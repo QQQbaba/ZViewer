@@ -5,10 +5,12 @@ import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import {
   listFTPDirectory,
   statFTPFile,
+  statFTPFileCached,
   createFTPReadStream,
   type FTPConnectionParams,
 } from '../services/ftp';
 import { detectMediaFormat, getContentType } from '../services/mediaFormat';
+import { resolveUserMount, parseRangeHeader, pipeRangeStream } from '../services/proxy';
 
 const router = Router();
 
@@ -378,99 +380,41 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
 // 代理流 - GET /proxy?mountId=&path=
 router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const mountIdRaw = req.query.mountId;
-    const pathRaw = req.query.path;
-    if (mountIdRaw === undefined || pathRaw === undefined) {
-      res.status(400).json({ success: false, message: '缺少 mountId 或 path 参数' });
-      return;
-    }
-
-    const mountId = Number(mountIdRaw);
-    if (Number.isNaN(mountId)) {
-      res.status(400).json({ success: false, message: 'mountId 不正确' });
-      return;
-    }
-    const targetPath = typeof pathRaw === 'string' ? pathRaw : '';
-    if (!targetPath.trim()) {
-      res.status(400).json({ success: false, message: 'path 不能为空' });
-      return;
-    }
-
-    const repo = userMountRepository();
-    const mount = await repo.findOneBy({
-      id: mountId,
-      userId: req.user!.userId,
-      type: 'ftp',
-    });
-    if (!mount) {
-      res.status(404).json({ success: false, message: '挂载不存在或无权限' });
-      return;
-    }
-    if (!mount.serverUrl) {
-      res.status(400).json({ success: false, message: '该挂载未配置服务器地址' });
-      return;
-    }
+    const resolved = await resolveUserMount(req, res, 'ftp');
+    if (!resolved) return;
+    const { mount, targetPath } = resolved;
 
     const params: FTPConnectionParams = {
-      serverUrl: mount.serverUrl,
+      serverUrl: mount.serverUrl!,
       path: targetPath,
       port: mount.port || undefined,
       username: mount.username || undefined,
       password: mount.password || undefined,
     };
 
-    // 解析 Range 请求（video 元素会发 Range 请求按需拉取片段）
-    const rangeHeader = req.headers.range;
-    let start = 0;
-    let end: number | null = null;
-    if (rangeHeader) {
-      // 格式：bytes=start-end（end 可省略）
-      const match = /^bytes=(\d+)-(\d*)$/.exec(rangeHeader);
-      if (match) {
-        start = Number(match[1]);
-        if (match[2]) end = Number(match[2]);
-      }
-    }
-
     try {
-      const info = await statFTPFile(params);
+      const info = await statFTPFileCached(params);
       const fileSize = info.size;
-      // end 默认为文件末尾
-      const endByte = end === null ? fileSize - 1 : Math.min(end, fileSize - 1);
-      const contentLength = endByte - start + 1;
 
-      // CORS 头（与 webdav/openlist proxy 一致，避免 video.src 跨源被 ORB 阻止）
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader(
-        'Access-Control-Allow-Headers',
-        'Authorization, Content-Type, Range',
-      );
-      res.setHeader(
-        'Access-Control-Expose-Headers',
-        'Content-Range, Accept-Ranges, Content-Length',
-      );
-
-      res.setHeader('Content-Type', getContentType(detectMediaFormat(targetPath)));
-      res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Content-Length', contentLength.toString());
-
-      if (rangeHeader) {
-        res.status(206);
-        res.setHeader('Content-Range', `bytes ${start}-${endByte}/${fileSize}`);
-      } else {
-        res.status(200);
-      }
+      // 解析 Range 请求（video 元素会发 Range 请求按需拉取片段）
+      const rangeHeader = req.headers.range;
+      const parsed = parseRangeHeader(rangeHeader, fileSize);
+      const start = parsed && parsed !== 'invalid' ? parsed.start : 0;
+      const endByte =
+        parsed && parsed !== 'invalid' ? parsed.end : fileSize - 1;
 
       const stream = createFTPReadStream(params, start);
-      stream.on('error', (err) => {
-        console.error('[ftp] proxy stream error:', err);
-        if (!res.headersSent) {
-          res.status(500).json({ success: false, message: '流传输失败' });
-        } else {
-          res.end();
-        }
+      pipeRangeStream(res, {
+        stream,
+        contentType: getContentType(detectMediaFormat(targetPath)),
+        fileSize,
+        start,
+        end: endByte,
+        ranged: !!rangeHeader,
+        logTag: 'ftp',
+        errorMessage: '流传输失败',
+        softDestroy: true,
       });
-      stream.pipe(res);
     } catch (err) {
       res.status(400).json({
         success: false,

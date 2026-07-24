@@ -90,9 +90,10 @@ export function WatchTogetherPanel({
     setWatchTogether,
     forceSync,
     isResolving,
-    resolvingMessage,
     currentQuality,
     availableQualities,
+    reloadVideo,
+    reloadBilibili,
   } = useWatchTogether({
     roomId,
     isHost,
@@ -157,10 +158,6 @@ export function WatchTogetherPanel({
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(
     null
   )
-  // seek 过渡动画状态：仅在「显著跳转」（> 2s）时触发淡出淡入，
-  // 忽略 drift correction 等小幅 currentTime 调整避免频繁闪烁。
-  const [isSeeking, setIsSeeking] = useState(false)
-  const lastTimeRef = useRef(0)
 
   // Bug #10 修复：使用 useCallback 锁定 ref callback 引用，
   // 避免每次渲染都创建新函数导致 React 在 commit 阶段先调用旧 callback(null)、
@@ -200,38 +197,7 @@ export function WatchTogetherPanel({
     }
   }, [isWebFullscreen, exitWebFullscreen])
 
-  // seek 过渡动画：监听 video 元素的 seeking/seeked 事件，
-  // 仅在显著跳转（> 2s）时触发淡出淡入，忽略 drift correction 等小幅调整。
-  // - seeking：currentTime 变化时触发，检查与上次记录的差距
-  // - seeked：seek 完成后触发，恢复 opacity 并更新 lastTimeRef
-  // - timeupdate：持续更新 lastTimeRef 供下次 seeking 比较
-  useEffect(() => {
-    if (!videoElement) return
-    const SEEK_ANIMATION_THRESHOLD = 2 // 秒，小于此差距不触发动画
-
-    const onTimeUpdate = () => {
-      lastTimeRef.current = videoElement.currentTime
-    }
-    const onSeeking = () => {
-      const delta = Math.abs(videoElement.currentTime - lastTimeRef.current)
-      if (delta >= SEEK_ANIMATION_THRESHOLD) {
-        setIsSeeking(true)
-      }
-    }
-    const onSeeked = () => {
-      setIsSeeking(false)
-      lastTimeRef.current = videoElement.currentTime
-    }
-
-    videoElement.addEventListener('timeupdate', onTimeUpdate)
-    videoElement.addEventListener('seeking', onSeeking)
-    videoElement.addEventListener('seeked', onSeeked)
-    return () => {
-      videoElement.removeEventListener('timeupdate', onTimeUpdate)
-      videoElement.removeEventListener('seeking', onSeeking)
-      videoElement.removeEventListener('seeked', onSeeked)
-    }
-  }, [videoElement])
+  // seek 动画已移除（不再需要压暗/模糊效果），进度条跳动由 ProgressTrack 的 pendingSeek 机制处理
 
   const tracks = useDanmakuStore((state) => state.tracks)
   const style = useDanmakuStore((state) => state.style)
@@ -803,6 +769,19 @@ export function WatchTogetherPanel({
     forceSync()
   }, [isHost, forceSync])
 
+  // 重载按钮：
+  // - 房主 + B站源：调用 reloadBilibili 重新解析获取全新 URL（真正的重载）
+  // - 其他情况（观众端 / 非 B站源）：调用 reloadVideo 重新 attach 现有源
+  const handleReload = useCallback(() => {
+    if (isHost && watchTogether.sourceType === 'bilibili') {
+      void reloadBilibili()
+      return
+    }
+    const video = videoRef.current
+    if (!video) return
+    void reloadVideo(video)
+  }, [isHost, watchTogether.sourceType, reloadBilibili, reloadVideo])
+
   const handleShowControls = () => {
     videoControlsRef.current?.showControls()
   }
@@ -823,8 +802,7 @@ export function WatchTogetherPanel({
       <video
         ref={setVideoRef}
         className={cn(
-          'h-full w-full object-contain transition-[filter,opacity] duration-200 ease-out',
-          isSeeking && 'opacity-60 [filter:blur(2px)_brightness(0.85)]'
+          'h-full w-full object-contain'
         )}
         playsInline
         preload="metadata"
@@ -852,20 +830,14 @@ export function WatchTogetherPanel({
         `}</style>
 
       {isResolving && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/70 backdrop-blur-sm">
-          <Spinner size={32} />
-          <Text className="text-sm">
-            {resolvingMessage || '正在解析视频...'}
-          </Text>
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+          <Spinner size={36} />
         </div>
       )}
 
       {isReloading && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center">
-          <div className="zen-overlay-fade-in glass-strong flex flex-col items-center gap-3 rounded-[var(--md-sys-shape-corner)] border border-[var(--glass-border)] px-8 py-6 shadow-lg">
-            <Spinner size={32} />
-            <Text className="text-sm">正在加载目标位置...</Text>
-          </div>
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+          <Spinner size={36} />
         </div>
       )}
 
@@ -921,6 +893,7 @@ export function WatchTogetherPanel({
               onToggleDanmaku={handleToggleDanmaku}
               onSendDanmaku={handleSendDanmaku}
               onSync={handleSync}
+              onReload={handleReload}
               // 观众端 readOnly 模式下拖动进度条触发申请跳转
               onRequestSeek={isHost ? undefined : handleRequestSeek}
               // 观众端 readOnly 模式下点击申请暂停
@@ -947,6 +920,7 @@ export function WatchTogetherPanel({
               onDanmakuAdvancedChange={setAdvancedStyle}
               onResetDanmakuStyle={resetStyle}
               timeOverride={isReloading ? reloadTargetTime : null}
+              syncTime={watchTogether.currentTime}
             />
           </div>
         </>

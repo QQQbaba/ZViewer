@@ -155,7 +155,7 @@ export function BackgroundSettingsModal({
     >
       <div className="space-y-4">
         {/* 标签页 */}
-        <div className="flex p-1 rounded-[var(--md-sys-shape-corner)] bg-[var(--md-sys-color-surface-container-high)]">
+        <div className="flex p-1 rounded-[var(--md-sys-shape-corner)] bg-[var(--glass-bg)]">
           {tabs.map((tab) => (
             <button
               key={tab.key}
@@ -185,7 +185,7 @@ export function BackgroundSettingsModal({
         {/* 本地上传 */}
         {activeTab === 'upload' && (
           <div className="space-y-2">
-            <label className="flex flex-col items-center justify-center gap-2 w-full py-6 rounded-[var(--md-sys-shape-corner)] border border-dashed border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface-variant)] cursor-pointer hover:bg-[var(--md-sys-color-surface-container-highest)] transition-all">
+            <label className="flex flex-col items-center justify-center gap-2 w-full py-6 rounded-[var(--md-sys-shape-corner)] border border-dashed border-[var(--md-sys-color-outline)] bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface-variant)] cursor-pointer hover:bg-[var(--md-sys-color-surface-container-highest)] transition-all">
               <Upload className="w-6 h-6" />
               <span className="text-xs">点击选择图片文件</span>
               <input
@@ -201,7 +201,7 @@ export function BackgroundSettingsModal({
         {/* 预览 */}
         {previewImage && (
           <div
-            className="w-full h-32 rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] bg-cover bg-center overflow-hidden"
+            className="w-full h-32 rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--glass-bg)] bg-cover bg-center overflow-hidden"
             style={{
               backgroundImage: `url(${previewImage})`,
               filter: `blur(${store.backgroundBlur}px)`,

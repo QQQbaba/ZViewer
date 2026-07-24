@@ -5,6 +5,8 @@ import { ThemeProvider } from '@/components/ThemeProvider'
 import { RequireAuth } from '@/components/RequireAuth'
 import { useAuthStore, type User } from '@/store/authStore'
 import { apiFetch } from '@/lib/api'
+import { useBackendHealth } from '@/hooks/useBackendHealth'
+import { ReturnToRoomButton } from '@/components/ReturnToRoomButton'
 import HomePage from '@/pages/HomePage'
 import LoginPage from '@/pages/LoginPage'
 import RoomPage from '@/modules/room/RoomPage'
@@ -45,6 +47,7 @@ function AuthInitializer() {
             username: string
             role: string
             status?: 'active' | 'pending'
+            avatar?: string | null
           }
         }
         if (res.ok && data.success && data.user) {
@@ -53,6 +56,7 @@ function AuthInitializer() {
             username: data.user.username,
             role: data.user.role as User['role'],
             status: data.user.status,
+            avatar: data.user.avatar,
           })
         }
       } catch (err) {
@@ -81,6 +85,7 @@ function AuthInitializer() {
             username: string
             role: string
             status?: 'active' | 'pending'
+            avatar?: string | null
           }
         }
         if (res.ok && data.success && data.user) {
@@ -89,6 +94,7 @@ function AuthInitializer() {
             username: data.user.username,
             role: data.user.role as User['role'],
             status: data.user.status,
+            avatar: data.user.avatar,
           })
           setAutoLoginStatus('done')
           return
@@ -140,10 +146,14 @@ function WatchRedirect() {
 }
 
 function App() {
+  // 监听后端自动重启：socket 重连后对比 /health.startedAt，变化时在网页内提示
+  useBackendHealth()
+
   return (
     <Layout>
       <ThemeProvider>
         <AuthInitializer />
+        <ReturnToRoomButton />
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />

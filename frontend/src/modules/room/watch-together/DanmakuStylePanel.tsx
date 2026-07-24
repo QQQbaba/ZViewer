@@ -1,23 +1,13 @@
-import { useState } from 'react'
-import { ChevronDown, RotateCcw, Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { RotateCcw, ChevronRight } from 'lucide-react'
 import { Switch } from '@/components/ui/Switch'
 import { Slider } from '@/components/ui/Slider'
-import { Text } from '@/components/ui/Typography'
 import { Input } from '@/components/ui/Input'
+import { cn } from '@/lib/utils'
 import type {
   DanmakuStyleState,
   DanmakuTypeFilters,
   DanmakuAdvancedStyle,
 } from '@/store/danmakuStore'
-
-interface DanmakuStylePanelProps {
-  style: DanmakuStyleState
-  setStyle: (updates: Partial<DanmakuStyleState>) => void
-  setFilters: (updates: Partial<DanmakuTypeFilters>) => void
-  setAdvancedStyle: (updates: Partial<DanmakuAdvancedStyle>) => void
-  resetStyle: () => void
-}
 
 const FILTER_BUTTONS: {
   key: keyof DanmakuTypeFilters
@@ -29,83 +19,56 @@ const FILTER_BUTTONS: {
   { key: 'advanced', label: '高级' },
 ]
 
+interface DanmakuStylePanelProps {
+  style: DanmakuStyleState
+  setStyle: (updates: Partial<DanmakuStyleState>) => void
+  resetStyle: () => void
+  advancedOpen: boolean
+  onAdvancedToggle: () => void
+}
+
+/**
+ * 弹幕样式面板（主内容）：
+ * 显示区域 / 不透明度 / 字号 / 随屏幕缩放 + 底部操作按钮。
+ * 高级设置内容见 DanmakuAdvancedSettings 组件，由 SettingsPanel 在延伸面板中渲染。
+ */
 export function DanmakuStylePanel({
   style,
   setStyle,
-  setFilters,
-  setAdvancedStyle,
   resetStyle,
+  advancedOpen,
+  onAdvancedToggle,
 }: DanmakuStylePanelProps) {
-  const [advancedOpen, setAdvancedOpen] = useState(false)
-
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <Sparkles
-            className="h-3.5 w-3.5"
-            style={{ color: 'var(--md-sys-color-primary)' }}
-          />
-          <Text className="text-[11px] font-semibold">弹幕样式</Text>
-        </div>
-        <Button
-          variant="ghost"
+      {/* 显示设置 */}
+      <div className="flex flex-col gap-2">
+        <Slider
+          label="显示区域"
           size="sm"
-          className="h-5 px-1.5 text-[10px]"
-          icon={<RotateCcw className="h-2.5 w-2.5" />}
-          onClick={resetStyle}
-        >
-          重置
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-4 gap-1">
-        {FILTER_BUTTONS.map(({ key, label }) => {
-          const active = style.filters[key]
-          return (
-            <Button
-              key={key}
-              variant={active ? 'primary' : 'secondary'}
-              size="sm"
-              className="h-6 px-0.5 text-[10px]"
-              onClick={() => setFilters({ [key]: !active })}
-            >
-              {label}
-            </Button>
-          )
-        })}
-      </div>
-
-      <div className="flex items-center justify-between py-0.5">
-        <Text className="text-[11px]">随屏幕缩放</Text>
-        <Switch
-          checked={style.scaleWithScreen}
-          onChange={(e) => setStyle({ scaleWithScreen: e.target.checked })}
+          value={style.displayArea}
+          min={0.25}
+          max={1}
+          step={0.05}
+          valueFormatter={(v) => `${Math.round(v * 100)}%`}
+          onChange={(v) => setStyle({ displayArea: v })}
+        />
+        <Slider
+          label="不透明度"
+          size="sm"
+          value={style.opacity}
+          min={0.1}
+          max={1}
+          step={0.05}
+          valueFormatter={(v) => `${Math.round(v * 100)}%`}
+          onChange={(v) => setStyle({ opacity: v })}
         />
       </div>
 
-      <Slider
-        label="显示区域"
-        value={style.displayArea}
-        min={0.25}
-        max={1}
-        step={0.05}
-        valueFormatter={(v) => `${Math.round(v * 100)}%`}
-        onChange={(v) => setStyle({ displayArea: v })}
-      />
-
-      <Slider
-        label="不透明度"
-        value={style.opacity}
-        min={0.1}
-        max={1}
-        step={0.05}
-        valueFormatter={(v) => `${Math.round(v * 100)}%`}
-        onChange={(v) => setStyle({ opacity: v })}
-      />
-
+      {/* 外观：字号 */}
       <Slider
         label="字号"
+        size="sm"
         value={style.fontSize}
         min={12}
         max={36}
@@ -114,8 +77,120 @@ export function DanmakuStylePanel({
         onChange={(v) => setStyle({ fontSize: v })}
       />
 
+      {/* 随屏幕缩放 */}
+      <div className="flex items-center justify-between">
+        <span
+          className="text-sm font-medium"
+          style={{ color: 'var(--md-sys-color-on-surface)' }}
+        >
+          随屏幕缩放
+        </span>
+        <Switch
+          checked={style.scaleWithScreen}
+          onChange={(e) => setStyle({ scaleWithScreen: e.target.checked })}
+        />
+      </div>
+
+      {/* 底部操作行 */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onAdvancedToggle}
+          className={cn(
+            'flex flex-1 items-center justify-center gap-1 rounded-md border py-1 text-xs font-medium transition-all active:brightness-95',
+            advancedOpen
+              ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)] border-transparent'
+              : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+          )}
+          style={{ borderColor: 'var(--md-sys-color-outline)' }}
+        >
+          {advancedOpen ? '收起高级设置' : '高级设置'}
+          <ChevronRight
+            className={cn(
+              'h-3.5 w-3.5 transition-transform',
+              advancedOpen && 'rotate-180'
+            )}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={resetStyle}
+          className="flex items-center justify-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-all hover:bg-[var(--md-sys-color-surface-container-highest)] active:brightness-95"
+          style={{
+            color: 'var(--md-sys-color-on-surface-variant)',
+            borderColor: 'var(--md-sys-color-outline)',
+          }}
+        >
+          <RotateCcw className="h-3 w-3" />
+          重置
+        </button>
+      </div>
+    </div>
+  )
+}
+
+interface DanmakuAdvancedSettingsProps {
+  style: DanmakuStyleState
+  setStyle: (updates: Partial<DanmakuStyleState>) => void
+  setFilters: (updates: Partial<DanmakuTypeFilters>) => void
+  setAdvancedStyle: (updates: Partial<DanmakuAdvancedStyle>) => void
+}
+
+/**
+ * 弹幕高级设置内容（渲染在延伸面板中）：
+ * 显示类型 / 速度 / 字体 / 描边 / 阴影 / 密度
+ */
+export function DanmakuAdvancedSettings({
+  style,
+  setStyle,
+  setFilters,
+  setAdvancedStyle,
+}: DanmakuAdvancedSettingsProps) {
+  return (
+    <div className="flex flex-col gap-2">
+      {/* 标题 */}
+      <div
+        className="text-xs font-semibold uppercase tracking-wide"
+        style={{ color: 'var(--md-sys-color-on-surface)' }}
+      >
+        高级设置
+      </div>
+
+      {/* 显示类型 */}
+      <div>
+        <div
+          className="mb-1 text-[11px] font-medium uppercase tracking-wide"
+          style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+        >
+          显示类型
+        </div>
+        <div className="grid grid-cols-4 gap-1">
+          {FILTER_BUTTONS.map(({ key, label }) => {
+            const active = style.filters[key]
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilters({ [key]: !active })}
+                className={cn(
+                  'rounded-md border py-1 text-xs font-medium transition-all',
+                  'hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:brightness-95',
+                  active
+                    ? 'border-transparent bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
+                    : 'border-[var(--md-sys-color-outline)] bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface)]'
+                )}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* 速度 */}
       <Slider
         label="速度"
+        size="sm"
         value={style.speed}
         min={0.5}
         max={2}
@@ -124,55 +199,51 @@ export function DanmakuStylePanel({
         onChange={(v) => setStyle({ speed: v })}
       />
 
-      <button
-        type="button"
-        onClick={() => setAdvancedOpen((prev) => !prev)}
-        className="flex items-center justify-between rounded-[var(--md-sys-radius-small)] px-1 py-0.5 text-[11px] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
-        style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-      >
-        <span>高级设置</span>
-        <ChevronDown
-          className={`h-3 w-3 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
+      {/* 字体 */}
+      <div>
+        <label
+          className="mb-1 block text-[11px] font-medium uppercase tracking-wide"
+          style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+        >
+          字体
+        </label>
+        <Input
+          size="sm"
+          value={style.advanced.fontFamily}
+          onChange={(e) => setAdvancedStyle({ fontFamily: e.target.value })}
         />
-      </button>
+      </div>
 
-      {advancedOpen && (
-        <div className="flex flex-col gap-1.5">
-          <Input
-            size="sm"
-            label="字体"
-            value={style.advanced.fontFamily}
-            onChange={(e) => setAdvancedStyle({ fontFamily: e.target.value })}
-          />
-          <Slider
-            label="描边"
-            value={style.advanced.strokeWidth}
-            min={0}
-            max={3}
-            step={0.5}
-            valueFormatter={(v) => `${v}px`}
-            onChange={(v) => setAdvancedStyle({ strokeWidth: v })}
-          />
-          <Slider
-            label="阴影"
-            value={style.advanced.shadowBlur}
-            min={0}
-            max={8}
-            step={0.5}
-            valueFormatter={(v) => `${v}px`}
-            onChange={(v) => setAdvancedStyle({ shadowBlur: v })}
-          />
-          <Slider
-            label="密度"
-            value={style.advanced.density}
-            min={0.1}
-            max={2}
-            step={0.05}
-            valueFormatter={(v) => `${Math.round(v * 100)}%`}
-            onChange={(v) => setAdvancedStyle({ density: v })}
-          />
-        </div>
-      )}
+      <Slider
+        label="描边"
+        size="sm"
+        value={style.advanced.strokeWidth}
+        min={0}
+        max={3}
+        step={0.5}
+        valueFormatter={(v) => `${v}px`}
+        onChange={(v) => setAdvancedStyle({ strokeWidth: v })}
+      />
+      <Slider
+        label="阴影"
+        size="sm"
+        value={style.advanced.shadowBlur}
+        min={0}
+        max={8}
+        step={0.5}
+        valueFormatter={(v) => `${v}px`}
+        onChange={(v) => setAdvancedStyle({ shadowBlur: v })}
+      />
+      <Slider
+        label="密度"
+        size="sm"
+        value={style.advanced.density}
+        min={0.1}
+        max={2}
+        step={0.05}
+        valueFormatter={(v) => `${Math.round(v * 100)}%`}
+        onChange={(v) => setAdvancedStyle({ density: v })}
+      />
     </div>
   )
 }

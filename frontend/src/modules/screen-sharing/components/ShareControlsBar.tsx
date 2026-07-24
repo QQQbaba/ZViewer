@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/Button'
 import { Space } from '@/components/ui/Space'
 import { Tag } from '@/components/ui/Tag'
-import { Copy, PauseCircle, PlayCircle, Power } from 'lucide-react'
+import { Copy, PauseCircle, PlayCircle, Power, RefreshCw } from 'lucide-react'
 
 interface ShareControlsBarProps {
   /** 是否暂停中（决定显示暂停/恢复按钮） */
@@ -22,6 +22,8 @@ interface ShareControlsBarProps {
   onClearAnnotations: () => void
   /** 结束共享 */
   onClose: () => void
+  /** 刷新共享（重启采集并重建连接） */
+  onRefresh: () => void
 }
 
 export function ShareControlsBar({
@@ -34,58 +36,65 @@ export function ShareControlsBar({
   onCopyLink,
   onClearAnnotations,
   onClose,
+  onRefresh,
 }: ShareControlsBarProps): JSX.Element {
   return (
-    <div
-      className="absolute bottom-0 left-0 right-0 z-20 p-3"
-      style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
-    >
-      <Space className="w-full" wrap>
-        {isPaused ? (
+    <div className="vc-container absolute bottom-0 left-0 right-0 z-20 p-2">
+      <div className="glass-strong rounded-xl px-2.5 py-2 shadow-lg">
+        <Space className="w-full" wrap>
+          {isPaused ? (
+            <Button
+              variant="primary"
+              icon={<PlayCircle className="h-5 w-5" />}
+              onClick={onTogglePause}
+            >
+              恢复共享
+            </Button>
+          ) : (
+            <Button
+              icon={<PauseCircle className="h-5 w-5" />}
+              onClick={onTogglePause}
+            >
+              暂停共享
+            </Button>
+          )}
           <Button
-            variant="primary"
-            icon={<PlayCircle className="h-5 w-5" />}
-            onClick={onTogglePause}
+            variant="secondary"
+            icon={<Copy className="h-5 w-5" />}
+            onClick={onCopyLink}
           >
-            恢复共享
+            复制观看链接
           </Button>
-        ) : (
+          <Button variant="ghost" onClick={onClearAnnotations}>
+            清空批注
+          </Button>
           <Button
-            icon={<PauseCircle className="h-5 w-5" />}
-            onClick={onTogglePause}
+            variant="secondary"
+            icon={<RefreshCw className="h-5 w-5" />}
+            onClick={onRefresh}
           >
-            暂停共享
+            刷新
           </Button>
-        )}
-        <Button
-          variant="secondary"
-          icon={<Copy className="h-5 w-5" />}
-          onClick={onCopyLink}
-        >
-          复制观看链接
-        </Button>
-        <Button variant="ghost" onClick={onClearAnnotations}>
-          清空批注
-        </Button>
-        <Button
-          variant="danger"
-          icon={<Power className="h-5 w-5" />}
-          loading={closing}
-          onClick={onClose}
-        >
-          结束共享
-        </Button>
-      </Space>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Tag color={connected ? 'success' : 'default'}>
-          {connected ? '已连接' : '未连接'}
-        </Tag>
-        <Tag color="primary">共享中</Tag>
-        {isPaused && <Tag color="warning">已暂停</Tag>}
-        {!isPaused && <Tag color="cyan">传输中</Tag>}
-        <Tag color="purple">
-          在线观众：{viewerCount} / {connectionCount} 连接
-        </Tag>
+          <Button
+            variant="danger"
+            icon={<Power className="h-5 w-5" />}
+            loading={closing}
+            onClick={onClose}
+          >
+            结束共享
+          </Button>
+        </Space>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Tag color={connected ? 'success' : 'default'}>
+            {connected ? '已连接' : '未连接'}
+          </Tag>
+          <Tag color="primary">共享中</Tag>
+          {isPaused && <Tag color="warning">已暂停</Tag>}
+          {!isPaused && <Tag color="cyan">传输中</Tag>}
+          <Tag color="purple">
+            在线观众：{viewerCount} / {connectionCount} 连接
+          </Tag>
+        </div>
       </div>
     </div>
   )

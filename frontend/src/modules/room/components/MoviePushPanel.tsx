@@ -8,6 +8,7 @@ import {
   Plus,
   Search,
   Crown,
+  FolderOpen,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -62,16 +63,23 @@ import { resolveWebDAV, buildWebDAVProxyUrl } from '@/modules/webdav/webdavApi'
 import MountBrowser from '@/modules/mounts/MountBrowser'
 import WebDAVBrowser from '@/modules/webdav/WebDAVBrowser'
 import { resolveFTP as resolveFTPNew } from '@/modules/ftp/ftpApi'
+import ServerFilesBrowser from '@/modules/server-files/ServerFilesBrowser'
+import {
+  resolveServerFile,
+  buildServerFileProxyUrl,
+} from '@/modules/server-files/serverFilesApi'
 import type { MediaFormat } from '@/lib/mediaFormat'
 import {
   fetchAllMounts,
   type UnionMount,
   type MountType,
 } from '@/modules/mounts'
+import { useAuthStore } from '@/store/authStore'
+import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 
-type SourceType = 'bilibili' | 'mp4' | 'webdav' | 'ftp' | 'openlist' | 'anime' | 'kazumi'
+type SourceType = 'bilibili' | 'mp4' | 'webdav' | 'ftp' | 'openlist' | 'anime' | 'kazumi' | 'server-files'
 
-const SOURCE_OPTIONS = [
+const ALL_SOURCE_OPTIONS: { value: string; label: string; rootOnly?: boolean }[] = [
   { value: 'bilibili', label: '哔哩哔哩' },
   { value: 'mp4', label: 'MP4 直链' },
   { value: 'webdav', label: 'WebDAV' },
@@ -79,6 +87,7 @@ const SOURCE_OPTIONS = [
   { value: 'openlist', label: 'OpenList' },
   { value: 'anime', label: 'ani-subs 番剧源' },
   { value: 'kazumi', label: 'Kazumi 番剧源' },
+  { value: 'server-files', label: '服务器文件', rootOnly: true },
 ]
 
 function extractTitleFromUrl(url: string) {
@@ -102,6 +111,8 @@ interface MoviePushPanelProps {
 
 export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
   const { socket } = useSocket()
+  const userRole = useAuthStore((state) => state.user?.role)
+  const { betaFeaturesEnabled, fetchSettings } = useSystemSettingsStore()
   const addMovie = useRoomStore((state) => state.addMovie)
   const fetchMovies = useRoomStore((state) => state.fetchMovies)
   const setCurrentMovieId = useRoomStore((state) => state.setCurrentMovieId)
@@ -156,6 +167,8 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
   const [bangumiOpen, setBangumiOpen] = useState(false)
   const [animeOpen, setAnimeOpen] = useState(false)
   const [kazumiOpen, setKazumiOpen] = useState(false)
+  const [serverFilesBrowserOpen, setServerFilesBrowserOpen] = useState(false)
+  const [serverFilePath, setServerFilePath] = useState('')
   const [qrModalOpen, setQrModalOpen] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [qrStatus, setQrStatus] = useState(0)
@@ -163,6 +176,16 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isPollingRef = useRef(false)
   const qrRetryCountRef = useRef(0)
+
+  useEffect(() => {
+    void fetchSettings()
+  }, [fetchSettings])
+
+  useEffect(() => {
+    if (!betaFeaturesEnabled && (sourceType === 'anime' || sourceType === 'kazumi')) {
+      setSourceType('bilibili')
+    }
+  }, [betaFeaturesEnabled, sourceType])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sourceType 变化时重置状态
@@ -496,6 +519,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
     setWebdavDirectLink(false)
     setFtp({ serverUrl: '', path: '', port: 21, username: '', password: '' })
     setOpenlist({ serverUrl: '', path: '' })
+    setServerFilePath('')
   }
 
   // 仅 bilibili 需要 handleResolve：解析后显示清晰度选择器，再点"添加"
@@ -705,6 +729,23 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           serverUrl: openlist.serverUrl.trim() || undefined,
           path: openlist.path.trim(),
           directLink: false,
+        })
+        resetForm()
+        message.success('影片已添加')
+      } else if (sourceType === 'server-files') {
+        if (!serverFilePath.trim()) {
+          message.warning('请选择服务器文件')
+          return
+        }
+        setResolveProgress('正在解析服务器文件...')
+        const resolved = await resolveServerFile(serverFilePath.trim())
+        const movieUrl = buildServerFileProxyUrl(serverFilePath.trim())
+        await addMovie(roomId, {
+          url: movieUrl,
+          title: resolved.title,
+          source: 'server-files',
+          format: resolved.format as MediaFormat,
+          path: serverFilePath.trim(),
         })
         resetForm()
         message.success('影片已添加')
@@ -962,7 +1003,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
 
     if (sourceType === 'anime') {
       return (
-        <div className="rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] p-3">
+        <div className="rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--glass-bg)] p-3">
           <Text className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
             从 ani-subs 订阅源搜索番剧并选择集数播放。
           </Text>
@@ -972,7 +1013,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
 
     if (sourceType === 'kazumi') {
       return (
-        <div className="rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] p-3">
+        <div className="rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--glass-bg)] p-3">
           <Text className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
             从 Kazumi XPath 规则源搜索番剧并选择集数播放。
           </Text>
@@ -1034,6 +1075,33 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
       )
     }
 
+    if (sourceType === 'server-files') {
+      return (
+        <Space direction="vertical" className="w-full" size="sm">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<FolderOpen className="h-4 w-4" />}
+            onClick={() => setServerFilesBrowserOpen(true)}
+          >
+            浏览服务器文件
+          </Button>
+          <Input
+            size="sm"
+            value={serverFilePath}
+            onChange={(e) => setServerFilePath(e.target.value)}
+            placeholder="文件路径，如 /movies/video.mp4（可点击上方按钮选择）"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                void handleAddMovie()
+              }
+            }}
+          />
+        </Space>
+      )
+    }
+
     return null
   }
 
@@ -1045,13 +1113,12 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           <div
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
             style={{
-              background:
-                'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-secondary) 18%, transparent))',
+              backgroundColor: 'var(--md-sys-color-secondary-container)',
             }}
           >
             <Plus
               className="h-4 w-4"
-              style={{ color: 'var(--md-sys-color-primary)' }}
+              style={{ color: 'var(--md-sys-color-on-secondary-container)' }}
             />
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
@@ -1068,7 +1135,12 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         <div className="flex min-h-0 flex-1 flex-col gap-2.5 px-4 py-3">
           <Dropdown
             value={sourceType}
-            options={SOURCE_OPTIONS}
+            options={ALL_SOURCE_OPTIONS.filter(
+              (opt) =>
+                (!opt.rootOnly || userRole === 'root') &&
+                (betaFeaturesEnabled ||
+                  (opt.value !== 'anime' && opt.value !== 'kazumi'))
+            )}
             onChange={(value) => setSourceType(value as SourceType)}
           />
 
@@ -1113,7 +1185,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
               className="rounded-[var(--md-sys-shape-corner)] p-2.5"
               style={{
                 backgroundColor:
-                  'var(--md-sys-color-surface-container-high)',
+                  'var(--glass-bg)',
               }}
             >
               <div className="flex items-center gap-2">
@@ -1153,8 +1225,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
                       <div
                         className="flex h-6 w-6 items-center justify-center rounded-full"
                         style={{
-                          backgroundColor:
-                            'var(--md-sys-color-surface-container)',
+                          backgroundColor: 'var(--glass-bg)',
                           border: '1px solid var(--md-sys-color-outline-variant)',
                         }}
                       >
@@ -1324,6 +1395,13 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           selectable
         />
       )}
+
+      <ServerFilesBrowser
+        open={serverFilesBrowserOpen}
+        onClose={() => setServerFilesBrowserOpen(false)}
+        onSelectFile={(path) => setServerFilePath(path)}
+        selectable
+      />
     </>
   )
 }

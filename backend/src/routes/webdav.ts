@@ -11,6 +11,7 @@ import {
   type WebDAVConnectionParams,
 } from '../services/webdav';
 import { detectMediaFormat, getContentType } from '../services/mediaFormat';
+import { resolveUserMount, pipeRangeStream } from '../services/proxy';
 
 const router = Router();
 
@@ -362,41 +363,13 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
 // 2.5 代理 - GET /proxy?mountId=&path=
 router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const mountIdRaw = req.query.mountId;
-    const pathRaw = req.query.path;
-    if (mountIdRaw === undefined) {
-      res.status(400).json({ success: false, message: '缺少 mountId 参数' });
-      return;
-    }
-    const mountId = Number(mountIdRaw);
-    if (Number.isNaN(mountId)) {
-      res.status(400).json({ success: false, message: 'mountId 不正确' });
-      return;
-    }
-    const targetPath = typeof pathRaw === 'string' ? pathRaw : '';
-    if (!targetPath.trim()) {
-      res.status(400).json({ success: false, message: '缺少 path 参数' });
-      return;
-    }
-
     // 代理端点通过 query 暴露 mountId+path，但凭证仅从 DB 读取，不会出现在 URL 中
-    const repo = userMountRepository();
-    const mount = await repo.findOneBy({
-      id: mountId,
-      userId: req.user!.userId,
-      type: 'webdav',
-    });
-    if (!mount) {
-      res.status(404).json({ success: false, message: '挂载不存在或无权限' });
-      return;
-    }
-    if (!mount.serverUrl) {
-      res.status(400).json({ success: false, message: '该挂载未配置服务器地址' });
-      return;
-    }
+    const resolved = await resolveUserMount(req, res, 'webdav');
+    if (!resolved) return;
+    const { mount, targetPath } = resolved;
 
     const params: WebDAVConnectionParams = {
-      serverUrl: mount.serverUrl,
+      serverUrl: mount.serverUrl!,
       path: targetPath,
       username: mount.username || undefined,
       password: mount.password || undefined,
@@ -425,42 +398,17 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
       return;
     }
 
-    // CORS 头
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Authorization, Content-Type, Range',
-    );
-    res.setHeader(
-      'Access-Control-Expose-Headers',
-      'Content-Range, Accept-Ranges, Content-Length',
-    );
-
-    res.setHeader('Content-Type', getContentType(detectMediaFormat(targetPath)));
-    res.setHeader('Accept-Ranges', 'bytes');
-    const contentLength = end - start + 1;
-    res.setHeader('Content-Length', contentLength.toString());
-
-    if (rangeHeader) {
-      res.status(206);
-      res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-    } else {
-      res.status(200);
-    }
-
-    stream.on('error', (err) => {
-      console.error('[webdav] proxy stream error:', err);
-      if (!res.headersSent) {
-        res.status(502).json({
-          success: false,
-          message: 'WebDAV 代理流错误',
-          code: 'UNREACHABLE',
-        });
-      } else {
-        res.destroy();
-      }
+    pipeRangeStream(res, {
+      stream,
+      contentType: getContentType(detectMediaFormat(targetPath)),
+      fileSize,
+      start,
+      end,
+      ranged: !!rangeHeader,
+      logTag: 'webdav',
+      errorMessage: 'WebDAV 代理流错误',
+      errorCode: 'UNREACHABLE',
     });
-    stream.pipe(res);
   } catch (err) {
     console.error('[webdav] proxy error:', err);
     if (!res.headersSent) {

@@ -1,89 +1,75 @@
 /**
  * B站 解析相关统一缓存模块。
  * 集中管理 VIP 状态、用户信息、视频信息等缓存，避免散落在各模块。
- * 每类缓存按各自的 TTL 自动过期。
+ *
+ * 底层使用通用 TtlCache（TTL + LRU + 容量上限），替代原先的无界 Map：
+ * - 每类缓存按各自的 TTL 自动过期；
+ * - VIP 缓存键归一化为 DedeUserID（mid），Cookie 刷新/轮换后仍可命中，
+ *   避免以整个 Cookie 字符串做键导致的缓存穿透。
  */
 
-interface VipCacheEntry {
-  isVip: boolean;
-  cachedAt: number;
-}
+import { TtlCache } from '../../utils/ttl-cache';
 
-interface UserInfoCacheEntry {
+export interface BilibiliUserInfo {
   name: string;
   avatar: string;
   mid?: number;
   vipStatus?: number;
   vipType?: number;
-  cachedAt: number;
 }
 
-interface VideoInfoCacheEntry {
-  data: {
-    bvid: string;
-    aid: number;
-    cid: number;
-    title: string;
-    duration: number;
-    pages: { cid: number; page: number; part: string; duration: number }[];
-  };
-  cachedAt: number;
+export interface BilibiliVideoInfo {
+  bvid: string;
+  aid: number;
+  cid: number;
+  title: string;
+  duration: number;
+  pages: { cid: number; page: number; part: string; duration: number }[];
 }
-
-const vipCache = new Map<string, VipCacheEntry>();
-const userInfoCache = new Map<string, UserInfoCacheEntry>();
-const videoInfoCache = new Map<string, VideoInfoCacheEntry>();
 
 const VIP_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_INFO_CACHE_TTL_MS = 5 * 60 * 1000;
 const VIDEO_INFO_CACHE_TTL_MS = 2 * 60 * 1000;
 
+const vipCache = new TtlCache<boolean>({ ttlMs: VIP_CACHE_TTL_MS });
+const userInfoCache = new TtlCache<BilibiliUserInfo>({
+  ttlMs: USER_INFO_CACHE_TTL_MS,
+});
+const videoInfoCache = new TtlCache<BilibiliVideoInfo>({
+  ttlMs: VIDEO_INFO_CACHE_TTL_MS,
+});
+
+/**
+ * VIP 缓存键归一化：优先使用 Cookie 中的 DedeUserID（同一账号多次登录稳定），
+ * 提取失败时退化为完整 Cookie 字符串。
+ */
+function normalizeVipCacheKey(cookie: string): string {
+  const match = cookie.match(/(?:^|;\s*)DedeUserID=(\d+)/);
+  return match?.[1] ? `mid:${match[1]}` : cookie;
+}
+
 export function getCachedVipStatus(cookie: string): boolean | null {
-  const entry = vipCache.get(cookie);
-  if (!entry) return null;
-  if (Date.now() - entry.cachedAt >= VIP_CACHE_TTL_MS) {
-    vipCache.delete(cookie);
-    return null;
-  }
-  return entry.isVip;
+  return vipCache.get(normalizeVipCacheKey(cookie));
 }
 
 export function setCachedVipStatus(cookie: string, isVip: boolean): void {
-  vipCache.set(cookie, { isVip, cachedAt: Date.now() });
+  vipCache.set(normalizeVipCacheKey(cookie), isVip);
 }
 
-export function getCachedUserInfo(userId: string): UserInfoCacheEntry | null {
-  const entry = userInfoCache.get(userId);
-  if (!entry) return null;
-  if (Date.now() - entry.cachedAt >= USER_INFO_CACHE_TTL_MS) {
-    userInfoCache.delete(userId);
-    return null;
-  }
-  return entry;
+export function getCachedUserInfo(userId: string): BilibiliUserInfo | null {
+  return userInfoCache.get(userId);
 }
 
-export function setCachedUserInfo(
-  userId: string,
-  info: Omit<UserInfoCacheEntry, 'cachedAt'>,
-): void {
-  userInfoCache.set(userId, { ...info, cachedAt: Date.now() });
+export function setCachedUserInfo(userId: string, info: BilibiliUserInfo): void {
+  userInfoCache.set(userId, info);
 }
 
-export function getCachedVideoInfo(bvid: string): VideoInfoCacheEntry['data'] | null {
-  const entry = videoInfoCache.get(bvid);
-  if (!entry) return null;
-  if (Date.now() - entry.cachedAt >= VIDEO_INFO_CACHE_TTL_MS) {
-    videoInfoCache.delete(bvid);
-    return null;
-  }
-  return entry.data;
+export function getCachedVideoInfo(bvid: string): BilibiliVideoInfo | null {
+  return videoInfoCache.get(bvid);
 }
 
-export function setCachedVideoInfo(
-  bvid: string,
-  data: VideoInfoCacheEntry['data'],
-): void {
-  videoInfoCache.set(bvid, { data, cachedAt: Date.now() });
+export function setCachedVideoInfo(bvid: string, data: BilibiliVideoInfo): void {
+  videoInfoCache.set(bvid, data);
 }
 
 export function invalidateUserInfo(userId: string): void {
@@ -91,5 +77,5 @@ export function invalidateUserInfo(userId: string): void {
 }
 
 export function invalidateVipCache(cookie: string): void {
-  vipCache.delete(cookie);
+  vipCache.delete(normalizeVipCacheKey(cookie));
 }

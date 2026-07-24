@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useRoomStore } from '@/store/roomStore'
+import { useAuthStore } from '@/store/authStore'
 import { useSocket } from '@/hooks/useSocket'
+import { VoiceChatPanel } from '@/modules/voice-chat'
 import { RoomPanel } from '@/modules/room/components/RoomPanel'
 import { WatchTogetherPanel } from '@/modules/room/watch-together/WatchTogetherPanel'
 import { RoomLayout } from '@/modules/room/components/RoomLayout'
@@ -50,6 +52,7 @@ function RoomPage() {
   const setStreamKey = useRoomStore((state) => state.setStreamKey)
   const setRoomId = useRoomStore((state) => state.setRoomId)
   const setRoomName = useRoomStore((state) => state.setRoomName)
+  const setActiveRoomId = useRoomStore((state) => state.setActiveRoomId)
   const resetRoomStore = useRoomStore((state) => state.reset)
 
   // 房主刷新/重连恢复时由后端返回的最近一次播放状态
@@ -77,12 +80,12 @@ function RoomPage() {
   // effect 在 initialPlayback=null 时执行，从而丢失播放进度恢复。
   const [hostRegistered, setHostRegistered] = useState(false)
 
-  // roomId 变化（包括从有值变为无值，即返回主页）或组件卸载时重置 roomStore，
-  // 避免旧房间的 movies/currentMovieId/watchTogether 残留导致下次创建新房间时
-  // useWatchTogether 加载旧影片，看起来像"进入旧房间"。
+  // roomId 变化时重置 roomStore（不包括首次挂载）。
+  // 注意：组件卸载时不再 resetRoomStore —— 保留房间状态用于"不离开房间"功能：
+  // 用户导航到个人中心等页面时 RoomPage 卸载但房间状态保留，右上角显示"回到房间"入口。
+  // 真正退出房间（点击返回按钮）由 RoomLayout/WatchPage 调用 exitRoom() 清除状态。
   const prevRoomIdRef = useRef(roomId)
   useEffect(() => {
-    // roomId 变化时重置（不包括首次挂载）
     if (prevRoomIdRef.current !== roomId) {
       resetRoomStore()
       setHostRegistered(false)
@@ -90,23 +93,21 @@ function RoomPage() {
       prevRoomIdRef.current = roomId
     }
   }, [roomId, resetRoomStore])
-  useEffect(() => {
-    return () => {
-      resetRoomStore()
-    }
-  }, [resetRoomStore])
   const { socket } = useSocket()
+  const username = useAuthStore((state) => state.user?.username)
   const [hostPeerConnection, setHostPeerConnection] =
     useState<RTCPeerConnection | null>(null)
   const [isWebFullscreen, setIsWebFullscreen] = useState(false)
 
   // 将 URL 中的房间号同步到 store，确保刷新或直接访问房间链接时
   // MoviePushPanel 等依赖 store.roomId 的组件能正常工作。
+  // 同时设置 activeRoomId，用于"不离开房间"功能：导航到其他页面时保留房间标记。
   useEffect(() => {
     if (roomId) {
       setRoomId(roomId)
+      setActiveRoomId(roomId)
     }
-  }, [roomId, setRoomId])
+  }, [roomId, setRoomId, setActiveRoomId])
 
   // 房主刷新或重连后，重新声明房主身份以恢复 sharer 会话
   useEffect(() => {
@@ -137,7 +138,11 @@ function RoomPage() {
               audioCodec?: string
               cid?: number
               currentQn?: number
-              acceptQuality?: { id: number; label: string; resolution?: string }[]
+              acceptQuality?: {
+                id: number
+                label: string
+                resolution?: string
+              }[]
               currentMovieId?: number
               headers?: Record<string, string>
               updatedAt: number
@@ -196,7 +201,15 @@ function RoomPage() {
       socket.off('connect', registerHost)
       socket.off('room-name-updated', handleRoomNameUpdated)
     }
-  }, [isHost, roomId, socket, setMode, setShareMethod, setStreamKey, setRoomName])
+  }, [
+    isHost,
+    roomId,
+    socket,
+    setMode,
+    setShareMethod,
+    setStreamKey,
+    setRoomName,
+  ])
 
   const mode = storeMode
 
@@ -204,6 +217,10 @@ function RoomPage() {
   if (!roomId) {
     return <RoomPanel />
   }
+
+  const voiceChatPanel = (
+    <VoiceChatPanel socket={socket} roomId={roomId} username={username} />
+  )
 
   // 房主：使用 RoomLayout，根据模式渲染对应播放器
   if (isHost) {
@@ -231,7 +248,9 @@ function RoomPage() {
       )
 
     const controls =
-      mode === 'screen-share' ? null : (
+      mode === 'screen-share' ? (
+        <RoomInfoPanel roomId={roomId} isHost />
+      ) : (
         <>
           <RoomInfoPanel roomId={roomId} isHost />
           <MovieListPanel isHost />
@@ -240,26 +259,34 @@ function RoomPage() {
       )
 
     return (
-      <RoomLayout
-        roomId={roomId}
-        isHost
-        mainContent={mainContent}
-        rightPanel={
-          <CommentPanel
-            socket={socket}
-            roomId={roomId}
-            commentsOnly={mode === 'screen-share'}
-          />
-        }
-        peerConnection={hostPeerConnection}
-        controls={controls}
-        webFullscreen={isWebFullscreen}
-      />
+      <>
+        <RoomLayout
+          roomId={roomId}
+          isHost
+          mainContent={mainContent}
+          rightPanel={
+            <CommentPanel
+              socket={socket}
+              roomId={roomId}
+              commentsOnly={mode === 'screen-share'}
+            />
+          }
+          peerConnection={hostPeerConnection}
+          controls={controls}
+          webFullscreen={isWebFullscreen}
+        />
+        {voiceChatPanel}
+      </>
     )
   }
 
   // 观众：统一由 WatchPage 处理加入与模式切换
-  return <WatchPage />
+  return (
+    <>
+      <WatchPage />
+      {voiceChatPanel}
+    </>
+  )
 }
 
 export default RoomPage

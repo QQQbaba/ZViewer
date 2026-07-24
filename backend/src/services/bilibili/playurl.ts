@@ -68,11 +68,12 @@ interface RawPlayUrlData {
 
 export interface GetPlayUrlOptions {
   qn?: number;
-  fnval?: number;
-  /** 优先返回 URL 中包含该字符串的 CDN 轨道。 */
-  preferCdn?: string;
+  /** 编码偏好：auto / avc / hevc / av1。 */
+  codec?: string;
   /** 是否为大会员，用于动态计算 fnval。 */
   isVip?: boolean;
+  /** 强制 fnval（仅 MP4 降级用 fnval=1，正常解析不传由 computeFnval 计算）。 */
+  fnval?: number;
 }
 
 export class NoPermissionError extends Error {
@@ -98,44 +99,53 @@ function sortByBandwidthDesc<T extends { bandwidth: number }>(tracks?: T[]): T[]
 }
 
 /**
- * 对 DASH 轨道按 preferred CDN 排序：URL 包含 preferCdn 的轨道排在前面。
- * 没有任何匹配时保持原有排序。
- */
-function sortTracksByPreferredCdn<T extends { baseUrl: string }>(
-  tracks: T[] | undefined,
-  preferCdn: string,
-): T[] {
-  if (!tracks || tracks.length === 0) return [];
-  const lower = preferCdn.toLowerCase();
-  const preferred: T[] = [];
-  const others: T[] = [];
-  for (const track of tracks) {
-    if (track.baseUrl.toLowerCase().includes(lower)) {
-      preferred.push(track);
-    } else {
-      others.push(track);
-    }
-  }
-  return preferred.length > 0 ? [...preferred, ...others] : tracks;
-}
-
-/**
- * 判断 codec 是否为兼容性最好的 H.264 (avc)。
+ * 判断 codec 是否为 H.264 (avc)。
  */
 function isAvcCodec(codecs?: string): boolean {
   return typeof codecs === 'string' && /^avc\d/i.test(codecs.trim());
 }
 
 /**
- * 对 DASH 轨道排序：优先保留 H.264 轨道并按带宽降序，
- * 若没有 H.264 轨道则回退到原始排序。
+ * 判断 codec 是否为 HEVC (hvc1/hev1)。
+ */
+function isHevcCodec(codecs?: string): boolean {
+  return typeof codecs === 'string' && /^hvc\d|^hev\d/i.test(codecs.trim());
+}
+
+/**
+ * 判断 codec 是否为 AV1 (av01)。
+ */
+function isAv1Codec(codecs?: string): boolean {
+  return typeof codecs === 'string' && /^av01/i.test(codecs.trim());
+}
+
+/**
+ * 检测轨道编码类型，返回标准化名称。
+ */
+function detectCodec(codecs?: string): 'avc' | 'hevc' | 'av1' | 'unknown' {
+  if (isAvcCodec(codecs)) return 'avc';
+  if (isHevcCodec(codecs)) return 'hevc';
+  if (isAv1Codec(codecs)) return 'av1';
+  return 'unknown';
+}
+
+/**
+ * 对 DASH 轨道按编码偏好排序：
+ * - 指定 avc/hevc/av1 时优先返回匹配轨道，按带宽降序
+ * - auto 时默认优先 H.264（浏览器兼容性最好），无则回退到原始排序
+ * - 匹配失败时回退到全部轨道（按带宽降序）
  */
 function sortDashTracks<T extends { bandwidth: number; codecs: string }>(
   tracks?: T[],
+  codec?: string,
 ): T[] {
   const sorted = sortByBandwidthDesc(tracks);
-  const avcTracks = sorted.filter((t) => isAvcCodec(t.codecs));
-  return avcTracks.length > 0 ? avcTracks : sorted;
+  if (sorted.length === 0) return sorted;
+
+  const preferred = codec && codec !== 'auto' ? codec : 'avc';
+  const matched = sorted.filter((t) => detectCodec(t.codecs) === preferred);
+
+  return matched.length > 0 ? matched : sorted;
 }
 
 /**
@@ -199,6 +209,7 @@ function buildAcceptQuality(
 function normalizePlayUrlData(
   data?: RawPlayUrlData,
   currentQn?: number,
+  codec?: string,
 ): BilibiliPlayUrlResult | null {
   if (!data) return null;
 
@@ -210,8 +221,13 @@ function normalizePlayUrlData(
   );
 
   if (data.dash?.video?.length) {
-    const video = sortDashTracks(data.dash.video.map(normalizeDashMedia));
-    const audio = sortByBandwidthDesc(data.dash.audio?.map(normalizeDashMedia));
+    const video = sortDashTracks(
+      data.dash.video.map(normalizeDashMedia),
+      codec,
+    );
+    const audio = sortByBandwidthDesc(
+      data.dash.audio?.map(normalizeDashMedia),
+    );
     return {
       format: 'dash',
       video,
@@ -271,13 +287,7 @@ async function getPlayUrlWbi(
     { cookie },
   );
 
-  const result = normalizePlayUrlData(res.data, effectiveQn);
-  if (result && options?.preferCdn) {
-    result.video = sortTracksByPreferredCdn(result.video, options.preferCdn);
-    result.audio = sortTracksByPreferredCdn(result.audio, options.preferCdn);
-    result.bestVideo = result.video?.[0];
-    result.bestAudio = result.audio?.[0];
-  }
+  const result = normalizePlayUrlData(res.data, effectiveQn, options?.codec);
   return result;
 }
 
@@ -307,13 +317,7 @@ async function getPlayUrlLegacy(
     { cookie },
   );
 
-  const result = normalizePlayUrlData(res.data, effectiveQn);
-  if (result && options?.preferCdn) {
-    result.video = sortTracksByPreferredCdn(result.video, options.preferCdn);
-    result.audio = sortTracksByPreferredCdn(result.audio, options.preferCdn);
-    result.bestVideo = result.video?.[0];
-    result.bestAudio = result.audio?.[0];
-  }
+  const result = normalizePlayUrlData(res.data, effectiveQn, options?.codec);
   return result;
 }
 

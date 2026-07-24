@@ -1,4 +1,11 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import {
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useMemo,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -35,24 +42,75 @@ export function Dropdown({
     top: number
     left: number
     width: number
+    placement: 'bottom' | 'top'
+    maxHeight: number
   } | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  // 记录上次测量到的菜单高度，用于判断是否需要重新定位（避免无限循环）
+  const lastMeasuredHeightRef = useRef<number | null>(null)
 
   const selectedLabel = useMemo(() => {
     const found = options.find((opt) => String(opt.value) === String(value))
     return found?.label ?? placeholder
   }, [options, value, placeholder])
 
-  const computePosition = useCallback(() => {
-    if (!triggerRef.current) return
-    const rect = triggerRef.current.getBoundingClientRect()
-    setPosition({
-      top: rect.bottom + 6,
-      left: rect.left,
-      width: rect.width,
-    })
-  }, [])
+  // 计算菜单位置：根据触发按钮位置和上下方可用空间，自动选择展开方向并限制最大高度
+  // actualMenuHeight 用于在菜单渲染后用实测高度修正（首次为 null 走估算）
+  const computePosition = useCallback(
+    (actualMenuHeight?: number) => {
+      if (!triggerRef.current) return
+      const rect = triggerRef.current.getBoundingClientRect()
+      const viewportHeight = window.innerHeight
+      const margin = 6
+      const spaceBelow = viewportHeight - rect.bottom - margin
+      const spaceAbove = rect.top - margin
+
+      // 估算菜单自然高度：每项约 40px（py-2 + text-sm）+ 容器 padding 12px，上限 288px(max-h-72)
+      const naturalHeight = Math.min(
+        options.length * 40 + 12,
+        288,
+      )
+      const menuHeight = actualMenuHeight ?? naturalHeight
+
+      let top: number
+      let placement: 'bottom' | 'top'
+      let maxHeight: number
+
+      if (spaceBelow >= menuHeight) {
+        // 下方空间充足，向下展开
+        top = rect.bottom + margin
+        placement = 'bottom'
+        maxHeight = 288
+      } else if (spaceAbove >= menuHeight) {
+        // 上方空间充足，向上展开（菜单底部贴触发按钮顶部）
+        top = rect.top - menuHeight - margin
+        placement = 'top'
+        maxHeight = 288
+      } else {
+        // 上下都不够，选空间更大的一侧并限制 maxHeight
+        if (spaceBelow >= spaceAbove) {
+          top = rect.bottom + margin
+          placement = 'bottom'
+          maxHeight = Math.max(spaceBelow, 120)
+        } else {
+          // 向上展开，顶部贴近视口顶部
+          top = Math.max(margin, rect.top - spaceAbove)
+          placement = 'top'
+          maxHeight = Math.max(spaceAbove, 120)
+        }
+      }
+
+      setPosition({
+        top,
+        left: rect.left,
+        width: rect.width,
+        placement,
+        maxHeight,
+      })
+    },
+    [options.length],
+  )
 
   const closeMenu = useCallback(() => {
     if (!open) return
@@ -61,13 +119,17 @@ export function Dropdown({
       setOpen(false)
       setClosing(false)
       setPosition(null)
+      lastMeasuredHeightRef.current = null
     }, 160)
   }, [open])
 
   useEffect(() => {
     if (!open) return
     computePosition()
-    const handler = () => computePosition()
+    const handler = () => {
+      lastMeasuredHeightRef.current = null
+      computePosition()
+    }
     window.addEventListener('resize', handler)
     window.addEventListener('scroll', handler, true)
     return () => {
@@ -75,6 +137,20 @@ export function Dropdown({
       window.removeEventListener('scroll', handler, true)
     }
   }, [open, computePosition])
+
+  // 菜单渲染后用实测高度修正位置（绘制前同步执行，避免闪烁）
+  // 仅当实测高度与上次差异较大时重新计算，防止无限循环
+  useLayoutEffect(() => {
+    if (!open || !menuRef.current || !position) return
+    const actualHeight = menuRef.current.scrollHeight
+    if (
+      lastMeasuredHeightRef.current === null ||
+      Math.abs(actualHeight - lastMeasuredHeightRef.current) > 4
+    ) {
+      lastMeasuredHeightRef.current = actualHeight
+      computePosition(actualHeight)
+    }
+  }, [open, position, computePosition])
 
   useEffect(() => {
     if (!open) return
@@ -142,14 +218,17 @@ export function Dropdown({
           <div
             ref={menuRef}
             className={cn(
-              'glass-strong fixed max-h-72 overflow-auto rounded-[var(--md-sys-shape-corner)] p-1.5 shadow-lg',
+              'glass-strong fixed overflow-auto rounded-[var(--md-sys-shape-corner)] p-1.5 shadow-lg',
               closing ? 'zen-dropdown-exit' : 'zen-dropdown-enter'
             )}
             style={{
               top: `${position.top}px`,
               left: `${position.left}px`,
               width: `${position.width}px`,
+              maxHeight: `${position.maxHeight}px`,
               zIndex: 60,
+              transformOrigin:
+                position.placement === 'top' ? 'bottom center' : 'top center',
               boxShadow:
                 '0 8px 24px -8px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent)',
             }}

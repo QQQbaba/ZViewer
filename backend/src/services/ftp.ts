@@ -79,6 +79,39 @@ export async function statFTPFile(
   );
 }
 
+// ── 文件 stat 缓存 ─────────────────────────────────────
+// 视频 seek 时每个 Range 请求都要 stat 一次（一次完整 FTP 登录 + LIST），
+// 叠加下载流本身的第二次连接，高延迟 FTP 下 seek 响应被显著拖慢。
+// 文件大小在播放期间不会变化，短 TTL 缓存即可；文件被替换时最多 30s 后自愈。
+const statCache = new Map<string, { info: FTPFileInfo; cachedAt: number }>();
+const STAT_CACHE_TTL_MS = 30 * 1000; // 30 秒
+const STAT_CACHE_MAX_ENTRIES = 200;
+
+function statCacheKey(params: FTPConnectionParams): string {
+  return `${params.serverUrl}|${params.port || 21}|${params.username || ''}|${params.path}`;
+}
+
+/** statFTPFile 的缓存版本：Range 流请求专用，每次 seek 少一次 FTP 登录往返。 */
+export async function statFTPFileCached(
+  params: FTPConnectionParams,
+): Promise<FTPFileInfo> {
+  const key = statCacheKey(params);
+  const now = Date.now();
+  const cached = statCache.get(key);
+  if (cached && now - cached.cachedAt < STAT_CACHE_TTL_MS) {
+    return cached.info;
+  }
+  const info = await statFTPFile(params);
+  if (statCache.size >= STAT_CACHE_MAX_ENTRIES) {
+    for (const [k, v] of statCache) {
+      if (now - v.cachedAt >= STAT_CACHE_TTL_MS) statCache.delete(k);
+    }
+    if (statCache.size >= STAT_CACHE_MAX_ENTRIES) statCache.clear();
+  }
+  statCache.set(key, { info, cachedAt: now });
+  return info;
+}
+
 export function createFTPReadStream(
   params: FTPConnectionParams,
   startAt = 0,

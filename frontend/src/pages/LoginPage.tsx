@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Shield, UserPlus, LogIn } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -46,11 +46,32 @@ export default function LoginPage() {
   const [mode, setMode] = useState<AuthMode>('login')
   const [form, setForm] = useState<AuthForm>({ username: '', password: '' })
   const [loading, setLoading] = useState(false)
+  const [registrationMode, setRegistrationMode] = useState<
+    'open' | 'approval' | 'closed'
+  >('approval')
 
   const from = (location.state as { from?: { pathname?: string } } | null)?.from
     ?.pathname
 
   const isLogin = mode === 'login'
+
+  useEffect(() => {
+    const fetchMode = async () => {
+      try {
+        const res = await apiFetch(`${API_URL}/api/auth/registration-mode`)
+        const data = (await res.json()) as {
+          success: boolean
+          mode?: 'open' | 'approval' | 'closed'
+        }
+        if (data.success && data.mode) {
+          setRegistrationMode(data.mode)
+        }
+      } catch (err) {
+        console.error('[LoginPage] fetch registration mode error:', err)
+      }
+    }
+    void fetchMode()
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -84,6 +105,11 @@ export default function LoginPage() {
       }
 
       if (data.success && data.user) {
+        if (!isLogin && data.user.status === 'pending') {
+          message.success(data.message || '注册成功，请等待管理员审核')
+          setMode('login')
+          return
+        }
         login({
           id: data.user.id,
           username: data.user.username,
@@ -127,7 +153,11 @@ export default function LoginPage() {
             <Paragraph type="secondary" className="m-0 mt-2">
               {isLogin
                 ? '管理员账号可创建共享房间'
-                : '注册后需 root 审核通过，方可成为普通用户'}
+                : registrationMode === 'closed'
+                  ? '当前已关闭注册'
+                  : registrationMode === 'open'
+                    ? '注册后即可使用'
+                    : '注册后需管理员审核通过，方可成为普通用户'}
             </Paragraph>
           </Fade>
         </div>
@@ -183,17 +213,23 @@ export default function LoginPage() {
         <Fade delay={340} key={`login-switch-${mode}`}>
           <div className="mt-6 text-center">
             {isLogin ? (
-              <Paragraph type="secondary" className="text-xs m-0">
-                还没有账号？{' '}
-                <button
-                  type="button"
-                  onClick={() => setMode('register')}
-                  className="underline hover:opacity-80"
-                  style={{ color: 'var(--md-sys-color-primary)' }}
-                >
-                  注册账号
-                </button>
-              </Paragraph>
+              registrationMode === 'closed' ? (
+                <Paragraph type="secondary" className="text-xs m-0">
+                  当前站点已关闭新用户注册
+                </Paragraph>
+              ) : (
+                <Paragraph type="secondary" className="text-xs m-0">
+                  还没有账号？{' '}
+                  <button
+                    type="button"
+                    onClick={() => setMode('register')}
+                    className="underline hover:opacity-80"
+                    style={{ color: 'var(--md-sys-color-primary)' }}
+                  >
+                    注册账号
+                  </button>
+                </Paragraph>
+              )
             ) : (
               <Paragraph type="secondary" className="text-xs m-0">
                 已有账号？{' '}

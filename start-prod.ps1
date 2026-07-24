@@ -1,13 +1,17 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 #Requires -Version 5.1
 
 <#
 .SYNOPSIS
-  ZControl 生产服务统一管理脚本
+  ZControl 一键启动 / 生产服务统一管理脚本
 .DESCRIPTION
-  直接使用已构建的代码（backend/dist / frontend/dist）启动服务，不执行构建。
+  一键启动：自动检测并安装依赖（npm install）、自动构建缺失产物（npm run build）、启动服务。
+  无需提前执行 npm install 即可直接运行本脚本。
   支持子命令：start | stop | restart | status | logs | port | menu | help
   适配 npm workspaces（根目录统一安装依赖）。
+
+  崩溃自动重启：通过 supervisor.ps1 监控前后端子进程，崩溃后自动重启（最多 20 次）。
+  后端 /health 端点返回 startedAt + restartCount，前端据此在网页内提示"后端已自动重启"。
 .EXAMPLE
   .\start-prod.ps1 start
   .\start-prod.ps1 start -Port 3001
@@ -26,7 +30,8 @@ param(
     [ValidateSet('backend', 'frontend', '')]
     [string]$Target = '',
 
-    [switch]$ForceDeps,            # 强制重新安装依赖（默认跳过已安装）
+    [switch]$ForceDeps,            # 强制重新安装依赖（默认按需自动安装）
+    [switch]$SkipBuild,            # 跳过自动构建（仅使用已有产物启动）
     [int]$Port = 3333,
     [int]$FrontendPort = 4173,
     [string]$Database
@@ -89,9 +94,11 @@ function Resolve-ViteJs {
 
 function Install-ProjectDependencies {
     # npm workspaces：仅在根目录安装一次，子目录会自动 hoist
-    Write-Host "  [$rootDir] 检测到 package-lock.json，执行 npm ci ..."
+    Write-Host "  [$rootDir] 安装依赖（npm workspaces）..."
     Push-Location $rootDir
     try {
+        # 优先 npm ci（要求 package-lock.json，可重现依赖树，更快更稳定）
+        # 失败则回退到 npm install（兼容 lock 文件缺失或损坏的情况）
         # 用 --no-audit --no-fund 提速；--prefer-offline 减少网络
         npm ci --no-audit --no-fund --prefer-offline
         if ($LASTEXITCODE -ne 0) {
@@ -264,28 +271,84 @@ function Test-FrontendBuilt {
     return Test-Path (Join-Path $frontendDir "dist/index.html")
 }
 
-function Assert-BuiltArtifacts {
-    # 启动前检查构建产物是否存在。本脚本不执行构建，必须由 release-zip.ps1 或手动 npm run build 生成。
-    Write-Host "[3/4] 检查构建产物 ..."
-    $backendOk = Test-BackendBuilt
-    $frontendOk = Test-FrontendBuilt
-    if ($backendOk -and $frontendOk) {
-        Write-Host "  构建产物已就绪：backend/dist/index.js / frontend/dist/index.html" -ForegroundColor Green
+function Test-BuildUpToDate {
+    # 智能构建跳过：检测构建产物是否新于所有源代码文件
+    # 返回 $true = 可跳过，$false = 需要构建
+    param([string]$ProjectDir, [string]$Artifact)
+
+    # 产物不存在，必须构建
+    if (-not (Test-Path $Artifact)) { return $false }
+
+    $artifactTime = (Get-Item $Artifact).LastWriteTime
+
+    # 检查 src 目录下所有源代码文件
+    $srcDir = Join-Path $ProjectDir "src"
+    if (Test-Path $srcDir) {
+        $newerFile = Get-ChildItem -Path $srcDir -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -gt $artifactTime } |
+            Select-Object -First 1
+        if ($newerFile) { return $false }
+    }
+
+    # 同时检查 package.json / tsconfig.json / vite.config 等配置文件
+    foreach ($cfg in @("package.json", "tsconfig.json", "vite.config.ts", "vite.config.js")) {
+        $cfgPath = Join-Path $ProjectDir $cfg
+        if ((Test-Path $cfgPath) -and ((Get-Item $cfgPath).LastWriteTime -gt $artifactTime)) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Build-ProjectDependencies {
+    # 构建前后端项目（npm workspaces：可在根目录执行 npm run build 一次性构建所有 workspace）
+    Write-Host "  构建后端 ..."
+    Push-Location $backendDir
+    try {
+        npm run build
+        if ($LASTEXITCODE -ne 0) { throw "后端构建失败 (exit $LASTEXITCODE)" }
+    } finally {
+        Pop-Location
+    }
+
+    Write-Host "  构建前端 ..."
+    Push-Location $frontendDir
+    try {
+        npm run build
+        if ($LASTEXITCODE -ne 0) { throw "前端构建失败 (exit $LASTEXITCODE)" }
+    } finally {
+        Pop-Location
+    }
+}
+
+function Invoke-BuildIfNeeded {
+    # 自动构建缺失或过期产物。SkipBuild 时跳过；否则检测产物是否最新，按需构建。
+    Write-Host "[3/5] 检查并构建产物 ..."
+    if ($SkipBuild) {
+        Write-Host "  跳过构建（-SkipBuild）" -ForegroundColor Yellow
         return
     }
 
-    Write-Host "  构建产物缺失：" -ForegroundColor Red
-    if (-not $backendOk) {
-        Write-Host "    - backend/dist/index.js 不存在" -ForegroundColor Red
+    $backendArtifact = Join-Path $backendDir "dist/index.js"
+    $frontendArtifact = Join-Path $frontendDir "dist/index.html"
+
+    $backendUpToDate = Test-BuildUpToDate -ProjectDir $backendDir -Artifact $backendArtifact
+    $frontendUpToDate = Test-BuildUpToDate -ProjectDir $frontendDir -Artifact $frontendArtifact
+
+    if ($backendUpToDate -and $frontendUpToDate) {
+        Write-Host "  构建产物已是最新（源代码未修改），跳过构建" -ForegroundColor Green
+        return
     }
-    if (-not $frontendOk) {
-        Write-Host "    - frontend/dist/index.html 不存在" -ForegroundColor Red
+
+    if (-not $backendUpToDate) {
+        Write-Host "  后端产物缺失或源代码已更新，需要构建" -ForegroundColor Yellow
     }
-    Write-Host ""
-    Write-Host "  本脚本不执行构建，请先通过以下方式之一生成构建产物：" -ForegroundColor Yellow
-    Write-Host "    1. 运行打包脚本：.\release-zip.ps1（会自动构建并打包）" -ForegroundColor Cyan
-    Write-Host "    2. 手动构建：npm run build" -ForegroundColor Cyan
-    throw "构建产物缺失，无法启动服务"
+    if (-not $frontendUpToDate) {
+        Write-Host "  前端产物缺失或源代码已更新，需要构建" -ForegroundColor Yellow
+    }
+    Build-ProjectDependencies
+    Write-Host "  构建完成" -ForegroundColor Green
 }
 
 function Get-PidByPort {
@@ -372,26 +435,41 @@ function Invoke-Start {
     }
 
     # 1. 检查环境
-    Write-Host "[1/4] 检查环境 ..."
+    Write-Host "[1/5] 检查环境 ..."
     $nodeCmd = Test-CommandInstalled "node"
     $npmCmd = Test-CommandInstalled "npm"
     Write-Host "  Node.js: $( & $nodeCmd.Source --version )"
     Write-Host "  npm: $( & $npmCmd.Source --version )"
 
-    # 2. 安装依赖（npm workspaces：只在根目录装一次）
-    $depsInstalled = Test-DepsInstalled
-    if ($depsInstalled -and -not $ForceDeps) {
-        Write-Host "[2/4] 依赖已安装，跳过（如需重装加 -ForceDeps）" -ForegroundColor Green
+    # 2. 依赖：node_modules 缺失则自动安装；-ForceDeps 强制重装
+    Write-Host "[2/5] 检查依赖 ..."
+    if ($ForceDeps) {
+        Write-Host "  强制重新安装依赖 ..."
+        Install-ProjectDependencies
+    } elseif (Test-DepsInstalled) {
+        Write-Host "  依赖已就绪" -ForegroundColor Green
     } else {
-        Write-Host "[2/4] 安装依赖 ..."
+        Write-Host "  node_modules 缺失，自动安装依赖 ..." -ForegroundColor Yellow
         Install-ProjectDependencies
     }
 
-    # 3. 检查构建产物（本脚本不执行构建，必须由 release-zip.ps1 或手动 npm run build 生成）
-    Assert-BuiltArtifacts
+    # 3. 自动构建缺失或过期的产物（除非 -SkipBuild）
+    Invoke-BuildIfNeeded
 
-    # 4. 启动服务
-    Write-Host "[4/4] 启动服务 ..."
+    # 4. 校验构建产物（兜底，确保启动前产物存在）
+    Write-Host "[4/5] 校验构建产物 ..."
+    $backendArtifact = Join-Path $backendDir "dist/index.js"
+    $frontendArtifact = Join-Path $frontendDir "dist/index.html"
+    if (-not (Test-Path $backendArtifact)) {
+        throw "后端构建产物缺失: $backendArtifact"
+    }
+    if (-not (Test-Path $frontendArtifact)) {
+        throw "前端构建产物缺失: $frontendArtifact"
+    }
+    Write-Host "  构建产物已就绪" -ForegroundColor Green
+
+    # 5. 启动服务
+    Write-Host "[5/5] 启动服务 ..."
     $env:PORT = "$Port"
     $env:NODE_ENV = "production"
     if ($Database) { $env:DATABASE_URL = $Database }
@@ -401,72 +479,74 @@ function Invoke-Start {
         if (Test-Path $log) { Remove-Item $log -Force -ErrorAction SilentlyContinue }
     }
 
-    Write-Host "  启动后端 (PORT=$Port) ..."
-    # stdout 与 stderr 分别写入不同文件，避免文件占用冲突
-    $backendProcStub = Start-Process -FilePath "node" -ArgumentList "dist/index.js" `
-        -WorkingDirectory $backendDir -PassThru -WindowStyle Hidden `
-        -RedirectStandardOutput $backendLog -RedirectStandardError $backendErrLog
-    $stubPid = $backendProcStub.Id
-    Write-Host "  后端 stub PID: $stubPid (等待端口监听...)"
+    # supervisor 脚本：监控子进程，崩溃后自动重启
+    $supervisorScript = Join-Path $rootDir "supervisor.ps1"
 
-    # Start-Process -WindowStyle Hidden 返回的 PID 可能是 stub，通过端口查找真实 PID
-    $realBackendPid = Get-PidByPort -LocalPort $Port -TimeoutMs 6000
+    Write-Host "  启动后端 (PORT=$Port, supervisor 模式) ..."
+    $backendSupervisorArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', "`"$supervisorScript`"",
+        '-Command', 'node',
+        '-CommandArgs', '"dist/index.js"',
+        '-WorkingDirectory', "`"$backendDir`"",
+        '-LogStdout', "`"$backendLog`"",
+        '-LogStderr', "`"$backendErrLog`""
+    )
+    $backendSupervisor = Start-Process -FilePath 'powershell.exe' -ArgumentList $backendSupervisorArgs -PassThru -WindowStyle Hidden
+    $backendSupervisorPid = $backendSupervisor.Id
+    Write-Host "  后端 supervisor PID: $backendSupervisorPid (等待端口监听...)"
+
+    # 通过端口查找真实监听进程（supervisor 启动的子进程）
+    $realBackendPid = Get-PidByPort -LocalPort $Port -TimeoutMs 8000
     if (-not $realBackendPid) {
         Write-Host "  后端启动失败（端口 $Port 未监听），查看日志 $backendErrLog" -ForegroundColor Red
         if (Test-Path $backendErrLog) {
             Write-Host "  --- 错误日志（最后 20 行）---"
             Get-Content $backendErrLog -Tail 20 -ErrorAction SilentlyContinue
         }
-        # 清理可能残留的 stub 进程
-        Stop-ProcessGraceful -ProcessId $stubPid | Out-Null
+        Stop-ProcessGraceful -ProcessId $backendSupervisorPid | Out-Null
         throw "后端启动失败"
     }
-    # stub 可能已退出（被真实进程替代），或仍存在（同 PID）
-    if ($realBackendPid -ne $stubPid) {
-        Write-Host "  真实后端 PID: $realBackendPid" -ForegroundColor Green
-        # stub 可能还活着，清理掉
-        Stop-ProcessGraceful -ProcessId $stubPid -TimeoutSec 1 | Out-Null
-    } else {
-        Write-Host "  后端 PID: $realBackendPid"
-    }
-    $backendPid = $realBackendPid
+    Write-Host "  后端服务 PID: $realBackendPid (supervisor: $backendSupervisorPid)" -ForegroundColor Green
+    # 记录 supervisor PID：stop 时杀 supervisor，/T 连带杀子进程
+    $backendPid = $backendSupervisorPid
 
-    Write-Host "  启动前端 (PORT=$FrontendPort) ..."
-    # 直接调用 node + vite.js，避免 npm.cmd 在 Start-Process 中的兼容性问题
-    # vite 在 workspaces 模式下可能 hoist 到根目录，也可能在 frontend/node_modules
+    Write-Host "  启动前端 (PORT=$FrontendPort, supervisor 模式) ..."
     $viteJs = Resolve-ViteJs
     if (-not $viteJs) {
         Write-Host "  未找到 vite.js，前端启动失败" -ForegroundColor Red
-        Write-Host "  回滚：停止已启动的后端 PID $backendPid ..." -ForegroundColor Yellow
+        Write-Host "  回滚：停止已启动的后端 supervisor PID $backendPid ..." -ForegroundColor Yellow
         Stop-ProcessGraceful -ProcessId $backendPid | Out-Null
         throw "未找到 vite.js，请确认 frontend 依赖已安装"
     }
     Write-Host "  vite.js: $viteJs"
-    $frontendProcStub = Start-Process -FilePath "node" -ArgumentList "`"$viteJs`"", "preview", "--port", "$FrontendPort", "--host" `
-        -WorkingDirectory $frontendDir -PassThru -WindowStyle Hidden `
-        -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErrLog
-    $frontendStubPid = $frontendProcStub.Id
-    Write-Host "  前端 stub PID: $frontendStubPid (等待端口监听...)"
+    $frontendSupervisorArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', "`"$supervisorScript`"",
+        '-Command', 'node',
+        '-CommandArgs', "`"$viteJs`" preview --port $FrontendPort --host",
+        '-WorkingDirectory', "`"$frontendDir`"",
+        '-LogStdout', "`"$frontendLog`"",
+        '-LogStderr', "`"$frontendErrLog`""
+    )
+    $frontendSupervisor = Start-Process -FilePath 'powershell.exe' -ArgumentList $frontendSupervisorArgs -PassThru -WindowStyle Hidden
+    $frontendSupervisorPid = $frontendSupervisor.Id
+    Write-Host "  前端 supervisor PID: $frontendSupervisorPid (等待端口监听...)"
 
-    $realFrontendPid = Get-PidByPort -LocalPort $FrontendPort -TimeoutMs 8000
+    $realFrontendPid = Get-PidByPort -LocalPort $FrontendPort -TimeoutMs 10000
     if (-not $realFrontendPid) {
         Write-Host "  前端启动失败（端口 $FrontendPort 未监听），查看日志 $frontendErrLog" -ForegroundColor Red
         if (Test-Path $frontendErrLog) {
             Write-Host "  --- 错误日志（最后 20 行）---"
             Get-Content $frontendErrLog -Tail 20 -ErrorAction SilentlyContinue
         }
-        Stop-ProcessGraceful -ProcessId $frontendStubPid | Out-Null
-        Write-Host "  回滚：停止已启动的后端 PID $backendPid ..." -ForegroundColor Yellow
+        Stop-ProcessGraceful -ProcessId $frontendSupervisorPid | Out-Null
+        Write-Host "  回滚：停止已启动的后端 supervisor PID $backendPid ..." -ForegroundColor Yellow
         Stop-ProcessGraceful -ProcessId $backendPid | Out-Null
         throw "前端启动失败"
     }
-    if ($realFrontendPid -ne $frontendStubPid) {
-        Write-Host "  真实前端 PID: $realFrontendPid" -ForegroundColor Green
-        Stop-ProcessGraceful -ProcessId $frontendStubPid -TimeoutSec 1 | Out-Null
-    } else {
-        Write-Host "  前端 PID: $realFrontendPid"
-    }
-    $frontendPid = $realFrontendPid
+    Write-Host "  前端服务 PID: $realFrontendPid (supervisor: $frontendSupervisorPid)" -ForegroundColor Green
+    $frontendPid = $frontendSupervisorPid
 
     Write-PidsFile -BackendPid $backendPid -FrontendPid $frontendPid -BackendPort $Port -FrontendPortNum $FrontendPort
 
@@ -518,8 +598,14 @@ function Invoke-Restart {
     Write-Title "ZControl 生产服务重启"
     Invoke-Stop
     Start-Sleep -Seconds 1
-    # 重启直接使用已构建的代码，不执行构建
-    Invoke-Start
+    # 重启：跳过依赖检查和构建，直接使用已有产物启动，加快重启速度
+    $origSkipBuild = $SkipBuild
+    $SkipBuild = $true
+    try {
+        Invoke-Start
+    } finally {
+        $SkipBuild = $origSkipBuild
+    }
 }
 
 function Invoke-Status {
@@ -536,24 +622,34 @@ function Invoke-Status {
         $frontendProc = Get-ProcessByIdSafe -ProcessId $existing.frontend.pid
 
         Write-Host "  后端:"
-        Write-Host "    PID:   $($existing.backend.pid)"
+        Write-Host "    PID:   $($existing.backend.pid) (supervisor)"
         Write-Host "    端口:  $($existing.backend.port)"
         Write-Host "    URL:   $($existing.backend.url)"
         if ($backendProc) {
-            Write-Host "    状态:  运行中 ($($backendProc.ProcessName))" -ForegroundColor Green
+            $svcPid = Get-PidByPort -LocalPort $existing.backend.port -TimeoutMs 500
+            if ($svcPid) {
+                Write-Host "    状态:  运行中 (服务 PID $svcPid)" -ForegroundColor Green
+            } else {
+                Write-Host "    状态:  supervisor 运行中，服务正在重启..." -ForegroundColor Yellow
+            }
         } else {
-            Write-Host "    状态:  已退出" -ForegroundColor Red
+            Write-Host "    状态:  supervisor 已退出" -ForegroundColor Red
         }
 
         Write-Host ""
         Write-Host "  前端:"
-        Write-Host "    PID:   $($existing.frontend.pid)"
+        Write-Host "    PID:   $($existing.frontend.pid) (supervisor)"
         Write-Host "    端口:  $($existing.frontend.port)"
         Write-Host "    URL:   $($existing.frontend.url)"
         if ($frontendProc) {
-            Write-Host "    状态:  运行中 ($($frontendProc.ProcessName))" -ForegroundColor Green
+            $svcPid = Get-PidByPort -LocalPort $existing.frontend.port -TimeoutMs 500
+            if ($svcPid) {
+                Write-Host "    状态:  运行中 (服务 PID $svcPid)" -ForegroundColor Green
+            } else {
+                Write-Host "    状态:  supervisor 运行中，服务正在重启..." -ForegroundColor Yellow
+            }
         } else {
-            Write-Host "    状态:  已退出" -ForegroundColor Red
+            Write-Host "    状态:  supervisor 已退出" -ForegroundColor Red
         }
     }
 
@@ -631,7 +727,7 @@ function Show-Help {
     Write-Host "  .\start-prod.ps1 <command> [options]"
     Write-Host ""
     Write-Host "命令："
-    Write-Host "  start     启动服务（使用已构建的代码，不执行构建）"
+    Write-Host "  start     一键启动：自动安装依赖、自动构建缺失产物、启动服务"
     Write-Host "  stop      停止服务"
     Write-Host "  restart   重启服务（不重新构建）"
     Write-Host "  status    查看服务状态（含构建产物检查）"
@@ -641,22 +737,27 @@ function Show-Help {
     Write-Host "  help      显示此帮助"
     Write-Host ""
     Write-Host "选项："
-    Write-Host "  -ForceDeps          强制重新安装依赖（默认跳过已安装）"
+    Write-Host "  -ForceDeps          强制重新安装依赖（默认按需自动安装）"
+    Write-Host "  -SkipBuild          跳过自动构建（仅使用已有产物启动）"
     Write-Host "  -Port <int>         后端端口（默认 3333，优先级高于配置文件）"
     Write-Host "  -FrontendPort <int> 前端端口（默认 4173，优先级高于配置文件）"
     Write-Host "  -Database <url>     数据库 URL"
     Write-Host ""
-    Write-Host "注意：本脚本不执行构建。启动前请确保："
-    Write-Host "  - backend/dist/index.js 存在"
-    Write-Host "  - frontend/dist/index.html 存在"
-    Write-Host "  如需构建并打包，请使用 release-zip.ps1"
+    Write-Host "一键启动说明："
+    Write-Host "  无需提前执行 npm install 或 npm run build，脚本会自动检测："
+    Write-Host "    1. node_modules 缺失 -> 自动执行 npm ci / npm install"
+    Write-Host "    2. 构建产物缺失或源代码已更新 -> 自动执行 npm run build"
+    Write-Host "    3. 构建产物已是最新 -> 跳过构建，直接启动"
+    Write-Host "  如需跳过自动构建（仅使用已有产物启动），请加 -SkipBuild"
     Write-Host ""
     Write-Host "端口优先级："
     Write-Host "  命令行参数 > .prod.ports.json 配置文件 > 默认值"
     Write-Host "  使用 port 子命令或菜单第 7 项可交互式修改并持久化端口"
     Write-Host ""
     Write-Host "示例："
-    Write-Host "  .\start-prod.ps1 start"
+    Write-Host "  .\start-prod.ps1 start                # 一键启动（自动安装+构建）"
+    Write-Host "  .\start-prod.ps1 start -SkipBuild     # 跳过构建，仅启动"
+    Write-Host "  .\start-prod.ps1 start -ForceDeps     # 强制重新安装依赖"
     Write-Host "  .\start-prod.ps1 start -Port 3001"
     Write-Host "  .\start-prod.ps1 port"
     Write-Host "  .\start-prod.ps1 logs frontend"

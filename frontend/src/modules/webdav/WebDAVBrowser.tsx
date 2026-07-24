@@ -139,7 +139,13 @@ export default function WebDAVBrowser({
               )}
               {/* 切换目录时的加载蒙层：保留已有列表，叠加半透明遮罩 + 居中 Spinner */}
               {loading && entries.length > 0 && (
-                <div className="absolute inset-0 flex items-center justify-center rounded bg-[var(--md-sys-color-surface)]/50 backdrop-blur-[1px]">
+                <div
+                  className="absolute inset-0 flex items-center justify-center rounded bg-[var(--md-sys-color-surface)]/50"
+                  style={{
+                    backdropFilter: 'blur(var(--glass-blur-loading))',
+                    WebkitBackdropFilter: 'blur(var(--glass-blur-loading))',
+                  }}
+                >
                   <Spinner tip="加载中..." size={20} />
                 </div>
               )}

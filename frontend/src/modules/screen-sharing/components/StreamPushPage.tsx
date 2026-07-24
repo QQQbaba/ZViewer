@@ -1,5 +1,4 @@
 import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Download, Copy, Radio, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Text, Paragraph } from '@/components/ui/Typography'
@@ -35,7 +34,6 @@ export function StreamPushPage({
   const streamStatus = useRoomStore((state) => state.streamStatus)
   const streamKey = useRoomStore((state) => state.streamKey)
   const setStreamStatus = useRoomStore((state) => state.setStreamStatus)
-  const navigate = useNavigate()
   const [downloading, setDownloading] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
 
@@ -72,7 +70,7 @@ export function StreamPushPage({
 
   return (
     <div
-      className={`flex min-h-[480px] flex-col gap-4 overflow-y-auto p-6 ${className ?? ''}`}
+      className={`h-full min-h-0 overflow-y-auto p-6 space-y-4 ${className ?? ''}`}
       style={style}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -154,7 +152,7 @@ export function StreamPushPage({
       </Card>
 
       {previewMode && (
-        <Card className="aspect-video w-full overflow-hidden p-0">
+        <Card className="aspect-video w-full min-h-[480px] overflow-hidden p-0">
           <FlvPlayer
             src={flvUrl}
             muted
@@ -192,15 +190,6 @@ export function StreamPushPage({
           共享前请先停止 OBS 推流。
         </Paragraph>
       </Card>
-
-      <div className="flex justify-end">
-        <Button
-          variant="ghost"
-          onClick={() => navigate('/', { replace: true })}
-        >
-          返回主页
-        </Button>
-      </div>
     </div>
   )
 }

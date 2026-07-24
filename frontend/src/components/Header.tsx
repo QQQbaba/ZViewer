@@ -42,6 +42,8 @@ export function Header() {
     setRadius,
     glassStrength,
     setGlassStrength,
+    glassBlur,
+    setGlassBlur,
     reducedMotion,
     setReducedMotion,
   } = useThemeStore()
@@ -235,13 +237,15 @@ export function Header() {
                 } else {
                   setThemeOpen(true)
                   setThemeClosing(false)
+                  // 默认显示主面板，不保留上次打开的自定义背景侧面板
+                  setBackgroundModalOpen(false)
                 }
               }}
               className={cn(
                 'p-2 rounded-[var(--md-sys-shape-corner)] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]',
                 themeOpen
                   ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
-                  : 'bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface)]'
+                  : 'bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface)]'
               )}
               style={{
                 border: '1px solid var(--md-sys-color-outline)',
@@ -257,17 +261,31 @@ export function Header() {
                 <div
                   ref={themeMenuRef}
                   className={cn(
-                    'glass-strong fixed w-72 rounded-[var(--md-sys-shape-corner)] p-4 shadow-lg',
+                    'fixed',
                     themeClosing ? 'zen-dropdown-exit' : 'zen-dropdown-enter'
                   )}
                   style={{
                     top: `${themeMenuPos.top}px`,
                     right: `${themeMenuPos.right}px`,
                     zIndex: 50,
-                    boxShadow:
-                      '0 8px 24px -8px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent)',
                   }}
                 >
+                  <div
+                    className="glass flex overflow-hidden rounded-[var(--md-sys-shape-corner)] shadow-lg"
+                    style={{
+                      height: 'min(520px, calc(100vh - 32px))',
+                      // 容器宽度由子元素决定，不单独动画 width，避免与侧面板的 width 动画不同步导致抖动
+                      backdropFilter: 'blur(var(--glass-blur-strong))',
+                      WebkitBackdropFilter: 'blur(var(--glass-blur-strong))',
+                      boxShadow:
+                        '0 8px 24px -8px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent)',
+                    }}
+                  >
+                  <BackgroundSettingsPanel
+                    open={backgroundModalOpen}
+                    onClose={() => setBackgroundModalOpen(false)}
+                  />
+                  <div className="h-full w-72 flex-shrink-0 p-4">
                   {/* 深浅色切换 */}
                   <button
                     onClick={() => setDark(!isDark)}
@@ -278,9 +296,7 @@ export function Header() {
                       <span
                         className="w-10 h-10 rounded-lg flex items-center justify-center shadow-sm"
                         style={{
-                          backgroundColor: isDark
-                            ? 'var(--md-sys-color-surface-container-highest)'
-                            : 'var(--md-sys-color-surface-container-high)',
+                          backgroundColor: 'var(--glass-bg)',
                           border: '1px solid var(--md-sys-color-outline)',
                         }}
                       >
@@ -414,7 +430,7 @@ export function Header() {
                             )}
                           >
                             <span
-                              className="h-5 w-8 border-2 border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)]"
+                              className="h-5 w-8 border-2 border-[var(--md-sys-color-outline)] bg-[var(--glass-bg)]"
                               style={{ borderRadius: `${preset.px}px` }}
                             />
                             <span>{preset.label}</span>
@@ -424,19 +440,28 @@ export function Header() {
                     </div>
                   </div>
 
-                  {/* 玻璃强度滑块 */}
+                  {/* 玻璃透明度 + 模糊度滑块 */}
                   <div
                     className="zen-dropdown-item space-y-2 mt-3"
                     style={{ '--item-delay': '180ms' } as React.CSSProperties}
                   >
                     <Slider
-                      label="玻璃浓度"
+                      label="玻璃透明度"
                       value={Math.round(glassStrength * 100)}
                       min={0}
                       max={100}
                       step={1}
                       valueFormatter={(v) => `${v}%`}
                       onChange={(v) => setGlassStrength(v / 100)}
+                    />
+                    <Slider
+                      label="模糊度"
+                      value={glassBlur}
+                      min={0}
+                      max={40}
+                      step={1}
+                      valueFormatter={(v) => `${v}px`}
+                      onChange={(v) => setGlassBlur(v)}
                     />
                   </div>
 
@@ -470,8 +495,13 @@ export function Header() {
                   {/* 自定义背景入口 */}
                   <button
                     ref={backgroundBtnRef}
-                    onClick={() => setBackgroundModalOpen(true)}
-                    className="zen-dropdown-item mt-3 w-full flex items-center gap-2 px-3 py-2 rounded-[var(--md-sys-shape-corner)] text-sm text-[var(--md-sys-color-on-surface)] transition-all hover:bg-[var(--md-sys-color-surface-container-highest)] hover:translate-x-0.5"
+                    onClick={() => setBackgroundModalOpen((v) => !v)}
+                    className={cn(
+                      'zen-dropdown-item mt-3 w-full flex items-center gap-2 px-3 py-2 rounded-[var(--md-sys-shape-corner)] text-sm transition-all hover:translate-x-0.5',
+                      backgroundModalOpen
+                        ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)] border-[var(--md-sys-color-primary)]'
+                        : 'text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                    )}
                     style={
                       {
                         border: '1px solid var(--md-sys-color-outline)',
@@ -482,6 +512,8 @@ export function Header() {
                     <Image className="w-4 h-4 text-[var(--md-sys-color-primary)]" />
                     <span className="flex-1 text-left">自定义背景</span>
                   </button>
+                  </div>
+                  </div>
                 </div>,
                 document.body
               )}
@@ -503,7 +535,7 @@ export function Header() {
                   'flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-[var(--md-sys-shape-corner)] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]',
                   userOpen
                     ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
-                    : 'bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface)]'
+                    : 'bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface)]'
                 )}
                 style={{
                   border: '1px solid var(--md-sys-color-outline)',
@@ -513,7 +545,7 @@ export function Header() {
                 <Avatar
                   size="sm"
                   alt={user.username}
-                  src={user.role === 'root' ? '/root-avatar.jpg' : undefined}
+                  src={user.avatar ? `${API_URL}${user.avatar}` : (user.role === 'root' ? '/root-avatar.jpg' : undefined)}
                 />
                 <span className="hidden sm:inline text-xs font-medium max-w-[8rem] truncate">
                   {user.username}
@@ -548,7 +580,7 @@ export function Header() {
                       style={
                         {
                           backgroundColor:
-                            'var(--md-sys-color-surface-container-high)',
+                            'var(--glass-bg)',
                           '--item-delay': '0ms',
                         } as React.CSSProperties
                       }
@@ -556,9 +588,7 @@ export function Header() {
                       <Avatar
                         size="md"
                         alt={user.username}
-                        src={
-                          user.role === 'root' ? '/root-avatar.jpg' : undefined
-                        }
+                        src={user.avatar ? `${API_URL}${user.avatar}` : (user.role === 'root' ? '/root-avatar.jpg' : undefined)}
                       />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-[var(--md-sys-color-on-surface)] truncate">
@@ -667,12 +697,6 @@ export function Header() {
 
       {/* 顶部占位，避免内容被 fixed header 遮挡 */}
       <div style={{ height: '64px' }} />
-
-      <BackgroundSettingsPanel
-        open={backgroundModalOpen}
-        onClose={() => setBackgroundModalOpen(false)}
-        anchorRef={backgroundBtnRef}
-      />
     </>
   )
 }

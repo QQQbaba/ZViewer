@@ -74,7 +74,7 @@ function parseBox(data: Uint8Array, offset: number): BoxInfo | null {
 /**
  * 遍历顶层数据中的所有 box。
  */
-function* iterBoxes(data: Uint8Array, start: number = 0): Generator<BoxInfo> {
+export function* iterBoxes(data: Uint8Array, start: number = 0): Generator<BoxInfo> {
   let offset = start
   while (offset < data.length) {
     const box = parseBox(data, offset)
@@ -161,6 +161,132 @@ export function parseMvhdDuration(
 }
 
 /**
+ * sidx 解析结果。
+ */
+export interface SidxInfo {
+  /** 媒体时间刻度 */
+  timescale: number
+  /** sidx box 结束位置（init segment 之后） */
+  end: number
+  /** 第一个媒体分片相对于 sidx box 结束位置的字节偏移 */
+  firstOffset: number
+  /** 每个 reference 的累计开始时间（秒）和字节大小 */
+  references: { startTime: number; duration: number; size: number }[]
+}
+
+/**
+ * 解析 sidx（Segment Index Box）。
+ *
+ * sidx 描述了 fMP4 文件中每个 subsegment 的字节偏移和时间信息，
+ * 用于 seek 时精确定位到目标时间所在的 subsegment 起始位置，
+ * 避免线性估算在 VBR 视频下的较大偏差。
+ *
+ * @param data 包含完整 sidx box 的文件头部数据
+ * @param sidxOffset sidx box 的起始偏移
+ * @returns SidxInfo 或 null 如果解析失败
+ */
+export function parseSidx(
+  data: Uint8Array,
+  sidxOffset: number
+): SidxInfo | null {
+  const sidxBox = parseBox(data, sidxOffset)
+  if (!sidxBox || sidxBox.type !== 'sidx') return null
+
+  const boxData = data.subarray(sidxBox.offset + 8, sidxBox.end)
+  if (boxData.length < 12) return null
+
+  const version = boxData[0]
+  let offset = 4 // version(1) + flags(3)
+
+  if (boxData.length < offset + 8) return null
+  offset += 4 // reference_ID
+  const timescale = readU32(boxData, offset)
+  offset += 4
+
+  let earliestPresentationTime: number
+  let firstOffset: number
+
+  if (version === 0) {
+    if (boxData.length < offset + 8) return null
+    earliestPresentationTime = readU32(boxData, offset)
+    offset += 4
+    firstOffset = readU32(boxData, offset)
+    offset += 4
+  } else {
+    if (boxData.length < offset + 16) return null
+    earliestPresentationTime = readU64(boxData, offset)
+    offset += 8
+    firstOffset = readU64(boxData, offset)
+    offset += 8
+  }
+
+  if (boxData.length < offset + 4) return null
+  offset += 2 // reserved
+  const referenceCount = readU16(boxData, offset)
+  offset += 2
+
+  const references: { startTime: number; duration: number; size: number }[] = []
+  let currentTime = earliestPresentationTime
+  for (let i = 0; i < referenceCount; i++) {
+    if (boxData.length < offset + 12) return null
+    const ref1 = readU32(boxData, offset)
+    const referenceSize = ref1 & 0x7fffffff
+    // const referenceType = ref1 >>> 31
+    const subsegmentDuration = readU32(boxData, offset + 4)
+    offset += 8
+    // const ref2 = readU32(boxData, offset) // SAP info
+    offset += 4
+
+    references.push({
+      startTime: currentTime / timescale,
+      duration: subsegmentDuration / timescale,
+      size: referenceSize,
+    })
+    currentTime += subsegmentDuration
+  }
+
+  return {
+    timescale,
+    end: sidxBox.end,
+    firstOffset,
+    references,
+  }
+}
+
+/** 读取大端 uint16 */
+function readU16(data: Uint8Array, offset: number): number {
+  return ((data[offset] << 8) | data[offset + 1]) >>> 0
+}
+
+/**
+ * 根据目标时间从 sidx 信息中计算精确的字节偏移。
+ *
+ * 返回目标时间所在 subsegment 的起始字节偏移（相对于文件开头）。
+ * 如果目标时间早于第一个 subsegment，返回 sidx.end + firstOffset。
+ *
+ * @param sidx SidxInfo
+ * @param targetTime 目标时间（秒）
+ * @returns 字节偏移，或 null 如果无法计算
+ */
+export function findByteOffsetByTime(
+  sidx: SidxInfo,
+  targetTime: number
+): number | null {
+  if (sidx.references.length === 0) return null
+
+  let offset = sidx.end + sidx.firstOffset
+  for (const ref of sidx.references) {
+    if (targetTime <= ref.startTime + ref.duration) {
+      return offset
+    }
+    offset += ref.size
+  }
+
+  // 目标时间超过最后一个 subsegment，返回最后一个 subsegment 起始位置
+  return offset - sidx.references[sidx.references.length - 1].size
+}
+
+/**
  * 在数据中查找第一个完整的 moof box 的起始偏移量。
  *
  * 当从文件中间位置开始下载时，数据开头可能不是完整的 box。
@@ -190,4 +316,44 @@ export function findFirstMoof(data: Uint8Array): number | null {
     }
   }
   return null
+}
+
+/**
+ * 找到数据中最后一个完整的 moof+mdat fragment 的结束位置。
+ *
+ * fMP4 的媒体数据由多个 moof+mdat fragment 组成。Chrome 的 chunk demuxer
+ * 要求 append 的数据以完整 fragment 边界结束——如果末尾是截断的 mdat
+ * (mdat box 未完整包含在数据内)，demuxer 会尝试解码不完整帧并抛出
+ * CHUNK_DEMUXER_ERROR_APPEND_FAILED (video.error code=3)，导致永久黑屏。
+ *
+ * 此函数扫描数据中的 moof/mdat box 边界，返回最后一个完整 fragment
+ * (moof + 完整 mdat) 的结束字节偏移。调用方据此只 flush 完整 fragment，
+ * 保留剩余数据等待下一次 flush。
+ *
+ * @param data 已对齐到 moof 起点的数据（第一个 box 应为 moof）
+ * @returns 最后一个完整 fragment 的结束偏移；无完整 fragment 时返回 0
+ */
+export function findLastCompleteFragmentEnd(data: Uint8Array): number {
+  let lastCompleteEnd = 0
+  let offset = 0
+  while (offset + 8 <= data.length) {
+    const box = parseBox(data, offset)
+    if (!box) break
+    if (box.type === 'moof') {
+      // moof 后应紧跟 mdat；若 mdat 未完整包含则此 fragment 不完整
+      if (box.end + 8 > data.length) break
+      const mdatBox = parseBox(data, box.end)
+      if (mdatBox && mdatBox.type === 'mdat' && mdatBox.end <= data.length) {
+        lastCompleteEnd = mdatBox.end
+        offset = mdatBox.end
+      } else {
+        // moof 后非 mdat 或 mdat 不完整
+        break
+      }
+    } else {
+      // 非 moof box（如 sidx、free 等），跳过
+      offset = box.end
+    }
+  }
+  return lastCompleteEnd
 }

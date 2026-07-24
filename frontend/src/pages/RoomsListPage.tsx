@@ -160,10 +160,8 @@ export default function RoomsListPage() {
         <Fade delay={160}>
           <Space justify="between" align="center" className="mb-4">
             <div
-              className="flex items-center gap-1.5 rounded-[var(--md-sys-shape-corner)] border px-3 py-1.5 text-sm font-medium"
+              className="glass flex items-center gap-1.5 rounded-[var(--md-sys-shape-corner)] px-3 py-1.5 text-sm font-medium"
               style={{
-                borderColor: 'var(--md-sys-color-outline)',
-                backgroundColor: 'var(--md-sys-color-surface-container-low)',
                 color: 'var(--md-sys-color-on-surface-variant)',
               }}
             >
@@ -276,16 +274,12 @@ export default function RoomsListPage() {
                 <div
                   key={room.id}
                   className={cn(
-                    'zen-stagger-fade-up',
-                    viewMode === 'tile'
-                      ? 'flex flex-col gap-3 rounded-[var(--md-sys-shape-corner)] border p-4 transition-colors'
-                      : 'flex flex-col gap-3 rounded-[var(--md-sys-shape-corner)] border p-4 transition-colors sm:flex-row sm:items-center sm:justify-between'
+                    'zen-stagger-fade-up glass-card flex flex-col gap-3 p-4 transition-colors',
+                    viewMode !== 'tile' &&
+                      'sm:flex-row sm:items-center sm:justify-between'
                   )}
                   style={
                     {
-                      borderColor: 'var(--md-sys-color-outline)',
-                      backgroundColor:
-                        'var(--md-sys-color-surface-container-high)',
                       '--stagger-delay': `${200 + idx * 45}ms`,
                     } as React.CSSProperties
                   }

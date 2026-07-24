@@ -8,6 +8,8 @@ export interface User {
   username: string
   role: UserRole
   status?: 'active' | 'pending'
+  /** 头像 URL（相对路径，如 '/uploads/avatars/1-xxx.jpg'）。null 表示使用默认头像。 */
+  avatar?: string | null
 }
 
 export type AutoLoginStatus = 'idle' | 'pending' | 'done'

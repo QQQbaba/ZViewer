@@ -119,3 +119,16 @@ export function authenticateToken(
     res.status(403).json({ success: false, message: '认证令牌无效或已过期' });
   }
 }
+
+/** 仅允许 root 超级管理员访问的路由中间件。 */
+export function requireRoot(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) {
+  if (req.user?.role !== 'root') {
+    res.status(403).json({ success: false, message: '无权限：仅超级管理员可操作' });
+    return;
+  }
+  next();
+}

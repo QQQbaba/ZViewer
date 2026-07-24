@@ -212,11 +212,7 @@ export default function OpenListMountPanel() {
       return (
         <div
           key={mount.id}
-          className="flex items-start gap-3 rounded-[var(--md-sys-shape-corner)] border p-3 transition-colors"
-          style={{
-            borderColor: 'var(--md-sys-color-outline)',
-            backgroundColor: 'var(--md-sys-color-surface-container)',
-          }}
+          className="glass flex items-start gap-3 rounded-[var(--md-sys-shape-corner)] p-3 transition-colors"
         >
           <div
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
@@ -307,13 +303,7 @@ export default function OpenListMountPanel() {
   )
 
   return (
-    <div
-      className="rounded-[var(--md-sys-shape-corner)] border p-4"
-      style={{
-        borderColor: 'var(--md-sys-color-outline)',
-        backgroundColor: 'var(--md-sys-color-surface-container-high)',
-      }}
-    >
+    <div className="glass-card p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <div

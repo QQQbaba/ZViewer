@@ -62,7 +62,7 @@ export const Slider = forwardRef<HTMLInputElement, SliderProps>(
           <div
             className={cn(
               'flex items-center justify-between text-[var(--md-sys-color-on-surface-variant)] transition-colors',
-              isSm ? 'mb-1 text-[10px]' : 'mb-1.5 text-xs',
+              isSm ? 'mb-1 text-xs' : 'mb-1 text-sm',
               (dragging || hovering) && 'text-[var(--md-sys-color-primary)]'
             )}
           >
@@ -105,7 +105,7 @@ export const Slider = forwardRef<HTMLInputElement, SliderProps>(
               backgroundColor: 'var(--md-sys-color-primary)',
               boxShadow:
                 dragging || hovering
-                  ? '0 0 8px color-mix(in srgb, var(--md-sys-color-primary) 50%, transparent)'
+                  ? '0 0 6px color-mix(in srgb, var(--md-sys-color-primary) 50%, transparent)'
                   : 'none',
             }}
           />
@@ -132,7 +132,7 @@ export const Slider = forwardRef<HTMLInputElement, SliderProps>(
           <div
             className={cn(
               'pointer-events-none absolute rounded-full border-2 shadow transition-all duration-200',
-              isSm ? 'h-3 w-3' : 'h-4 w-4',
+              isSm ? 'h-3.5 w-3.5' : 'h-4 w-4',
               'bg-[var(--md-sys-color-primary)] border-[var(--md-sys-color-primary)]'
             )}
             style={{
@@ -140,7 +140,7 @@ export const Slider = forwardRef<HTMLInputElement, SliderProps>(
               transform: `translateX(-50%) scale(${dragging ? 1.3 : hovering ? 1.1 : 1})`,
               boxShadow:
                 dragging || hovering
-                  ? '0 0 0 4px color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent), 0 0 12px color-mix(in srgb, var(--md-sys-color-primary) 50%, transparent)'
+                  ? '0 0 0 3px color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent), 0 0 10px color-mix(in srgb, var(--md-sys-color-primary) 50%, transparent)'
                   : 'none',
             }}
           />

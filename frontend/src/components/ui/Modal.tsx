@@ -66,9 +66,14 @@ export function Modal({
     >
       <div
         className={cn(
-          'absolute inset-0 bg-black/40 backdrop-blur-sm',
+          'absolute inset-0 bg-black/40',
           exiting ? 'zen-modal-backdrop-exit' : 'zen-modal-backdrop-enter'
         )}
+        style={{
+          // 蒙层模糊度跟随主题设置（取 glass-blur 的 40%，避免大模糊度时背景过度模糊）
+          backdropFilter: 'blur(var(--glass-blur-mask))',
+          WebkitBackdropFilter: 'blur(var(--glass-blur-mask))',
+        }}
         onClick={onClose}
         aria-hidden="true"
       />

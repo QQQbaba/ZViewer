@@ -84,7 +84,7 @@ export class RoomLifecycleHandler implements SocketEventHandler {
             maxViewers: payload.maxViewers ?? 10,
             status: 'active',
             mode: payload.mode ?? 'screen-share',
-            requireApproval: payload.requireApproval ?? true,
+            requireApproval: payload.requireApproval ?? false,
             ownerUserId: userId || null,
           });
           await roomRepo.save(room);

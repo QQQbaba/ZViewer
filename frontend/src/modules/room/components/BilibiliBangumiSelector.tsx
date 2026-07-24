@@ -267,10 +267,10 @@ export function BilibiliBangumiSelector({
               <div
                 key={bangumi.seasonId}
                 className={cn(
-                  'bangumi-card overflow-hidden rounded-[var(--md-sys-shape-corner)] border transition-all',
+                  'bangumi-card glass overflow-hidden rounded-[var(--md-sys-shape-corner)] border transition-all',
                   expanded
-                    ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-surface-container-high)]'
-                    : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container)] hover:border-[var(--md-sys-color-outline)]'
+                    ? 'border-[var(--md-sys-color-primary)]'
+                    : 'border-[var(--md-sys-color-outline-variant)] hover:border-[var(--md-sys-color-outline)]'
                 )}
               >
                 <button
@@ -302,7 +302,7 @@ export function BilibiliBangumiSelector({
                       )}
                       style={{
                         backgroundColor:
-                          'var(--md-sys-color-surface-container-high)',
+                          'var(--glass-bg)',
                       }}
                     >
                       <Tv

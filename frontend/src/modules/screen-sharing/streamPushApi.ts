@@ -6,7 +6,11 @@ import { apiFetch, API_URL } from '@/lib/api'
 
 /**
  * 构建拉流地址。
- * 优先使用 VITE_FLV_BASE_URL 环境变量，否则使用当前 host 的 HTTP-FLV 默认端口（3335）。
+ * 优先使用 VITE_FLV_BASE_URL 环境变量，否则按当前页面协议自动选择：
+ * - HTTPS 页面默认使用相对路径 `/live`，假设生产环境通过 Nginx/Caddy 等反向代理
+ *   将 `/live` 映射到 Node Media Server 的 HTTP-FLV 端口（默认 3335）。
+ * - HTTP 页面默认直连 `http://host:3335`，用于本地开发。
+ *
  * 最终地址格式为 `${base}/live/${streamKey}.flv`
  *
  * 注意：HTTP-FLV 拉流使用独立的 streamKey（与 roomId 分离），
@@ -15,7 +19,9 @@ import { apiFetch, API_URL } from '@/lib/api'
 export function buildFlvUrl(streamKey: string): string {
   const base =
     import.meta.env.VITE_FLV_BASE_URL ||
-    `${window.location.protocol}//${window.location.hostname}:3335`
+    (window.location.protocol === 'https:'
+      ? ''
+      : `http://${window.location.hostname}:3335`)
   return `${base}/live/${streamKey}.flv`
 }
 

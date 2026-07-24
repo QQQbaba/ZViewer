@@ -85,6 +85,7 @@ export function RoomLayout({
 }: RoomLayoutProps) {
   const navigate = useNavigate()
   const { socket } = useSocket()
+  const exitRoom = useRoomStore((state) => state.exitRoom)
   const defaultBack = () => {
     // 房主返回主页时关闭旧房间，避免 socket 仍 joined 到旧 room、
     // 旧 sharer session 残留，导致下次创建新房间时收到旧房间事件。
@@ -93,6 +94,8 @@ export function RoomLayout({
         /* ack，无需提示 */
       })
     }
+    // 明确退出房间：清除 activeRoomId + 重置房间状态
+    exitRoom()
     navigate('/')
   }
   const handleBack = onBack ?? defaultBack
@@ -115,7 +118,6 @@ export function RoomLayout({
   const roomMode = useRoomStore((state) => state.mode)
   const setMode = useRoomStore((state) => state.setMode)
   const storeIsSharing = useRoomStore((state) => state.isSharing)
-  const storeShareMethod = useRoomStore((state) => state.shareMethod)
 
   // 模式切换加载占位：房主点击切换后等待后端确认期间显示 Spinner
   const [isModeSwitching, setIsModeSwitching] = useState(false)
@@ -131,14 +133,9 @@ export function RoomLayout({
 
   // 是否使用 aspect-video（16:9）布局。
   // - watch-together：始终 aspect-video
-  // - screen-share + webrtc：仅 isSharing 时 aspect-video
-  // - screen-share + stream-push：
-  //   - 观众端始终 aspect-video（拉流播放器）
-  //   - 房主端 StreamPushPage 用 min-h-[480px]（未推流时显示配置 UI）
+  // - screen-share：始终 aspect-video，与一起看/观众端 CinemaLayout 保持统一高度
   const useAspectRatio =
-    roomMode === 'watch-together' ||
-    (roomMode === 'screen-share' &&
-      (storeShareMethod === 'stream-push' ? !isHost : isSharing))
+    roomMode === 'watch-together' || roomMode === 'screen-share'
 
   // 监听 room-mode-changed：观众端跟随房主切换无需刷新；
   // 同时清除本地加载占位（房主切换完成后）。
@@ -239,16 +236,18 @@ export function RoomLayout({
   )
 
   // 共享状态下：将评论区（rightPanel）追加到下方 controls 区域与原 controls 合并渲染
-  const effectiveControls = isSharing
-    ? controls
-      ? (
-          <>
-            {controls}
-            {rightPanel}
-          </>
-        )
-      : rightPanel
-    : controls
+  const effectiveControls = isSharing ? (
+    controls ? (
+      <>
+        {controls}
+        {rightPanel}
+      </>
+    ) : (
+      rightPanel
+    )
+  ) : (
+    controls
+  )
 
   // 根据当前模式渲染主区域：切换中显示加载占位，否则渲染调用方传入的 mainContent
   const renderMainContent = () => {
@@ -294,13 +293,11 @@ export function RoomLayout({
         'flex min-h-0 min-w-0 flex-col overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
         isNativeFullscreen
           ? 'glass-strong absolute inset-y-0 right-0 z-20 w-[85%] max-w-[340px] rounded-l-2xl border-l'
-          : 'w-[320px] flex-shrink-0 self-stretch rounded-xl border',
+          : 'glass-card w-[320px] flex-shrink-0 self-stretch rounded-xl',
         isNativeFullscreen && !isRightPanelOpen && 'translate-x-full',
         !isNativeFullscreen && !isRightPanelOpen && 'w-0 scale-x-95 opacity-0'
       )}
       style={{
-        backgroundColor: 'var(--md-sys-color-surface-container)',
-        borderColor: 'var(--md-sys-color-outline-variant)',
         boxShadow: isNativeFullscreen
           ? '0 8px 32px -4px rgba(0, 0, 0, 0.3)'
           : isRightPanelOpen
@@ -325,7 +322,7 @@ export function RoomLayout({
 
   return (
     <div className="flex min-h-[calc(100vh-64px)] flex-col items-center overflow-y-auto px-4 py-6">
-      <Card className="relative flex w-full max-w-6xl flex-none flex-col overflow-hidden min-h-0">
+      <Card className="relative flex w-full max-w-6xl flex-none flex-col overflow-hidden min-h-0 bg-transparent">
         {/* 顶部工具栏：返回、模式切换、右侧操作在同一行，避免 absolute 重叠 */}
         <div className="z-30 flex flex-none items-center justify-between gap-2 px-4 pt-4 pb-2">
           <Button

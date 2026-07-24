@@ -1,34 +1,21 @@
 /**
  * Sync Playback Services Barrel Export
  *
- * 同步播放服务层：从 hooks 中抽取的纯函数逻辑，便于复用与测试。
- *
  * 服务划分：
  * - state-merge: 状态构建与比较（buildStateFromVideo / isStateEqual）
- * - broadcast-throttle: 广播节流与防抖（throttled / debounced seek）
- * - seek-strategy: seek 跟随与缓冲检测（自适应阈值 / 未缓冲区域检测）
- * - mse-reload: MSE 流重新加载（seek 到未缓冲区域时重新创建流）
+ * - seek-strategy: seek 判断函数（缓冲检测 / MSE 流检测 / 自适应阈值）
+ * - seek-service: 统一 seek 入口（调用 MsePlayer.seekTo，不重建 MediaSource）
  */
 export { buildStateFromVideo, isStateEqual } from './state-merge'
-
-export {
-  createThrottledBroadcaster,
-  createForceThrottledBroadcaster,
-  createDebouncedSeek,
-} from './broadcast-throttle'
 
 export {
   getAdaptiveSeekThreshold,
   shouldSeekToHost,
   isInBufferedRange,
   isMseStream,
-  needsMseReloadForSeek,
-  waitForBuffered,
-  findNearestBufferedTime,
+  getGapFromLiveEdge,
+  FORWARD_BUFFER_TOLERANCE_SEC,
 } from './seek-strategy'
 
-export { reloadMseAtTime } from './mse-reload'
-export type {
-  ReloadMseAtTimeOptions,
-  ReloadMseAtTimeResult,
-} from './mse-reload'
+export { executeSeek } from './seek-service'
+export type { ExecuteSeekParams, SeekToResult } from './seek-service'

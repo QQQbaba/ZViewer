@@ -22,7 +22,6 @@ import { Space } from '@/components/ui/Space'
 import { Text, Paragraph } from '@/components/ui/Typography'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
-import { Switch } from '@/components/ui/Switch'
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle'
 import { message } from '@/components/ui/message'
 import { useSocket } from '@/hooks/useSocket'
@@ -97,7 +96,6 @@ export function RoomInfoPanel({
   // 房间设置表单
   const [passwordValue, setPasswordValue] = useState('')
   const [maxViewersValue, setMaxViewersValue] = useState(10)
-  const [requireApprovalValue, setRequireApprovalValue] = useState(true)
   const [savingSettings, setSavingSettings] = useState(false)
 
   // 房主转交确认
@@ -126,7 +124,6 @@ export function RoomInfoPanel({
       // eslint-disable-next-line react-hooks/set-state-in-effect -- 打开设置时同步房间设置到表单
       setPasswordValue(roomSettings.password ?? '')
       setMaxViewersValue(roomSettings.maxViewers)
-      setRequireApprovalValue(roomSettings.requireApproval)
     }
   }, [showSettings, roomSettings])
 
@@ -330,7 +327,6 @@ export function RoomInfoPanel({
         roomId,
         password: trimmedPwd,
         maxViewers: maxViewersValue,
-        requireApproval: requireApprovalValue,
       },
       (response: { success: boolean; message?: string }) => {
         setSavingSettings(false)
@@ -338,6 +334,22 @@ export function RoomInfoPanel({
           message.success('房间设置已保存')
         } else {
           message.error(response.message || '保存失败')
+        }
+      }
+    )
+  }
+
+  const handleToggleRequireApproval = () => {
+    if (!socket || !isHost) return
+    const next = !roomSettings.requireApproval
+    socket.emit(
+      'update-room-settings',
+      { roomId, requireApproval: next },
+      (response: { success: boolean; message?: string }) => {
+        if (response.success) {
+          message.success(next ? '已开启房主审批' : '已关闭房主审批')
+        } else {
+          message.error(response.message || '操作失败')
         }
       }
     )
@@ -362,10 +374,7 @@ export function RoomInfoPanel({
     return (
       <div
         key={viewer.socketId}
-        className="flex items-center gap-2 rounded-lg px-3 py-2"
-        style={{
-          backgroundColor: 'var(--md-sys-color-surface-container-high)',
-        }}
+        className="glass flex items-center gap-2 rounded-lg px-3 py-2"
       >
         <MessageSquare
           className="h-4 w-4 shrink-0"
@@ -445,13 +454,12 @@ export function RoomInfoPanel({
           <div
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
             style={{
-              background:
-                'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-tertiary) 18%, transparent))',
+              backgroundColor: 'var(--md-sys-color-primary-container)',
             }}
           >
             <Settings
               className="h-4 w-4"
-              style={{ color: 'var(--md-sys-color-primary)' }}
+              style={{ color: 'var(--md-sys-color-on-primary-container)' }}
             />
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
@@ -470,7 +478,10 @@ export function RoomInfoPanel({
                     : 'none',
                 }}
               />
-              <Text type="secondary" className="text-[10px] uppercase tracking-wide">
+              <Text
+                type="secondary"
+                className="text-[10px] uppercase tracking-wide"
+              >
                 {connected ? '已连接' : '未连接'}
               </Text>
             </div>
@@ -494,7 +505,10 @@ export function RoomInfoPanel({
         <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 py-3">
           {/* 房间名称 */}
           <div className="flex flex-col gap-1">
-            <Text type="secondary" className="text-[10px] uppercase tracking-wide">
+            <Text
+              type="secondary"
+              className="text-[10px] uppercase tracking-wide"
+            >
               房间名称
             </Text>
             {isEditingName ? (
@@ -557,7 +571,10 @@ export function RoomInfoPanel({
 
           {/* 房间 ID */}
           <div className="flex flex-col gap-1">
-            <Text type="secondary" className="text-[10px] uppercase tracking-wide">
+            <Text
+              type="secondary"
+              className="text-[10px] uppercase tracking-wide"
+            >
               房间 ID
             </Text>
             <button
@@ -621,6 +638,17 @@ export function RoomInfoPanel({
                 {autoApproveRequests ? '自动通过：开' : '自动通过：关'}
               </Button>
             )}
+            {isHost && (
+              <Button
+                variant={roomSettings.requireApproval ? 'primary' : 'secondary'}
+                size="sm"
+                icon={<Shield className="h-3.5 w-3.5" />}
+                onClick={handleToggleRequireApproval}
+                title="开启后，观众加入需房主审批"
+              >
+                {roomSettings.requireApproval ? '需要审批：开' : '需要审批：关'}
+              </Button>
+            )}
           </div>
 
           {/* 房主端在线观众列表 */}
@@ -631,7 +659,10 @@ export function RoomInfoPanel({
                   className="h-3.5 w-3.5"
                   style={{ color: 'var(--md-sys-color-primary)' }}
                 />
-                <Text type="secondary" className="text-[10px] uppercase tracking-wide">
+                <Text
+                  type="secondary"
+                  className="text-[10px] uppercase tracking-wide"
+                >
                   在线观众（{viewers.length}）
                 </Text>
               </div>
@@ -639,8 +670,7 @@ export function RoomInfoPanel({
                 <div
                   className="flex items-center justify-center rounded-[var(--md-sys-shape-corner)] py-3"
                   style={{
-                    backgroundColor:
-                      'var(--md-sys-color-surface-container-high)',
+                    backgroundColor: 'var(--glass-bg)',
                   }}
                 >
                   <Text type="secondary" className="text-xs">
@@ -654,8 +684,7 @@ export function RoomInfoPanel({
                       key={viewer.socketId}
                       className="flex items-center gap-1.5 rounded-[var(--md-sys-shape-corner)] px-2 py-1.5 transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
                       style={{
-                        backgroundColor:
-                          'var(--md-sys-color-surface-container-high)',
+                        backgroundColor: 'var(--glass-bg)',
                       }}
                     >
                       <MessageSquare
@@ -719,13 +748,7 @@ export function RoomInfoPanel({
           {settingsTab === 'info' && (
             <div className="flex flex-col gap-3">
               {/* 房间密码 */}
-              <div
-                className="rounded-[var(--md-sys-shape-corner)] border p-3"
-                style={{
-                  backgroundColor: 'var(--md-sys-color-surface-container)',
-                  borderColor: 'var(--md-sys-color-outline-variant)',
-                }}
-              >
+              <div className="glass rounded-[var(--md-sys-shape-corner)] p-3">
                 <div className="flex items-center gap-2.5">
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
@@ -764,13 +787,7 @@ export function RoomInfoPanel({
               </div>
 
               {/* 观众上限 */}
-              <div
-                className="rounded-[var(--md-sys-shape-corner)] border p-3"
-                style={{
-                  backgroundColor: 'var(--md-sys-color-surface-container)',
-                  borderColor: 'var(--md-sys-color-outline-variant)',
-                }}
-              >
+              <div className="glass rounded-[var(--md-sys-shape-corner)] p-3">
                 <div className="flex items-center gap-2.5">
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
@@ -809,48 +826,6 @@ export function RoomInfoPanel({
                 </div>
               </div>
 
-              {/* 审批开关 */}
-              <div
-                className="flex items-center justify-between rounded-[var(--md-sys-shape-corner)] border p-3"
-                style={{
-                  backgroundColor: 'var(--md-sys-color-surface-container)',
-                  borderColor: 'var(--md-sys-color-outline-variant)',
-                }}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
-                    style={{
-                      background:
-                        'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-secondary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent))',
-                    }}
-                  >
-                    <Shield
-                      className="h-4 w-4"
-                      style={{ color: 'var(--md-sys-color-secondary)' }}
-                    />
-                  </div>
-                  <div className="flex min-w-0 flex-col">
-                    <Text className="text-sm font-medium">需要房主审批</Text>
-                    <Text
-                      type="secondary"
-                      className="text-[10px] uppercase tracking-wide"
-                    >
-                      APPROVAL REQUIRED
-                    </Text>
-                  </div>
-                </div>
-                <Switch
-                  checked={requireApprovalValue}
-                  onChange={(e) =>
-                    isHost &&
-                    !savingSettings &&
-                    setRequireApprovalValue(e.target.checked)
-                  }
-                  disabled={!isHost || savingSettings}
-                />
-              </div>
-
               {/* 保存按钮 */}
               {isHost && (
                 <Button
@@ -884,8 +859,7 @@ export function RoomInfoPanel({
                 <div
                   className="flex h-32 items-center justify-center rounded-[var(--md-sys-shape-corner)] border"
                   style={{
-                    backgroundColor:
-                      'var(--md-sys-color-surface-container-high)',
+                    backgroundColor: 'var(--glass-bg)',
                     borderColor: 'var(--md-sys-color-outline-variant)',
                   }}
                 >
@@ -895,9 +869,7 @@ export function RoomInfoPanel({
                 </div>
               ) : (
                 <div className="flex flex-col gap-1.5">
-                  {viewers.map((viewer) =>
-                    renderViewerItem(viewer, true)
-                  )}
+                  {viewers.map((viewer) => renderViewerItem(viewer, true))}
                 </div>
               )}
             </div>
@@ -907,13 +879,7 @@ export function RoomInfoPanel({
           {settingsTab === 'permissions' && (
             <div className="flex flex-col gap-3">
               {/* 房主 */}
-              <div
-                className="rounded-[var(--md-sys-shape-corner)] border p-3"
-                style={{
-                  backgroundColor: 'var(--md-sys-color-surface-container)',
-                  borderColor: 'var(--md-sys-color-outline-variant)',
-                }}
-              >
+              <div className="glass rounded-[var(--md-sys-shape-corner)] p-3">
                 <div className="flex items-center gap-2.5">
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
@@ -947,13 +913,7 @@ export function RoomInfoPanel({
               </div>
 
               {/* 观众 */}
-              <div
-                className="rounded-[var(--md-sys-shape-corner)] border p-3"
-                style={{
-                  backgroundColor: 'var(--md-sys-color-surface-container)',
-                  borderColor: 'var(--md-sys-color-outline-variant)',
-                }}
-              >
+              <div className="glass rounded-[var(--md-sys-shape-corner)] p-3">
                 <div className="flex items-center gap-2.5">
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
@@ -986,13 +946,7 @@ export function RoomInfoPanel({
               </div>
 
               {/* 角色权限层级 */}
-              <div
-                className="rounded-[var(--md-sys-shape-corner)] border p-3"
-                style={{
-                  backgroundColor: 'var(--md-sys-color-surface-container)',
-                  borderColor: 'var(--md-sys-color-outline-variant)',
-                }}
-              >
+              <div className="glass rounded-[var(--md-sys-shape-corner)] p-3">
                 <div className="flex items-center gap-2.5">
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
@@ -1025,9 +979,7 @@ export function RoomInfoPanel({
                   </div>
                   <div className="flex items-center gap-2 text-[11px]">
                     <RoleBadge role="admin" />
-                    <Text type="secondary">
-                      可创建房间、管理自己创建的房间
-                    </Text>
+                    <Text type="secondary">可创建房间、管理自己创建的房间</Text>
                   </div>
                   <div className="flex items-center gap-2 text-[11px]">
                     <RoleBadge role="user" />

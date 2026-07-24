@@ -115,45 +115,38 @@ video {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: color-mix(
-    in srgb,
-    var(--md-sys-color-primary) 35%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--md-sys-color-primary) 35%, transparent);
 }
 
-/* 玻璃拟态工具类 */
+/* 玻璃拟态工具类：模糊度统一由 ThemeProvider 设置的 CSS 变量控制，
+   不再在组件中自行 calc，确保所有卡片的模糊度跟随主题设置自由调节 */
 @layer components {
   .glass {
-    background: rgba(
-      var(--md-sys-color-surface-container-rgb),
-      var(--glass-strength)
-    );
+    background-color: var(--glass-bg);
     backdrop-filter: blur(var(--glass-blur));
     -webkit-backdrop-filter: blur(var(--glass-blur));
     border: 1px solid var(--glass-border);
   }
 
   .glass-strong {
-    background: rgba(
-      var(--md-sys-color-surface-container-rgb),
-      var(--glass-strong-strength)
-    );
-    backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
+    background-color: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur-strong));
+    -webkit-backdrop-filter: blur(var(--glass-blur-strong));
     border: 1px solid var(--glass-border);
   }
 
   .glass-card {
-    background: rgba(
-      var(--md-sys-color-surface-container-rgb),
-      var(--glass-strength)
-    );
+    background-color: var(--glass-bg);
     backdrop-filter: blur(var(--glass-blur));
     -webkit-backdrop-filter: blur(var(--glass-blur));
     border: 1px solid var(--glass-border);
     border-radius: var(--md-sys-shape-corner);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  }
+
+  /* 玻璃背景色（无模糊）：用于需要与 glass 卡片视觉层次一致但不需要 backdrop-filter 的内部元素 */
+  .glass-bg {
+    background-color: var(--glass-bg);
   }
 }
 
@@ -293,8 +286,7 @@ video {
   0%,
   100% {
     box-shadow:
-      0 0 0 0
-        color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent),
+      0 0 0 0 color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent),
       0 4px 12px -4px
         color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
   }
@@ -352,9 +344,8 @@ video {
 
 .zen-btn:hover {
   transform: translateY(-1px);
-  box-shadow:
-    0 4px 14px -4px
-      color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
+  box-shadow: 0 4px 14px -4px
+    color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
 }
 
 .zen-btn:active {
@@ -1043,9 +1034,8 @@ video {
 
 .zen-avatar-hover:hover {
   transform: scale(1.06);
-  box-shadow:
-    0 4px 12px -3px
-      color-mix(in srgb, var(--md-sys-color-primary) 26%, transparent);
+  box-shadow: 0 4px 12px -3px
+    color-mix(in srgb, var(--md-sys-color-primary) 26%, transparent);
 }
 
 /* ---------- 3D 倾斜工具类（配合 useTilt hook 使用） ---------- */

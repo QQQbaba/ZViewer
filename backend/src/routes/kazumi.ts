@@ -12,7 +12,6 @@
  */
 
 import { Router, Response } from 'express';
-import { Readable } from 'node:stream';
 import {
   authenticateToken,
   AuthenticatedRequest,
@@ -22,99 +21,34 @@ import {
   getProvider,
   normalizeEpisode,
 } from '../services/kazumi';
+import { proxyHttpUpstream } from '../services/proxy';
 
 const router = Router();
 
 router.use(authenticateToken);
 
-const DEFAULT_PROXY_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
 // --- 媒体代理 ---
 
 router.get('/proxy', async (req: AuthenticatedRequest, res: Response) => {
   const url = req.query.url;
-  const referer = req.query.referer;
-  const userAgent = req.query.userAgent;
-  const origin = req.query.origin;
-  const cookie = req.query.cookie;
-
   if (typeof url !== 'string' || !url.trim()) {
     res.status(400).json({ success: false, message: '缺少 url 参数' });
     return;
   }
 
-  try {
-    const range = req.headers.range;
-    const upstreamHeaders: Record<string, string> = {
-      'User-Agent':
-        typeof userAgent === 'string' && userAgent.trim()
-          ? userAgent
-          : DEFAULT_PROXY_UA,
-      Accept: '*/*',
-    };
-    if (typeof referer === 'string' && referer.trim()) {
-      upstreamHeaders.Referer = referer;
-    }
-    if (typeof origin === 'string' && origin.trim()) {
-      upstreamHeaders.Origin = origin;
-    }
-    if (typeof cookie === 'string' && cookie.trim()) {
-      upstreamHeaders.Cookie = cookie;
-    }
-    if (range) {
-      upstreamHeaders.Range = range;
-    }
-
-    const upstream = await fetch(url, { headers: upstreamHeaders });
-
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Authorization, Content-Type, Range',
-    );
-    res.setHeader(
-      'Access-Control-Expose-Headers',
-      'Content-Range, Accept-Ranges, Content-Length',
-    );
-
-    if (!upstream.ok) {
-      res.status(upstream.status);
-      res.end();
-      return;
-    }
-
-    const contentType = upstream.headers.get('content-type');
-    res.setHeader('Content-Type', contentType || 'application/octet-stream');
-
-    const contentLength = upstream.headers.get('content-length');
-    if (contentLength) {
-      res.setHeader('Content-Length', contentLength);
-    }
-    const acceptRanges = upstream.headers.get('accept-ranges');
-    if (acceptRanges) {
-      res.setHeader('Accept-Ranges', acceptRanges);
-    }
-    const contentRange = upstream.headers.get('content-range');
-    if (contentRange) {
-      res.setHeader('Content-Range', contentRange);
-    }
-
-    if (upstream.body) {
-      Readable.fromWeb(
-        upstream.body as unknown as import('node:stream/web').ReadableStream,
-      ).pipe(res);
-    } else {
-      res.status(204).end();
-    }
-  } catch (err) {
-    console.error('[kazumi] proxy error:', err);
-    if (!res.headersSent) {
-      res.status(502).json({ success: false, message: '代理媒体失败' });
-    } else {
-      res.end();
-    }
-  }
+  const q = req.query;
+  await proxyHttpUpstream(req, res, {
+    url: url.trim(),
+    headers: {
+      referer: typeof q.referer === 'string' ? q.referer : undefined,
+      origin: typeof q.origin === 'string' ? q.origin : undefined,
+      userAgent: typeof q.userAgent === 'string' ? q.userAgent : undefined,
+      cookie: typeof q.cookie === 'string' ? q.cookie : undefined,
+    },
+    cors: 'wildcard',
+    logTag: 'kazumi',
+    errorMessage: '代理媒体失败',
+  });
 });
 
 // --- 列出数据源 ---

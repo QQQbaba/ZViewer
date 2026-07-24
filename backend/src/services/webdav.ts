@@ -283,12 +283,46 @@ function parseRangeHeader(rangeHeader: string, fileSize: number): { start: numbe
   return { start, end };
 }
 
+// ── 文件 stat 缓存 ─────────────────────────────────────
+// 视频播放/seek 期间会产生大量 Range 请求，每次都 PROPFIND 取 fileSize
+// 会多一次上游往返（高延迟 WebDAV 下显著拖慢 seek 响应）。
+// 文件大小在播放期间不会变化，短 TTL 缓存即可；文件被替换时最多 30s 后自愈。
+const statCache = new Map<string, { info: WebDAVFileInfo; cachedAt: number }>();
+const STAT_CACHE_TTL_MS = 30 * 1000; // 30 秒
+const STAT_CACHE_MAX_ENTRIES = 200;
+
+function statCacheKey(params: WebDAVConnectionParams): string {
+  return `${params.serverUrl}|${params.username || ''}|${params.path}`;
+}
+
+/** statWebDAVFile 的缓存版本：Range 流请求专用，减少 seek 时的上游往返。 */
+export async function statWebDAVFileCached(
+  params: WebDAVConnectionParams,
+): Promise<WebDAVFileInfo> {
+  const key = statCacheKey(params);
+  const now = Date.now();
+  const cached = statCache.get(key);
+  if (cached && now - cached.cachedAt < STAT_CACHE_TTL_MS) {
+    return cached.info;
+  }
+  const info = await statWebDAVFile(params);
+  // 简单容量控制：超限且正好撞上过期项时顺手清理
+  if (statCache.size >= STAT_CACHE_MAX_ENTRIES) {
+    for (const [k, v] of statCache) {
+      if (now - v.cachedAt >= STAT_CACHE_TTL_MS) statCache.delete(k);
+    }
+    if (statCache.size >= STAT_CACHE_MAX_ENTRIES) statCache.clear();
+  }
+  statCache.set(key, { info, cachedAt: now });
+  return info;
+}
+
 // 创建带 Range 的 WebDAV 读取流；未提供 rangeHeader 时返回完整流
 export async function createWebDAVReadStreamWithRange(
   params: WebDAVConnectionParams,
   rangeHeader?: string,
 ): Promise<{ stream: Readable; fileSize: number; start: number; end: number }> {
-  const info = await statWebDAVFile(params);
+  const info = await statWebDAVFileCached(params);
   const fileSize = info.size;
 
   if (!rangeHeader || !rangeHeader.trim()) {

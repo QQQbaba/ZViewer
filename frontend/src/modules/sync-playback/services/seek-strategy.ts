@@ -1,12 +1,12 @@
 /**
  * Seek 策略服务
  *
- * 提供观众端 seek 跟随与未缓冲区域检测的纯函数。
+ * 提供观众端 seek 跟随与缓冲检测的纯函数。
  *
  * - `getAdaptiveSeekThreshold`: 按播放倍速自适应的 seek 跟随阈值
  * - `shouldSeekToHost`: 判断观众是否需要 seek 到房主进度
  * - `isInBufferedRange`: 检查指定时间是否在 video 的缓冲范围内
- * - `isMseStream`: 判断当前源是否为 MSE 流（需要手动处理 seek 到未缓冲区域）
+ * - `isMseStream`: 判断当前源是否为 MSE 流
  */
 import type { WatchTogetherState } from '../types'
 import { SEEK_FOLLOW_THRESHOLD } from '../constants'
@@ -19,8 +19,6 @@ import { SEEK_FOLLOW_THRESHOLD } from '../constants'
  *   - 1x 倍速：0.5s
  *   - 2x 倍速：1.0s
  *   - 4x 倍速：2.0s
- *
- * @param playbackRate 当前播放倍速
  */
 export function getAdaptiveSeekThreshold(playbackRate: number): number {
   return Math.max(SEEK_FOLLOW_THRESHOLD, playbackRate * 0.5)
@@ -28,12 +26,6 @@ export function getAdaptiveSeekThreshold(playbackRate: number): number {
 
 /**
  * 判断观众是否需要 seek 到房主进度。
- *
- * 当本地进度与房主进度差距超过自适应阈值时返回 true。
- *
- * @param localTime 观众本地 video.currentTime
- * @param hostTime 房主广播的 currentTime
- * @param playbackRate 当前播放倍速（用于自适应阈值）
  */
 export function shouldSeekToHost(
   localTime: number,
@@ -48,11 +40,8 @@ export function shouldSeekToHost(
  * 检查指定时间是否在 video 元素的缓冲范围内。
  *
  * 用于判断 seek 目标位置是否已有数据可播放：
- * - true：浏览器可直接 seek，无需重新加载
- * - false：需要重新创建 MSE 流（seek 到未缓冲区域）
- *
- * @param video video 元素
- * @param time 目标时间（秒）
+ * - true：浏览器可直接 seek，无需 MSE seek
+ * - false：需要调用 MsePlayer.seekTo 重新加载
  */
 export function isInBufferedRange(
   video: HTMLVideoElement,
@@ -67,139 +56,43 @@ export function isInBufferedRange(
 }
 
 /**
- * 判断 seek 到未缓冲位置时是否需要重新加载 MSE 流。
+ * 判断当前源是否为 MSE 流。
  *
- * MSE 流的 SourceBuffer 被 pruneSourceBuffer 清理后，已播放位置的数据会被移除。
- * seek 到这些位置时浏览器无法恢复，必须重新创建 MSE 流（reload）。
- *
- * 但 seek 到**未来未缓冲区域**（buffered.end 之后）时，MSE 的 streamToSourceBuffer
- * 会基于新的 video.currentTime 继续下载，浏览器会自然等待缓冲后播放，
- * 通常几秒内即可恢复，**不需要 reload**。
- *
- * 旧实现只要 !isInBufferedRange 就触发 reload，导致 seek 到未来未缓冲区域时
- * 也重置 source 从头下载，等待数十秒。此函数修复该问题。
- *
- * @param video video 元素
- * @param time 目标时间（秒）
- * @returns true 表示需要 reload（过去已清理区域或无缓冲数据）
- */
-export function needsMseReloadForSeek(
-  video: HTMLVideoElement,
-  time: number
-): boolean {
-  // 无缓冲数据：需要 reload
-  if (video.buffered.length === 0) return true
-
-  // 目标在缓冲范围内：不需要
-  if (isInBufferedRange(video, time)) return false
-
-  const bufferedStart = video.buffered.start(0)
-  // 目标在第一个缓冲区间之前（过去已清理区域）：需要 reload
-  if (time < bufferedStart) return true
-
-  // 目标在最后一个缓冲区间之后（未来未缓冲区域）：
-  // MSE 会基于新 currentTime 继续下载，浏览器自然等待，不需要 reload
-  return false
-}
-
-/**
- * 判断当前源是否为 MSE 流（需要手动处理 seek 到未缓冲区域）。
- *
- * MSE 流（DASH / 含 audioUrl）的 SourceBuffer 会被 pruneSourceBuffer 清理，
- * seek 到已清理位置时需要重新创建流。普通 mp4 直链由浏览器原生处理。
- *
- * @param state 当前播放状态
+ * MSE 流（DASH / 含 audioUrl）的 seek 需要调用 MsePlayer.seekTo，
+ * 普通mp4 直链由浏览器原生处理。
  */
 export function isMseStream(state: WatchTogetherState): boolean {
   return state.format === 'dash' || !!state.audioUrl
 }
 
 /**
- * 等待指定时间被缓冲（用于 seek 到未缓冲区域后等待数据下载）。
+ * 向前跳转的缓冲容差（秒）。
  *
- * 轮询检查 video.buffered，目标时间进入缓冲范围后 resolve。
- * 超时后强制 resolve（可能下载失败，避免永久卡死）。
- *
- * **修复**：旧实现超时后 checkBuffered 的递归 setTimeout 未被清理，
- * 会永久在后台轮询。新实现在 resolve 前清理所有未触发的 setTimeout。
- *
- * @param video video 元素
- * @param targetTime 目标时间（秒）
- * @param timeoutMs 超时时间（毫秒，默认 30s）
- * @param pollIntervalMs 轮询间隔（毫秒，默认 200ms）
+ * 目标位置紧贴活动缓冲边缘（下载流正在向前延伸的边缘）时，
+ * 走普通 seek 让顺序下载自然补上缺口，避免全量 MSE 重载的
+ * 清理 + init 重建开销（小范围 overshoot 场景下比重载更快、更顺滑）。
  */
-export function waitForBuffered(
-  video: HTMLVideoElement,
-  targetTime: number,
-  timeoutMs = 30000,
-  pollIntervalMs = 200
-): Promise<void> {
-  return new Promise<void>((resolve) => {
-    let resolved = false
-    let pollTimer: ReturnType<typeof setTimeout> | null = null
-    let timeoutTimer: ReturnType<typeof setTimeout> | null = null
-
-    const finish = () => {
-      if (resolved) return
-      resolved = true
-      if (pollTimer) clearTimeout(pollTimer)
-      if (timeoutTimer) clearTimeout(timeoutTimer)
-      resolve()
-    }
-
-    const checkBuffered = () => {
-      if (resolved) return
-      if (isInBufferedRange(video, targetTime)) {
-        finish()
-        return
-      }
-      pollTimer = setTimeout(checkBuffered, pollIntervalMs)
-    }
-    checkBuffered()
-
-    // 超时保护：触发 finish，清理 pollTimer
-    timeoutTimer = setTimeout(finish, timeoutMs)
-  })
-}
+export const FORWARD_BUFFER_TOLERANCE_SEC = 10
 
 /**
- * 在 video.buffered 范围内找到最接近 targetTime 的位置。
+ * 计算目标时间距离"活动缓冲边缘"的缺口（秒）。
  *
- * 用于 seek 到未缓冲区域超时后的降级处理：
- * 若目标位置未能缓冲，跳到最近的已缓冲位置，而不是回到开头。
+ * 活动缓冲边缘 = 最后一个缓冲区间的末尾（MSE 下载流持续从该位置向前延伸）。
+ * - 目标在任意缓冲区间内 → 返回 null（调用方按普通 seek 处理）
+ * - 目标在活动边缘之后 → 返回缺口大小（正数）
+ * - 目标在活动边缘之前（回退）或无任何缓冲 → 返回 null
  *
- * - 若 targetTime 在某个缓冲区间内，返回 targetTime
- * - 若 targetTime 在所有缓冲区间之前，返回第一个区间的 start
- * - 若 targetTime 在所有缓冲区间之后，返回最后一个区间的 end
- * - 若无缓冲数据，返回 -1
- *
- * @param video video 元素
- * @param targetTime 目标时间（秒）
+ * 缺口 ≤ FORWARD_BUFFER_TOLERANCE_SEC 时，普通 seek 等下载补上即可；
+ * 缺口过大时必须走 MSE Range seek 直接定位到目标点，
+ * 否则要干等下载穿过整个缺口（跳转等待过长的根因）。
  */
-export function findNearestBufferedTime(
+export function getGapFromLiveEdge(
   video: HTMLVideoElement,
-  targetTime: number
-): number {
-  if (!video.buffered.length) return -1
-
-  for (let i = 0; i < video.buffered.length; i++) {
-    const start = video.buffered.start(i)
-    const end = video.buffered.end(i)
-    if (targetTime < start) {
-      // targetTime 在此区间之前
-      if (i === 0) {
-        // 第一个区间之前，返回第一个区间的 start
-        return start
-      }
-      // 否则在前一个区间和此区间之间，返回前一个区间的 end（更近）
-      return video.buffered.end(i - 1)
-    }
-    if (targetTime >= start && targetTime <= end) {
-      // targetTime 在此区间内
-      return targetTime
-    }
-  }
-
-  // targetTime 在所有区间之后
-  return video.buffered.end(video.buffered.length - 1)
+  time: number
+): number | null {
+  if (isInBufferedRange(video, time)) return null
+  if (video.buffered.length === 0) return null
+  const liveEnd = video.buffered.end(video.buffered.length - 1)
+  const gap = time - liveEnd
+  return gap > 0 ? gap : null
 }

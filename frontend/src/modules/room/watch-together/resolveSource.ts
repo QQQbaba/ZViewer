@@ -16,9 +16,6 @@ export type {
 export {
   getBilibiliParseOptions,
   setBilibiliParseOptions,
-  codecToFnval,
-  BILIBILI_CDN_OPTIONS,
-  type BilibiliCdnOption,
 } from '@/modules/bilibili/parseOptions'
 // Bilibili API 函数
 export {
@@ -287,15 +284,9 @@ export function isBilibiliImageUrl(url: string): boolean {
   if (!url) return false
   try {
     const parsed = new URL(url)
-    return [
-      'hdslb.com',
-      'bilivideo.com',
-      'biliimg.com',
-      'bilibili.com',
-    ].some(
+    return ['hdslb.com', 'bilivideo.com', 'biliimg.com', 'bilibili.com'].some(
       (domain) =>
-        parsed.hostname === domain ||
-        parsed.hostname.endsWith(`.${domain}`)
+        parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`)
     )
   } catch {
     return false

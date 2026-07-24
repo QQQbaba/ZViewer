@@ -1,7 +1,6 @@
-import { Button } from '@/components/ui/Button'
-import { Space } from '@/components/ui/Space'
 import { Text, Paragraph } from '@/components/ui/Typography'
 import { Tag } from '@/components/ui/Tag'
+import { IconButton } from '@/components/VideoControls'
 import {
   Maximize,
   PictureInPicture,
@@ -10,6 +9,7 @@ import {
   Volume2,
   VolumeX,
   X,
+  RefreshCw,
 } from 'lucide-react'
 
 interface WatchControlsBarProps {
@@ -40,6 +40,8 @@ interface WatchControlsBarProps {
   onTogglePiP: () => void
   /** 切换批注工具栏 */
   onToggleAnnotation: () => void
+  /** 刷新连接 */
+  onRefresh: () => void
 }
 
 function getConnectionStateText(
@@ -92,77 +94,65 @@ export function WatchControlsBar({
   onFullscreen,
   onTogglePiP,
   onToggleAnnotation,
+  onRefresh,
 }: WatchControlsBarProps): JSX.Element {
   return (
-    <div
-      className="absolute bottom-0 left-0 right-0 z-20 p-3"
-      style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
-    >
-      <Space className="w-full" wrap>
-        {hasRemoteAudio && (
-          <Button
-            icon={
-              isMuted ? (
-                <VolumeX className="h-4 w-4" />
-              ) : (
-                <Volume2 className="h-4 w-4" />
-              )
-            }
-            onClick={onToggleMute}
-          >
-            {isMuted ? '取消静音' : '静音'}
-          </Button>
-        )}
-        <Button icon={<Maximize className="h-4 w-4" />} onClick={onFullscreen}>
-          全屏
-        </Button>
-        {isPiPSupported && (
-          <Button
-            icon={
-              isPictureInPicture ? (
-                <PictureInPicture2 className="h-4 w-4" />
-              ) : (
-                <PictureInPicture className="h-4 w-4" />
-              )
-            }
-            onClick={onTogglePiP}
-          >
-            {isPictureInPicture ? '退出画中画' : '画中画'}
-          </Button>
-        )}
-        <Button
-          variant={showAnnotationToolbar ? 'primary' : 'secondary'}
-          icon={
-            showAnnotationToolbar ? (
-              <X className="h-4 w-4" />
-            ) : (
-              <Pencil className="h-4 w-4" />
-            )
-          }
-          onClick={onToggleAnnotation}
-        >
-          {showAnnotationToolbar ? '关闭批注' : '批注'}
-        </Button>
-      </Space>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Tag color={connected ? 'success' : 'default'}>
-          {connected ? '已连接' : '未连接'}
-        </Tag>
-        <Tag color="primary">已加入</Tag>
-        <Tag color={getConnectionStateColor(connectionState)}>
-          {getConnectionStateText(connectionState)}
-        </Tag>
-        {hasRemoteStream && hasRemoteAudio && (
-          <Tag color="cyan">{isMuted ? '静音中' : '音频开启'}</Tag>
+    <div className="vc-container absolute bottom-0 left-0 right-0 z-20 p-2">
+      <div className="glass-strong rounded-xl px-2.5 py-2 shadow-lg">
+        <div className="flex flex-wrap items-center vc-gap">
+          {hasRemoteAudio && (
+            <IconButton
+              icon={isMuted ? <VolumeX /> : <Volume2 />}
+              label={isMuted ? '取消静音' : '静音'}
+              onClick={onToggleMute}
+            />
+          )}
+          <IconButton icon={<Maximize />} label="全屏" onClick={onFullscreen} />
+          {isPiPSupported && (
+            <IconButton
+              icon={
+                isPictureInPicture ? (
+                  <PictureInPicture2 />
+                ) : (
+                  <PictureInPicture />
+                )
+              }
+              label={isPictureInPicture ? '退出画中画' : '画中画'}
+              onClick={onTogglePiP}
+            />
+          )}
+          <IconButton
+            icon={showAnnotationToolbar ? <X /> : <Pencil />}
+            label={showAnnotationToolbar ? '关闭批注' : '批注'}
+            active={showAnnotationToolbar}
+            onClick={onToggleAnnotation}
+          />
+          <IconButton
+            icon={<RefreshCw />}
+            label="刷新连接"
+            onClick={onRefresh}
+          />
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Tag color={connected ? 'success' : 'default'}>
+            {connected ? '已连接' : '未连接'}
+          </Tag>
+          <Tag color="primary">已加入</Tag>
+          <Tag color={getConnectionStateColor(connectionState)}>
+            {getConnectionStateText(connectionState)}
+          </Tag>
+          {hasRemoteStream && hasRemoteAudio && (
+            <Tag color="cyan">{isMuted ? '静音中' : '音频开启'}</Tag>
+          )}
+        </div>
+        {videoResolution && (
+          <Paragraph className="m-0 mt-2">
+            <Text type="secondary">
+              分辨率：{videoResolution.width} x {videoResolution.height}
+            </Text>
+          </Paragraph>
         )}
       </div>
-      {videoResolution && (
-        <Paragraph className="m-0 mt-2">
-          <Text type="secondary">
-            分辨率：{videoResolution.width} x {videoResolution.height}
-          </Text>
-        </Paragraph>
-      )}
     </div>
   )
 }

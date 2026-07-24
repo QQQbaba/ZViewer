@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { message } from '@/components/ui/message'
 import { useSocket } from '@/hooks/useSocket'
@@ -51,6 +58,7 @@ interface StreamPushViewerProps {
   streamStatus: StreamStatus
   onStatusChange: (status: 'playing' | 'offline') => void
   chatPanel: ReactNode
+  roomInfoPanel: ReactNode
 }
 
 function StreamPushViewer({
@@ -58,6 +66,7 @@ function StreamPushViewer({
   streamStatus,
   onStatusChange,
   chatPanel,
+  roomInfoPanel,
 }: StreamPushViewerProps) {
   const [flvStats, setFlvStats] = useState<FlvStatistics | null>(null)
   const flvUrl = useMemo(() => buildFlvUrl(streamKey), [streamKey])
@@ -65,7 +74,8 @@ function StreamPushViewer({
   const handleStatusChange = useCallback(
     (status: 'connecting' | 'playing' | 'error' | 'stopped') => {
       if (status === 'playing') onStatusChange('playing')
-      else if (status === 'error' || status === 'stopped') onStatusChange('offline')
+      else if (status === 'error' || status === 'stopped')
+        onStatusChange('offline')
     },
     [onStatusChange]
   )
@@ -106,11 +116,9 @@ function StreamPushViewer({
     <CinemaLayout
       children={playerContent}
       statsPanel={
-        <StreamStatusPanel
-          streamStatus={streamStatus}
-          statistics={flvStats}
-        />
+        <StreamStatusPanel streamStatus={streamStatus} statistics={flvStats} />
       }
+      roomInfoPanel={roomInfoPanel}
       chatPanel={chatPanel}
     />
   )
@@ -227,6 +235,7 @@ function WatchPage() {
   const setStreamStatus = useRoomStore((state) => state.setStreamStatus)
   const { shareMethod } = useShareMethod(socket, roomId ?? '', false)
   const streamKey = useRoomStore((state) => state.streamKey)
+  const exitRoom = useRoomStore((state) => state.exitRoom)
 
   // stream-push 子模式：缓存 chatPanel 和 status 回调，避免 StreamPushViewer 因 props 变化重渲染
   const handleStreamStatusChange = useCallback(
@@ -237,10 +246,12 @@ function WatchPage() {
     [setStreamStatus]
   )
   const streamPushChatPanel = useMemo(
-    () => (
-      <CommentPanel socket={socket} roomId={roomId ?? ''} commentsOnly />
-    ),
+    () => <CommentPanel socket={socket} roomId={roomId ?? ''} commentsOnly />,
     [socket, roomId]
+  )
+  const streamPushRoomInfoPanel = useMemo(
+    () => <RoomInfoPanel roomId={roomId ?? ''} isHost={false} />,
+    [roomId]
   )
 
   // 3.7 订阅 sharer-ready 事件：房主开始共享时触发，观众重建 PC 并重发 viewer-ready
@@ -343,6 +354,12 @@ function WatchPage() {
 
   const handleToggleMute = () => setIsMuted((prev) => !prev)
 
+  const handleRefresh = useCallback(() => {
+    cleanupPc()
+    // 短暂延迟确保清理完成后再重建连接
+    setTimeout(() => createPc(), 0)
+  }, [cleanupPc, createPc])
+
   // 7.1 已加入且 roomMode === 'watch-together'：观众使用与房主统一的 RoomLayout
   if (joinStatus === 'approved' && roomMode === 'watch-together') {
     return (
@@ -379,6 +396,7 @@ function WatchPage() {
           streamStatus={streamStatus}
           onStatusChange={handleStreamStatusChange}
           chatPanel={streamPushChatPanel}
+          roomInfoPanel={streamPushRoomInfoPanel}
         />
       )
     }
@@ -429,6 +447,7 @@ function WatchPage() {
           onFullscreen={handleFullscreen}
           onTogglePiP={handleTogglePictureInPicture}
           onToggleAnnotation={() => setShowAnnotationToolbar((prev) => !prev)}
+          onRefresh={handleRefresh}
         />
       </div>
     )
@@ -437,6 +456,7 @@ function WatchPage() {
       <CinemaLayout
         children={playerContent}
         statsPanel={<ConnectionStatsPanel pc={pc} mode="server" />}
+        roomInfoPanel={<RoomInfoPanel roomId={roomId ?? ''} isHost={false} />}
         chatPanel={
           <CommentPanel socket={socket} roomId={roomId ?? ''} commentsOnly />
         }
@@ -466,7 +486,10 @@ function WatchPage() {
       initialRoomId={roomId ?? ''}
       joinStatus={joinStatus}
       onSubmit={handleJoin}
-      onBack={() => navigate('/')}
+      onBack={() => {
+        exitRoom()
+        navigate('/')
+      }}
       hideRoomId={fromList && listHasPassword}
       roomName={
         fromList && listHasPassword ? (listRoomName ?? undefined) : undefined
