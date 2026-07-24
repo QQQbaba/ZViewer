@@ -3,10 +3,8 @@ export const ICE_SERVERS: RTCIceServer[] = [
 ]
 
 export const FRAME_RATE_OPTIONS = [
+  { label: '15 fps', value: 15 },
   { label: '30 fps', value: 30 },
+  { label: '45 fps', value: 45 },
   { label: '60 fps', value: 60 },
-  { label: '90 fps', value: 90 },
-  { label: '120 fps', value: 120 },
-  { label: '144 fps', value: 144 },
-  { label: '240 fps', value: 240 },
 ]

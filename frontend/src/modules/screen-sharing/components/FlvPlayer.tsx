@@ -13,20 +13,24 @@ import { Spinner } from '@/components/ui/Spinner'
 import { IconButton } from '@/components/VideoControls'
 import { cn } from '@/lib/utils'
 
-/** flv.js 统计信息 */
+/** flv.js 统计信息
+ *
+ * 注意：flv.js 的 STATISTICS_INFO 事件只提供网络层统计，
+ * 不提供 videoDataRate/audioDataRate 等编码层信息。
+ * 帧率通过 decodedFrames 差值自行计算，
+ * 总码率近似为 speed（下载速度 KB/s）× 8。
+ */
 export interface FlvStatistics {
   /** 网络下载速度 (KB/s) */
   speed: number
-  /** 视频码率 (kbps) */
-  videoDataRate: number
-  /** 音频码率 (kbps) */
-  audioDataRate: number
-  /** 当前帧率 */
+  /** 当前近似总码率 (Kbps)，由 speed × 8 计算得出 */
+  totalDataRate: number
+  /** 当前帧率（fps），由 decodedFrames 差值 / 时间差计算） */
   fps: number
+  /** 已解码帧数 */
+  decodedFrames: number
   /** 丢帧数 */
-  droppedVideoFrames: number
-  /** 总帧数 */
-  totalVideoFrames: number
+  droppedFrames: number
 }
 
 interface FlvPlayerProps {
@@ -79,11 +83,14 @@ export function FlvPlayer({
   const onErrorRef = useRef(onError)
   const onStatusChangeRef = useRef(onStatusChange)
   const onStatisticsRef = useRef(onStatistics)
-  onErrorRef.current = onError
-  onStatusChangeRef.current = onStatusChange
-  onStatisticsRef.current = onStatistics
 
-  // 帧率计算：flv.js STATISTICS_INFO 不直接提供 fps，通过 decodedVideoFrames 差值计算
+  useEffect(() => {
+    onErrorRef.current = onError
+    onStatusChangeRef.current = onStatusChange
+    onStatisticsRef.current = onStatistics
+  }, [onError, onStatusChange, onStatistics])
+
+  // 帧率计算：flv.js STATISTICS_INFO 不直接提供 fps，通过 decodedFrames 差值计算
   const lastStatsTimeRef = useRef(0)
   const lastDecodedFramesRef = useRef(0)
 
@@ -164,10 +171,12 @@ export function FlvPlayer({
     })
 
     // 统计信息上报（flv.js 内部约每秒触发一次）
+    // flv.js STATISTICS_INFO 实际字段：speed(KB/s), decodedFrames, droppedFrames
     player.on(flvjs.Events.STATISTICS_INFO, (info: Record<string, unknown>) => {
       const now = performance.now()
-      const decodedFrames = (info.decodedVideoFrames as number) ?? 0
-      const droppedFrames = (info.droppedVideoFrames as number) ?? 0
+      const decodedFrames = (info.decodedFrames as number) ?? 0
+      const droppedFrames = (info.droppedFrames as number) ?? 0
+      const speed = (info.speed as number) ?? 0
 
       // 通过两次统计的帧数差和时间差计算实际帧率
       let fps = 0
@@ -182,12 +191,11 @@ export function FlvPlayer({
       lastDecodedFramesRef.current = decodedFrames
 
       onStatisticsRef.current?.({
-        speed: Math.round((info.speed as number) ?? 0),
-        videoDataRate: Math.round((info.videoDataRate as number) ?? 0),
-        audioDataRate: Math.round((info.audioDataRate as number) ?? 0),
+        speed: Math.round(speed),
+        totalDataRate: Math.round(speed * 8),
         fps,
-        droppedVideoFrames: droppedFrames,
-        totalVideoFrames: decodedFrames + droppedFrames,
+        decodedFrames,
+        droppedFrames,
       })
     })
 

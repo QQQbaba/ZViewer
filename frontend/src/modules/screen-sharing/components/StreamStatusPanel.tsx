@@ -77,8 +77,10 @@ function getStatusIcon(status: StreamStatus) {
 
 /** 计算丢帧率百分比 */
 function calcDropRate(stats: FlvStatistics | null | undefined): string {
-  if (!stats || stats.totalVideoFrames === 0) return '0.0%'
-  return ((stats.droppedVideoFrames / stats.totalVideoFrames) * 100).toFixed(1) + '%'
+  if (!stats || stats.decodedFrames === 0) return '0.0%'
+  const total = stats.decodedFrames + stats.droppedFrames
+  if (total === 0) return '0.0%'
+  return ((stats.droppedFrames / total) * 100).toFixed(1) + '%'
 }
 
 /** 统计卡片 */
@@ -102,9 +104,7 @@ function StatCard({
         <div className="text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
           {label}
         </div>
-        <div className="truncate font-mono text-sm font-semibold">
-          {value}
-        </div>
+        <div className="truncate font-mono text-sm font-semibold">{value}</div>
         {sub && (
           <div className="truncate text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
             {sub}
@@ -159,12 +159,8 @@ export const StreamStatusPanel = memo(function StreamStatusPanel({
             />
           }
           label="总码率"
-          value={hasStats ? `${statistics!.videoDataRate + statistics!.audioDataRate} kbps` : '--'}
-          sub={
-            hasStats
-              ? `视频 ${statistics!.videoDataRate} / 音频 ${statistics!.audioDataRate}`
-              : '等待推流'
-          }
+          value={hasStats ? `${statistics!.totalDataRate} Kbps` : '--'}
+          sub={hasStats ? `≈ ${statistics!.speed} KB/s` : '等待推流'}
         />
         <StatCard
           icon={
@@ -175,7 +171,7 @@ export const StreamStatusPanel = memo(function StreamStatusPanel({
           }
           label="帧率"
           value={hasStats ? `${statistics!.fps} fps` : '--'}
-          sub="实时帧率"
+          sub="实时解码帧率"
         />
         <StatCard
           icon={
@@ -193,9 +189,10 @@ export const StreamStatusPanel = memo(function StreamStatusPanel({
             <Activity
               className="h-4.5 w-4.5"
               style={{
-                color: hasStats && statistics!.droppedVideoFrames > 0
-                  ? 'var(--md-sys-color-error)'
-                  : 'var(--md-sys-color-primary)'
+                color:
+                  hasStats && statistics!.droppedFrames > 0
+                    ? 'var(--md-sys-color-error)'
+                    : 'var(--md-sys-color-primary)',
               }}
             />
           }
@@ -203,7 +200,7 @@ export const StreamStatusPanel = memo(function StreamStatusPanel({
           value={hasStats ? calcDropRate(statistics) : '--'}
           sub={
             hasStats
-              ? `${statistics!.droppedVideoFrames} / ${statistics!.totalVideoFrames} 帧`
+              ? `${statistics!.droppedFrames} / ${statistics!.decodedFrames + statistics!.droppedFrames} 帧`
               : '丢帧 / 总帧'
           }
         />

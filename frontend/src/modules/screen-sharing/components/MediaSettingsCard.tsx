@@ -33,50 +33,57 @@ export function MediaSettingsCard(props: MediaSettingsCardProps): JSX.Element {
   } = props
 
   return (
-    <Card className="w-full max-w-md min-w-[280px] max-h-full !overflow-y-auto text-left">
-      <Space direction="vertical" className="w-full" size="sm">
-        <Space align="center" size="sm">
-          <Settings2 className="h-4 w-4 text-[var(--md-sys-color-on-surface-variant)]" />
+    <Card className="w-full border-0 bg-transparent p-0 text-left shadow-none">
+      <Space direction="vertical" className="w-full" size="md">
+        <Space align="center" size="sm" className="mb-1">
+          <Settings2 className="h-4 w-4 text-[var(--md-sys-color-primary)]" />
           <Text className="font-medium">媒体设置</Text>
         </Space>
-        <div className="text-left">
-          <label className="mb-1.5 block text-sm font-medium text-[var(--md-sys-color-on-surface-variant)]">
-            帧率
-          </label>
-          <Select
-            options={FRAME_RATE_OPTIONS}
-            value={String(frameRate)}
-            onChange={(value) => onFrameRateChange(Number(value))}
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-[var(--md-sys-color-on-surface-variant)]">
+              帧率
+            </label>
+            <Select
+              options={FRAME_RATE_OPTIONS}
+              value={String(frameRate)}
+              onChange={(value) => onFrameRateChange(Number(value))}
+              disabled={isSharing}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-[var(--md-sys-color-on-surface-variant)]">
+              最大码率（Mbps）
+            </label>
+            <InputNumber
+              min={0.5}
+              max={50}
+              step={0.5}
+              value={maxBitrateMbps}
+              onChange={(value) =>
+                onMaxBitrateChange(value === undefined ? 8 : value)
+              }
+              disabled={isSharing}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Switch
+            label="共享系统音频"
+            checked={shareSystemAudio}
+            onChange={(e) => onShareSystemAudioChange(e.target.checked)}
+            disabled={isSharing}
+          />
+          <Switch
+            label="共享麦克风"
+            checked={shareMicrophone}
+            onChange={(e) => onShareMicrophoneChange(e.target.checked)}
             disabled={isSharing}
           />
         </div>
-        <div className="text-left">
-          <label className="mb-1.5 block text-sm font-medium text-[var(--md-sys-color-on-surface-variant)]">
-            最大码率（Mbps）
-          </label>
-          <InputNumber
-            min={0.5}
-            max={50}
-            step={0.5}
-            value={maxBitrateMbps}
-            onChange={(value) =>
-              onMaxBitrateChange(value === undefined ? 8 : value)
-            }
-            disabled={isSharing}
-          />
-        </div>
-        <Switch
-          label="共享系统音频"
-          checked={shareSystemAudio}
-          onChange={(e) => onShareSystemAudioChange(e.target.checked)}
-          disabled={isSharing}
-        />
-        <Switch
-          label="共享麦克风"
-          checked={shareMicrophone}
-          onChange={(e) => onShareMicrophoneChange(e.target.checked)}
-          disabled={isSharing}
-        />
+
         {isSharing && (
           <Paragraph type="secondary" className="m-0 text-xs">
             共享期间无法修改媒体设置，请先结束共享。

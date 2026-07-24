@@ -28,6 +28,8 @@ import type { PublishValidationResult } from './dto/stream-push.dto';
 class NmsService {
   private nmsInstance: NodeMediaServer | null = null;
   private nmsAvailable = false;
+  /** 当前活跃的推流会话 id -> roomId（用于 donePublish/postClose 时无需再查库即可广播） */
+  private activePublishers = new Map<string | number, string>();
 
   /** NMS 是否已成功启动 */
   isAvailable(): boolean {
@@ -120,18 +122,25 @@ class NmsService {
           return;
         }
         const roomId = result.roomId!;
+        // 记录活跃会话，确保后续 donePublish/postClose 即使数据库查询失败也能广播 offline
+        this.activePublishers.set(id, roomId);
         console.log(`[NMS] publish accepted room=${roomId}`);
         io.to(roomId).emit('stream-status', { roomId, status: 'live' });
       });
 
       this.nmsInstance.on('donePublish', async (id, streamPath, _args) => {
         console.log(`[NMS] donePublish id=${id} streamPath=${streamPath}`);
-        const result = await this.validatePublishStream(streamPath);
-        if (result.valid && result.roomId) {
-          io.to(result.roomId).emit('stream-status', {
-            roomId: result.roomId,
-            status: 'offline',
-          });
+        // 优先从活跃会话 Map 中查找 roomId，避免数据库查询失败导致 offline 广播遗漏
+        let roomId = this.activePublishers.get(id);
+        if (!roomId) {
+          const result = await this.validatePublishStream(streamPath);
+          if (result.valid && result.roomId) {
+            roomId = result.roomId;
+          }
+        }
+        if (roomId) {
+          this.activePublishers.delete(id);
+          io.to(roomId).emit('stream-status', { roomId, status: 'offline' });
         }
       });
 
@@ -139,12 +148,16 @@ class NmsService {
       // NMS 异常关闭连接（未触发 donePublish）时确保客户端收到 offline 通知
       this.nmsInstance.on('postClose', async (id, streamPath) => {
         console.log(`[NMS] postClose id=${id} streamPath=${streamPath}`);
-        const result = await this.validatePublishStream(streamPath);
-        if (result.valid && result.roomId) {
-          io.to(result.roomId).emit('stream-status', {
-            roomId: result.roomId,
-            status: 'offline',
-          });
+        let roomId = this.activePublishers.get(id);
+        if (!roomId) {
+          const result = await this.validatePublishStream(streamPath);
+          if (result.valid && result.roomId) {
+            roomId = result.roomId;
+          }
+        }
+        if (roomId) {
+          this.activePublishers.delete(id);
+          io.to(roomId).emit('stream-status', { roomId, status: 'offline' });
         }
       });
 

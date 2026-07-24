@@ -33,7 +33,6 @@ export function StreamPushPage({
 }: StreamPushPageProps) {
   const streamStatus = useRoomStore((state) => state.streamStatus)
   const streamKey = useRoomStore((state) => state.streamKey)
-  const setStreamStatus = useRoomStore((state) => state.setStreamStatus)
   const [downloading, setDownloading] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
 
@@ -153,19 +152,7 @@ export function StreamPushPage({
 
       {previewMode && (
         <Card className="aspect-video w-full min-h-[480px] overflow-hidden p-0">
-          <FlvPlayer
-            src={flvUrl}
-            muted
-            autoPlay
-            onStatusChange={(status) => {
-              // 兜底：当拉流预览实际播放时，同步推流状态为 live
-              if (status === 'playing') {
-                setStreamStatus('live')
-              } else if (status === 'error' || status === 'stopped') {
-                setStreamStatus('offline')
-              }
-            }}
-          />
+          <FlvPlayer src={flvUrl} muted autoPlay />
         </Card>
       )}
 

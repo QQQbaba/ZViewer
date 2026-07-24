@@ -274,6 +274,14 @@ npm run dev:frontend
 
 PID 写入 `.prod.pids.json`，日志写入 `backend-prod.log` 与 `frontend-prod.log`。
 
+#### IPv6 兼容
+
+一键启动脚本默认将前后端服务绑定到 `::`（IPv6 双栈），同时接受 IPv4 与 IPv6 连接：
+
+- **后端**：通过 `HOST=::` 环境变量绑定到 IPv6 双栈
+- **前端**：通过 `vite preview --host ::` 和 `vite.config.ts` 的 `preview.host: '::'` 绑定到 IPv6 双栈
+- **访问方式**：可通过 `http://<IPv4地址>:<端口>` 或 `http://<IPv6地址>:<端口>` 访问，兼容纯 IPv6 网络环境
+
 ### 云服务器部署
 
 #### 1. 准备服务器
