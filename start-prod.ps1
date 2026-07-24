@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 #Requires -Version 5.1
 
 <#
@@ -45,10 +45,17 @@ $backendDir = Join-Path $rootDir "backend"
 $frontendDir = Join-Path $rootDir "frontend"
 $pidsFile = Join-Path $rootDir ".prod.pids.json"
 $portsFile = Join-Path $rootDir ".prod.ports.json"
-$backendLog = Join-Path $rootDir "backend-prod.log"
-$backendErrLog = Join-Path $rootDir "backend-prod.err.log"
-$frontendLog = Join-Path $rootDir "frontend-prod.log"
-$frontendErrLog = Join-Path $rootDir "frontend-prod.err.log"
+
+# 运行时日志统一存放于根目录 log/ 文件夹
+$logDir = Join-Path $rootDir "log"
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+$backendLog = Join-Path $logDir "backend.log"
+$backendErrLog = Join-Path $logDir "backend.err.log"
+$frontendLog = Join-Path $logDir "frontend.log"
+$frontendErrLog = Join-Path $logDir "frontend.err.log"
+$supervisorLogPath = Join-Path $logDir "supervisor.log"
 
 # ============ 辅助函数 ============
 
@@ -67,6 +74,121 @@ function Test-CommandInstalled {
         throw "$Name 未安装或不在 PATH 中"
     }
     return $cmd
+}
+
+function Get-NetworkAddresses {
+    # 获取本机所有可对外访问的 IPv4 / IPv6 地址（排除回环、链路本地、虚拟接口）
+    # 返回 @{ IPv4 = @('1.2.3.4', ...); IPv6 = @('2001:db8::1', ...) }
+    $result = @{ IPv4 = @(); IPv6 = @() }
+    try {
+        # Get-NetIPAddress 在 Windows 8+ / Server 2012+ 可用
+        # 筛选 AddressState=Preferred（已生效地址），排除回环与链路本地
+        $addresses = Get-NetIPAddress -AddressState Preferred -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -ne '127.0.0.1' -and
+                $_.IPAddress -ne '::1' -and
+                -not $_.IPAddress.StartsWith('169.254.') -and
+                -not $_.IPAddress.StartsWith('fe80::')
+            }
+        foreach ($addr in $addresses) {
+            if ($addr.AddressFamily -eq 'IPv4') {
+                $result.IPv4 += $addr.IPAddress
+            } elseif ($addr.AddressFamily -eq 'IPv6') {
+                # 过滤临时 IPv6（隐私扩展）、Teredo、6to4 等可能不稳定的地址
+                # 保留全局单播地址（2000::/3）
+                if ($addr.IPAddress -match '^2[0-9a-fA-F]') {
+                    $result.IPv6 += $addr.IPAddress
+                }
+            }
+        }
+    } catch {
+        # 回退方案：使用 ipconfig 解析（兼容老版本 Windows）
+        try {
+            $ipconfigOutput = & ipconfig 2>$null | Out-String
+            if ($ipconfigOutput) {
+                $matches = [regex]::Matches($ipconfigOutput, 'IPv4 Address[.\s:]+([\d.]+)')
+                foreach ($m in $matches) { $result.IPv4 += $m.Groups[1].Value }
+                $matches6 = [regex]::Matches($ipconfigOutput, 'IPv6 Address[.\s:]+([0-9a-fA-F:]+)')
+                foreach ($m in $matches6) {
+                    if ($m.Groups[1].Value -match '^2[0-9a-fA-F]') {
+                        $result.IPv6 += $m.Groups[1].Value
+                    }
+                }
+            }
+        } catch {}
+    }
+    # 去重
+    $result.IPv4 = $result.IPv4 | Select-Object -Unique
+    $result.IPv6 = $result.IPv6 | Select-Object -Unique
+    return $result
+}
+
+function Format-AccessUrls {
+    # 格式化访问地址列表，IPv6 地址需用方括号包裹
+    # 参数：端口列表（如 @(3333, 4173)），返回需要打印的行数组
+    param([int[]]$Ports)
+    $lines = @()
+    $addrs = Get-NetworkAddresses
+
+    foreach ($port in $Ports) {
+        $lines += "  端口 $port ："
+        $lines += "    http://localhost:$port"
+        $lines += "    http://127.0.0.1:$port"
+        foreach ($ip in $addrs.IPv4) {
+            if ($ip -ne '127.0.0.1') {
+                $lines += "    http://${ip}:$port"
+            }
+        }
+        foreach ($ip in $addrs.IPv6) {
+            $lines += "    http://[${ip}]:$port"
+        }
+    }
+    return $lines
+}
+
+function Backup-OldLogs {
+    # 启动前备份上一轮日志到归档子目录，避免直接删除丢失历史记录
+    # 备份命名格式：backend.20260725-120000.log
+    $archivedCount = 0
+    foreach ($log in @($backendLog, $backendErrLog, $frontendLog, $frontendErrLog)) {
+        if (-not (Test-Path $log)) { continue }
+        try {
+            $stamp = (Get-Item $log).LastWriteTime.ToString('yyyyMMdd-HHmmss')
+            $base = [System.IO.Path]::GetFileNameWithoutExtension($log)
+            $ext = [System.IO.Path]::GetExtension($log)
+            $archiveName = "${base}.${stamp}${ext}"
+            $archivePath = Join-Path $script:logDir $archiveName
+            Move-Item -Path $log -Destination $archivePath -Force -ErrorAction Stop
+            $archivedCount++
+        } catch {
+            # 备份失败则直接删除，避免占用文件句柄导致重定向失败
+            Remove-Item $log -Force -ErrorAction SilentlyContinue
+        }
+    }
+    # supervisor.log 是追加模式，启动时也备份一份（不删除，supervisor 会重新创建）
+    if (Test-Path $supervisorLogPath) {
+        try {
+            $stamp = (Get-Item $supervisorLogPath).LastWriteTime.ToString('yyyyMMdd-HHmmss')
+            $archivePath = Join-Path $script:logDir "supervisor.${stamp}.log"
+            Move-Item -Path $supervisorLogPath -Destination $archivePath -Force -ErrorAction Stop
+        } catch {
+            Remove-Item $supervisorLogPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return $archivedCount
+}
+
+function Cleanup-OldArchives {
+    # 清理超过保留天数的归档日志，避免 log/ 目录无限增长
+    param([int]$KeepDays = 7)
+    $cutoff = (Get-Date).AddDays(-$KeepDays)
+    $archiveFiles = Get-ChildItem -Path $script:logDir -File -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match '\.\d{8}-\d{6}\.' -and $_.LastWriteTime -lt $cutoff
+    }
+    foreach ($file in $archiveFiles) {
+        Remove-Item $file.FullName -Force -ErrorAction SilentlyContinue
+    }
+    return $archiveFiles.Count
 }
 
 function Test-DepsInstalled {
@@ -472,11 +594,20 @@ function Invoke-Start {
     Write-Host "[5/5] 启动服务 ..."
     $env:PORT = "$Port"
     $env:NODE_ENV = "production"
+    # 绑定到 '::' 让后端同时监听 IPv4 与 IPv6（IPv6 双栈），兼容纯 IPv6 网络。
+    # Node.js 在大多数平台上 '::' 会同时接受 IPv4-mapped 连接，无需额外配置。
+    $env:HOST = "::"
     if ($Database) { $env:DATABASE_URL = $Database }
 
-    # 清空旧日志
-    foreach ($log in @($backendLog, $backendErrLog, $frontendLog, $frontendErrLog)) {
-        if (Test-Path $log) { Remove-Item $log -Force -ErrorAction SilentlyContinue }
+    # 备份上一轮日志到归档（带时间戳），并清理超过 7 天的历史归档
+    Write-Host "  归档上一轮日志 ..."
+    $archivedCount = Backup-OldLogs
+    if ($archivedCount -gt 0) {
+        Write-Host "  已归档 $archivedCount 个日志文件至 log/ 目录" -ForegroundColor DarkGray
+    }
+    $cleanedCount = Cleanup-OldArchives -KeepDays 7
+    if ($cleanedCount -gt 0) {
+        Write-Host "  已清理 $cleanedCount 个超过 7 天的历史归档" -ForegroundColor DarkGray
     }
 
     # supervisor 脚本：监控子进程，崩溃后自动重启
@@ -524,7 +655,8 @@ function Invoke-Start {
         '-NoProfile', '-ExecutionPolicy', 'Bypass',
         '-File', "`"$supervisorScript`"",
         '-Command', 'node',
-        '-CommandArgs', "`"$viteJs`" preview --port $FrontendPort --host",
+        # --host :: 让 Vite preview 绑定到 IPv6 双栈（同时接受 IPv4/IPv6 连接）
+        '-CommandArgs', "`"$viteJs`" preview --port $FrontendPort --host ::",
         '-WorkingDirectory', "`"$frontendDir`"",
         '-LogStdout', "`"$frontendLog`"",
         '-LogStderr', "`"$frontendErrLog`""
@@ -550,12 +682,33 @@ function Invoke-Start {
 
     Write-PidsFile -BackendPid $backendPid -FrontendPid $frontendPid -BackendPort $Port -FrontendPortNum $FrontendPort
 
+    # 获取 RTMP / HTTP-FLV 端口（用于端口放行提示）
+    $rtmpPort = if ($env:RTMP_PORT) { [int]$env:RTMP_PORT } else { 3334 }
+    $httpFlvPort = if ($env:HTTP_FLV_PORT) { [int]$env:HTTP_FLV_PORT } else { 3335 }
+
     Write-Title "启动完成"
-    Write-Host "  后端：http://localhost:$Port"
-    Write-Host "  前端：http://localhost:$FrontendPort"
+
+    Write-Host "  可访问地址：" -ForegroundColor Cyan
+    $accessLines = Format-AccessUrls -Ports @($FrontendPort)
+    foreach ($line in $accessLines) {
+        Write-Host $line
+    }
+    Write-Host ""
+    Write-Host "  提示：前端页面通过 Vite preview 提供，访问前端地址即可使用全部功能。" -ForegroundColor DarkGray
+    Write-Host "        后端 API 端口 $Port 通常由前端代理访问，无需直接暴露。" -ForegroundColor DarkGray
+    Write-Host ""
+
+    Write-Host "  需要放行的端口（防火墙 / 安全组）：" -ForegroundColor Cyan
+    Write-Host "    $FrontendPort  - 前端页面（必须放行，对外提供访问）" -ForegroundColor Yellow
+    Write-Host "    $Port          - 后端 API（默认由前端代理访问，如直连需放行）"
+    Write-Host "    $rtmpPort      - RTMP 推流端口（使用 OBS 推流时必须放行）"
+    Write-Host "    $httpFlvPort   - HTTP-FLV 拉流端口（未配置反向代理时需放行）"
+    Write-Host ""
+
     Write-Host "  PID 文件：$pidsFile"
-    Write-Host "  日志：$backendLog / $backendErrLog"
-    Write-Host "        $frontendLog / $frontendErrLog"
+    Write-Host "  日志目录：$logDir"
+    Write-Host "    实时日志：backend.log / backend.err.log / frontend.log / frontend.err.log / supervisor.log"
+    Write-Host "    历史归档：backend.YYYYMMDD-HHmmss.log 等（保留 7 天）"
     Write-Host ""
 }
 
@@ -749,6 +902,10 @@ function Show-Help {
     Write-Host "    2. 构建产物缺失或源代码已更新 -> 自动执行 npm run build"
     Write-Host "    3. 构建产物已是最新 -> 跳过构建，直接启动"
     Write-Host "  如需跳过自动构建（仅使用已有产物启动），请加 -SkipBuild"
+    Write-Host ""
+    Write-Host "IPv6 兼容："
+    Write-Host "  前后端服务默认绑定到 '::'（IPv6 双栈），同时接受 IPv4 与 IPv6 连接。"
+    Write-Host "  可通过 http://<IPv4> 或 http://<IPv6> 访问，兼容纯 IPv6 网络环境。"
     Write-Host ""
     Write-Host "端口优先级："
     Write-Host "  命令行参数 > .prod.ports.json 配置文件 > 默认值"

@@ -64,6 +64,10 @@ usage() {
     3. 构建产物已是最新 -> 跳过构建，直接启动
   如需跳过自动构建（仅使用已有产物启动），请加 --skip-build
 
+IPv6 兼容：
+  前后端服务默认绑定到 '::'（IPv6 双栈），同时接受 IPv4 与 IPv6 连接。
+  可通过 http://<IPv4> 或 http://<IPv6> 访问，兼容纯 IPv6 网络环境。
+
 端口优先级：
   命令行参数 > .prod.ports.json 配置文件 > 默认值
 
@@ -121,6 +125,64 @@ check_command() {
     echo "错误: $1 未安装或不在 PATH 中" >&2
     exit 1
   fi
+}
+
+# 获取本机所有可对外访问的 IPv4 / IPv6 地址（排除回环、链路本地）
+# 输出两行：第一行 IPv4 空格分隔，第二行 IPv6 空格分隔
+get_network_addresses() {
+  local ipv4_list=""
+  local ipv6_list=""
+
+  # 优先使用 `ip` 命令（Linux 现代发行版默认）
+  if command -v ip &> /dev/null; then
+    # IPv4：global 范围，排除回环
+    ipv4_list=$(ip -4 -o addr show scope global 2>/dev/null | \
+      awk '{print $4}' | cut -d'/' -f1 | tr '\n' ' ')
+    # IPv6：global 范围，排除链路本地（fe80::/10）和临时地址（优选稳定地址）
+    # 仅保留全局单播地址（2000::/3），过滤 Teredo/6to4 等不稳定地址
+    ipv6_list=$(ip -6 -o addr show scope global 2>/dev/null | \
+      awk '{print $4}' | cut -d'/' -f1 | \
+      grep -E '^2[0-9a-f]' | tr '\n' ' ')
+  # 回退方案：使用 ifconfig（macOS / 老 Linux）
+  elif command -v ifconfig &> /dev/null; then
+    ipv4_list=$(ifconfig 2>/dev/null | \
+      grep -oE 'inet [0-9.]+' | awk '{print $2}' | \
+      grep -v '^127\.' | tr '\n' ' ')
+    ipv6_list=$(ifconfig 2>/dev/null | \
+      grep -oE 'inet6 [0-9a-f:]+' | awk '{print $2}' | \
+      grep -E '^2[0-9a-f]' | grep -v '^fe80' | tr '\n' ' ')
+  fi
+
+  # 去重
+  ipv4_list=$(echo "$ipv4_list" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+  ipv6_list=$(echo "$ipv6_list" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+
+  echo "$ipv4_list"
+  echo "$ipv6_list"
+}
+
+# 格式化访问地址列表
+# 参数：端口列表（如 "4173 3333"）
+format_access_urls() {
+  local ports=("$@")
+  local lines=()
+  # 读取两行：IPv4 / IPv6
+  local addr_output ipv4_addrs ipv6_addrs
+  addr_output=$(get_network_addresses)
+  ipv4_addrs=$(echo "$addr_output" | sed -n '1p')
+  ipv6_addrs=$(echo "$addr_output" | sed -n '2p')
+
+  for port in "${ports[@]}"; do
+    echo "  端口 $port ："
+    echo "    http://localhost:$port"
+    echo "    http://127.0.0.1:$port"
+    for ip in $ipv4_addrs; do
+      [[ "$ip" != "127.0.0.1" ]] && echo "    http://$ip:$port"
+    done
+    for ip in $ipv6_addrs; do
+      [[ -n "$ip" ]] && echo "    http://[$ip]:$port"
+    done
+  done
 }
 
 # ============ 端口配置 ============
@@ -428,7 +490,8 @@ do_start() {
 
   echo "  启动后端 (PORT=$PORT) ..."
   cd "$BACKEND_DIR"
-  PORT="$PORT" NODE_ENV=production ${DATABASE:+DATABASE_URL="$DATABASE"} \
+  # HOST=:: 让后端绑定到 IPv6 双栈（同时接受 IPv4/IPv6 连接），兼容纯 IPv6 网络
+  PORT="$PORT" NODE_ENV=production HOST="::" ${DATABASE:+DATABASE_URL="$DATABASE"} \
     nohup node dist/index.js > "$BACKEND_LOG" 2> "$BACKEND_ERR_LOG" &
   STUB_PID=$!
   echo "  后端 stub PID: $STUB_PID (等待端口监听...)"
@@ -457,8 +520,9 @@ do_start() {
   fi
   echo "  vite.js: $VITE_JS"
   cd "$FRONTEND_DIR"
+  # --host :: 让 Vite preview 绑定到 IPv6 双栈（同时接受 IPv4/IPv6 连接）
   NODE_ENV=production \
-    nohup node "$VITE_JS" preview --port "$FRONTEND_PORT" --host > "$FRONTEND_LOG" 2> "$FRONTEND_ERR_LOG" &
+    nohup node "$VITE_JS" preview --port "$FRONTEND_PORT" --host :: > "$FRONTEND_LOG" 2> "$FRONTEND_ERR_LOG" &
   FRONTEND_STUB=$!
   echo "  前端 stub PID: $FRONTEND_STUB (等待端口监听...)"
 
@@ -485,8 +549,25 @@ do_start() {
 EOF
 
   write_title "启动完成"
-  echo "  后端：http://localhost:$PORT"
-  echo "  前端：http://localhost:$FRONTEND_PORT"
+
+  # 获取 RTMP / HTTP-FLV 端口（用于端口放行提示）
+  local rtmp_port="${RTMP_PORT:-3334}"
+  local http_flv_port="${HTTP_FLV_PORT:-3335}"
+
+  echo "  可访问地址："
+  format_access_urls "$FRONTEND_PORT"
+  echo ""
+  echo "  提示：前端页面通过 Vite preview 提供，访问前端地址即可使用全部功能。"
+  echo "        后端 API 端口 $PORT 通常由前端代理访问，无需直接暴露。"
+  echo ""
+
+  echo "  需要放行的端口（防火墙 / 安全组）："
+  echo "    $FRONTEND_PORT  - 前端页面（必须放行，对外提供访问）"
+  echo "    $PORT          - 后端 API（默认由前端代理访问，如直连需放行）"
+  echo "    $rtmp_port      - RTMP 推流端口（使用 OBS 推流时必须放行）"
+  echo "    $http_flv_port   - HTTP-FLV 拉流端口（未配置反向代理时需放行）"
+  echo ""
+
   echo "  PID 文件：$PIDS_FILE"
   echo "  日志：$BACKEND_LOG / $BACKEND_ERR_LOG"
   echo "        $FRONTEND_LOG / $FRONTEND_ERR_LOG"

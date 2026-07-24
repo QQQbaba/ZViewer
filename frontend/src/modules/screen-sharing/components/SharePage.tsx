@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Monitor, Copy, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
+import { Space } from '@/components/ui/Space'
 import { Text, Paragraph } from '@/components/ui/Typography'
 import { Tag } from '@/components/ui/Tag'
 import { ConfirmModal } from '@/components/ui/Modal'
@@ -391,48 +392,53 @@ function SharePage({
           />
         </>
       ) : (
-        <div className="flex h-full min-h-0 flex-col items-center justify-start gap-4 overflow-y-auto p-6 pt-20 text-center">
-          <Paragraph type="secondary" className="m-0">
-            房间号
-          </Paragraph>
-          <Text
-            className="rounded px-3 py-1.5 font-mono text-2xl"
+        <div className="flex h-full min-h-0 flex-col items-center justify-center gap-5 overflow-y-auto p-6 pt-20">
+          <div
+            className="w-full max-w-sm rounded-2xl border p-6 shadow-sm"
             style={{
-              backgroundColor: 'var(--md-sys-color-primary-container)',
-              color: 'var(--md-sys-color-on-primary-container)',
+              borderColor: 'var(--md-sys-color-outline-variant)',
+              backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
             }}
           >
-            {currentRoomId}
-          </Text>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <Tag color={connected ? 'success' : 'default'}>
-              {connected ? '已连接' : '未连接'}
-            </Tag>
+            <div className="mb-5 flex items-center justify-between">
+              <Space align="center" size="sm">
+                <Monitor className="h-5 w-5 text-[var(--md-sys-color-primary)]" />
+                <Text className="text-base font-semibold">WebRTC 屏幕共享</Text>
+              </Space>
+              <Tag color={connected ? 'success' : 'default'}>
+                {connected ? '已连接' : '未连接'}
+              </Tag>
+            </div>
+
+            <MediaSettingsCard
+              frameRate={frameRate}
+              maxBitrateMbps={maxBitrateMbps}
+              shareSystemAudio={shareSystemAudio}
+              shareMicrophone={shareMicrophone}
+              isSharing={isSharing}
+              onFrameRateChange={setFrameRate}
+              onMaxBitrateChange={setMaxBitrateMbps}
+              onShareSystemAudioChange={setShareSystemAudio}
+              onShareMicrophoneChange={setShareMicrophone}
+            />
+
+            <Button
+              variant="primary"
+              className="mt-5 w-full"
+              icon={<Monitor className="h-5 w-5" />}
+              onClick={start}
+              loading={starting}
+              disabled={starting || closing}
+            >
+              {starting ? '正在请求权限...' : '开始共享'}
+            </Button>
           </div>
-          <MediaSettingsCard
-            frameRate={frameRate}
-            maxBitrateMbps={maxBitrateMbps}
-            shareSystemAudio={shareSystemAudio}
-            shareMicrophone={shareMicrophone}
-            isSharing={isSharing}
-            onFrameRateChange={setFrameRate}
-            onMaxBitrateChange={setMaxBitrateMbps}
-            onShareSystemAudioChange={setShareSystemAudio}
-            onShareMicrophoneChange={setShareMicrophone}
-          />
-          <Button
-            variant="primary"
-            icon={<Monitor className="h-5 w-5" />}
-            onClick={start}
-            loading={starting}
-            disabled={starting || closing}
-          >
-            {starting ? '正在请求权限...' : '开始共享'}
-          </Button>
+
           {inIframe && (
             <div
-              className="m-0 max-w-md rounded px-3 py-2 text-xs"
+              className="w-full max-w-sm rounded-xl border px-4 py-3 text-xs"
               style={{
+                borderColor: 'var(--md-sys-color-outline-variant)',
                 backgroundColor: 'var(--md-sys-color-tertiary-container)',
               }}
             >
@@ -442,6 +448,7 @@ function SharePage({
               <Button
                 variant="secondary"
                 size="sm"
+                className="w-full"
                 icon={<ExternalLink className="h-3.5 w-3.5" />}
                 onClick={handleOpenInNewWindow}
               >
@@ -449,10 +456,12 @@ function SharePage({
               </Button>
             </div>
           )}
+
           {mediaError && (
             <div
-              className="relative m-0 max-w-md rounded px-3 py-2 text-xs"
+              className="relative w-full max-w-sm rounded-xl border px-4 py-3 text-xs"
               style={{
+                borderColor: 'var(--md-sys-color-error-container)',
                 backgroundColor: 'var(--md-sys-color-error-container)',
               }}
             >
@@ -476,7 +485,11 @@ function SharePage({
               </button>
             </div>
           )}
-          <Paragraph type="secondary" className="m-0 max-w-md text-xs">
+
+          <Paragraph
+            type="secondary"
+            className="m-0 max-w-sm text-center text-xs"
+          >
             将链接发送给观看方，对方打开后即可自动加入房间观看。
           </Paragraph>
         </div>

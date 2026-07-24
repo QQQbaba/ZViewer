@@ -31,4 +31,10 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    // 绑定到 '::' 让 Vite preview 同时监听 IPv4 与 IPv6（IPv6 双栈），
+    // 兼容纯 IPv6 网络环境以及 IPv4/IPv6 双栈访问。
+    host: '::',
+    allowedHosts: true,
+  },
 })

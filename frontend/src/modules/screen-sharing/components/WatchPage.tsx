@@ -56,7 +56,6 @@ declare global {
 interface StreamPushViewerProps {
   streamKey: string
   streamStatus: StreamStatus
-  onStatusChange: (status: 'playing' | 'offline') => void
   chatPanel: ReactNode
   roomInfoPanel: ReactNode
 }
@@ -64,21 +63,11 @@ interface StreamPushViewerProps {
 function StreamPushViewer({
   streamKey,
   streamStatus,
-  onStatusChange,
   chatPanel,
   roomInfoPanel,
 }: StreamPushViewerProps) {
   const [flvStats, setFlvStats] = useState<FlvStatistics | null>(null)
   const flvUrl = useMemo(() => buildFlvUrl(streamKey), [streamKey])
-
-  const handleStatusChange = useCallback(
-    (status: 'connecting' | 'playing' | 'error' | 'stopped') => {
-      if (status === 'playing') onStatusChange('playing')
-      else if (status === 'error' || status === 'stopped')
-        onStatusChange('offline')
-    },
-    [onStatusChange]
-  )
 
   const playerContent = (
     <div className="relative h-full w-full">
@@ -101,13 +90,7 @@ function StreamPushViewer({
           </div>
         </div>
       ) : (
-        <FlvPlayer
-          src={flvUrl}
-          muted
-          autoPlay
-          onStatusChange={handleStatusChange}
-          onStatistics={setFlvStats}
-        />
+        <FlvPlayer src={flvUrl} muted autoPlay onStatistics={setFlvStats} />
       )}
     </div>
   )
@@ -232,19 +215,10 @@ function WatchPage() {
 
   // 3.5 推流子模式状态（仅 screen-share + stream-push 时使用）
   const streamStatus = useStreamStatus(socket, roomId ?? '')
-  const setStreamStatus = useRoomStore((state) => state.setStreamStatus)
   const { shareMethod } = useShareMethod(socket, roomId ?? '', false)
   const streamKey = useRoomStore((state) => state.streamKey)
   const exitRoom = useRoomStore((state) => state.exitRoom)
 
-  // stream-push 子模式：缓存 chatPanel 和 status 回调，避免 StreamPushViewer 因 props 变化重渲染
-  const handleStreamStatusChange = useCallback(
-    (status: 'playing' | 'offline') => {
-      if (status === 'playing') setStreamStatus('live')
-      else setStreamStatus('offline')
-    },
-    [setStreamStatus]
-  )
   const streamPushChatPanel = useMemo(
     () => <CommentPanel socket={socket} roomId={roomId ?? ''} commentsOnly />,
     [socket, roomId]
@@ -394,7 +368,6 @@ function WatchPage() {
         <StreamPushViewer
           streamKey={streamKey ?? roomId ?? ''}
           streamStatus={streamStatus}
-          onStatusChange={handleStreamStatusChange}
           chatPanel={streamPushChatPanel}
           roomInfoPanel={streamPushRoomInfoPanel}
         />
