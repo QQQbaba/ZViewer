@@ -1,0 +1,201 @@
+/**
+ * 统一 HTTP 上游媒体代理（v2 重写）。
+ *
+ * 历史问题：B站 CDN 代理、图片代理、anisubs/kazumi 等 5+ 个端点各自复制
+ * 「构造上游请求头 → fetch → 透传 Range/Content-* 头 → 管道输出」逻辑，
+ * 且 CORS 处理不一致。此模块收敛为单一实现，各端点仅声明差异项。
+ *
+ * v2 改进：
+ * - 上游超时控制（默认 30s，可配置），超时返回 504；
+ * - 客户端断连时通过 AbortController 中断上游请求，避免无效带宽消耗；
+ * - 错误分类：超时 504 / 上游非 2xx 透传状态码 / 网络异常 502；
+ * - 响应头透传收敛为白名单，逐一处理。
+ */
+
+import { Request, Response } from 'express';
+import { Readable } from 'node:stream';
+
+/** 上游请求默认 UA（桌面 Chrome），防盗链场景使用 */
+export const DEFAULT_PROXY_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+/** 上游请求默认超时（毫秒） */
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000;
+
+/**
+ * 通配 CORS 头。video.src 跨源加载媒体时需要 ACAO:*，否则会被 ORB 阻止。
+ * 注意：携带凭证（credentials: include）的请求不能使用通配 CORS，
+ * 此类端点应传 cors: 'global' 交给全局 cors 中间件反射 Origin。
+ */
+export function setWildcardCors(res: Response): void {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Authorization, Content-Type, Range',
+  );
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    'Content-Range, Accept-Ranges, Content-Length',
+  );
+}
+
+export interface UpstreamHeaderOptions {
+  referer?: string;
+  origin?: string;
+  userAgent?: string;
+  cookie?: string;
+  /** 追加或覆盖上游请求头 */
+  extra?: Record<string, string>;
+}
+
+export interface ProxyHttpOptions {
+  /** 上游 URL（调用方需已完成校验） */
+  url: string;
+  headers?: UpstreamHeaderOptions;
+  /**
+   * wildcard：手动设置 ACAO:*（无凭证的 video.src 直连场景）；
+   * global：交给全局 cors 中间件（fetch credentials: 'include' 场景，
+   * 手动设置 ACAO:* 会导致浏览器拒绝响应）。
+   * 默认 wildcard。
+   */
+  cors?: 'wildcard' | 'global';
+  /** 上游未返回 Content-Type 时的兜底值，默认 application/octet-stream */
+  defaultContentType?: string;
+  /** 可选 Cache-Control 响应头（如图片代理的 max-age） */
+  cacheControl?: string;
+  /** 上游请求超时（毫秒），默认 30000 */
+  timeoutMs?: number;
+  /** 日志前缀，如 'stream'、'anisubs' */
+  logTag: string;
+  /** 502 错误响应的 message 文案 */
+  errorMessage: string;
+}
+
+/** 需要透传给客户端的上游响应头（白名单） */
+const PASSTHROUGH_HEADERS = [
+  'content-length',
+  'accept-ranges',
+  'content-range',
+  'etag',
+  'last-modified',
+] as const;
+
+/** 构造上游请求头：UA / Referer / Origin / Cookie / Range 透传 */
+function buildUpstreamHeaders(
+  req: Request,
+  h: UpstreamHeaderOptions,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    'User-Agent':
+      h.userAgent && h.userAgent.trim() ? h.userAgent : DEFAULT_PROXY_UA,
+    Accept: '*/*',
+    ...h.extra,
+  };
+  if (h.referer && h.referer.trim()) headers.Referer = h.referer;
+  if (h.origin && h.origin.trim()) headers.Origin = h.origin;
+  if (h.cookie && h.cookie.trim()) headers.Cookie = h.cookie;
+  if (req.headers.range) headers.Range = req.headers.range;
+  return headers;
+}
+
+/**
+ * 代理一个 HTTP 上游资源：
+ * - 透传客户端 Range 头，回传 Content-Range / Accept-Ranges / Content-Length；
+ * - 上游非 2xx 时透传状态码并结束；
+ * - 上游超时返回 504（未发头时）；
+ * - 客户端断连时中断上游请求；
+ * - 网络异常时 502（已发头则直接断流）。
+ */
+export async function proxyHttpUpstream(
+  req: Request,
+  res: Response,
+  opts: ProxyHttpOptions,
+): Promise<void> {
+  const {
+    url,
+    cors = 'wildcard',
+    defaultContentType = 'application/octet-stream',
+    cacheControl,
+    timeoutMs = DEFAULT_UPSTREAM_TIMEOUT_MS,
+    logTag,
+    errorMessage,
+  } = opts;
+  const h = opts.headers ?? {};
+
+  // 客户端断连 / 超时统一中断上游
+  const controller = new AbortController();
+  // 超时只覆盖「连接 + 等待响应头」阶段：fetch resolve 后即取消，
+  // 开放式 Range 下载（bytes=0-）的 body 传输可能持续数分钟，不应被超时中断。
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  res.on('close', () => {
+    if (!res.writableFinished) controller.abort();
+  });
+
+  try {
+    const upstream = await fetch(url, {
+      headers: buildUpstreamHeaders(req, h),
+      signal: controller.signal,
+    });
+    // 响应头已到达，取消连接阶段超时；body 传输阶段由客户端断连检测兜底
+    clearTimeout(timeout);
+
+    if (cors === 'wildcard') {
+      setWildcardCors(res);
+    }
+
+    if (!upstream.ok) {
+      res.status(upstream.status);
+      res.end();
+      return;
+    }
+
+    res.setHeader(
+      'Content-Type',
+      upstream.headers.get('content-type') || defaultContentType,
+    );
+    for (const name of PASSTHROUGH_HEADERS) {
+      const value = upstream.headers.get(name);
+      if (value) res.setHeader(name, value);
+    }
+    if (cacheControl) res.setHeader('Cache-Control', cacheControl);
+
+    if (!upstream.body) {
+      res.status(204).end();
+      return;
+    }
+
+    const stream = Readable.fromWeb(
+      upstream.body as unknown as import('node:stream/web').ReadableStream,
+    );
+    stream.on('error', (err) => {
+      console.error(`[${logTag}] proxy upstream stream error:`, err);
+      if (!res.headersSent) {
+        res.status(502).json({ success: false, message: errorMessage });
+      } else {
+        res.destroy();
+      }
+    });
+    stream.pipe(res);
+  } catch (err) {
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    if (isAbort && res.writableEnded) return; // 客户端主动断连，无需响应
+    if (isAbort) {
+      // 超时触发的中断
+      console.warn(`[${logTag}] proxy upstream timeout after ${timeoutMs}ms`);
+      if (!res.headersSent) {
+        res.status(504).json({ success: false, message: '上游请求超时' });
+      } else {
+        res.end();
+      }
+      return;
+    }
+    console.error(`[${logTag}] proxy error:`, err);
+    if (!res.headersSent) {
+      res.status(502).json({ success: false, message: errorMessage });
+    } else {
+      res.end();
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}

@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import flvjs from 'flv.js'
-import { Maximize, Minimize, Volume2, VolumeX, Play, Pause } from 'lucide-react'
+import {
+  Maximize,
+  Minimize,
+  Volume2,
+  VolumeX,
+  Play,
+  Pause,
+  RefreshCw,
+} from 'lucide-react'
 import { Spinner } from '@/components/ui/Spinner'
+import { IconButton } from '@/components/VideoControls'
+import { cn } from '@/lib/utils'
 
 /** flv.js 统计信息 */
 export interface FlvStatistics {
@@ -62,6 +72,7 @@ export function FlvPlayer({
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [isMuted, setIsMuted] = useState(muted)
+  const [reloadVersion, setReloadVersion] = useState(0)
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   // 用 ref 存储回调，避免内联函数引用变化导致 useEffect 重新执行（播放器闪烁）
@@ -199,7 +210,10 @@ export function FlvPlayer({
           // 如果缓冲区末尾比当前时间超前较多，跳到接近缓冲区末尾
           if (bufferedEnd - video.currentTime > 0.5) {
             video.currentTime = bufferedEnd - 0.3
-            console.log('[FlvPlayer] recovered from stall, seek to', video.currentTime)
+            console.log(
+              '[FlvPlayer] recovered from stall, seek to',
+              video.currentTime
+            )
           }
         }
       }
@@ -214,7 +228,10 @@ export function FlvPlayer({
           const bufferedEnd = buffered.end(buffered.length - 1)
           if (bufferedEnd - video.currentTime > 0.5) {
             video.currentTime = bufferedEnd - 0.3
-            console.log('[FlvPlayer] recovered from stall (timer), seek to', video.currentTime)
+            console.log(
+              '[FlvPlayer] recovered from stall (timer), seek to',
+              video.currentTime
+            )
           }
         }
       }
@@ -273,7 +290,7 @@ export function FlvPlayer({
       }
       playerRef.current = null
     }
-  }, [src, autoPlay])
+  }, [src, autoPlay, reloadVersion])
 
   // 同步 muted 状态
   useEffect(() => {
@@ -304,6 +321,12 @@ export function FlvPlayer({
 
   // 播放/暂停
   const [isPlaying, setIsPlaying] = useState(false)
+
+  // 手动刷新：重新加载播放器
+  const handleRefresh = useCallback(() => {
+    setReloadVersion((v) => v + 1)
+  }, [])
+
   const handleTogglePlay = useCallback(() => {
     const video = videoRef.current
     if (!video) return
@@ -385,44 +408,32 @@ export function FlvPlayer({
       {/* 控制栏 */}
       {!loading && !errorMsg && (
         <div
-          className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2 pt-8 transition-opacity duration-200 ${
+          className={cn(
+            'vc-container absolute inset-x-0 bottom-0 z-20 p-2 transition-opacity duration-200',
             controlsVisible ? 'opacity-100' : 'opacity-0'
-          }`}
+          )}
         >
-          <div className="flex flex-wrap items-center justify-center gap-1.5 sm:justify-end">
-            <button
+          <div className="glass-strong flex items-center justify-center rounded-xl px-2 py-1.5 shadow-lg vc-gap">
+            <IconButton
+              icon={isPlaying ? <Pause /> : <Play />}
+              label={isPlaying ? '暂停' : '播放'}
               onClick={handleTogglePlay}
-              className="flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-white backdrop-blur transition hover:bg-white/20"
-              title={isPlaying ? '暂停' : '播放'}
-            >
-              {isPlaying ? (
-                <Pause className="h-4 w-4" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-            </button>
-            <button
+            />
+            <IconButton
+              icon={isMuted ? <VolumeX /> : <Volume2 />}
+              label={isMuted ? '取消静音' : '静音'}
               onClick={handleToggleMute}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white backdrop-blur transition hover:bg-white/20"
-              title={isMuted ? '取消静音' : '静音'}
-            >
-              {isMuted ? (
-                <VolumeX className="h-4 w-4" />
-              ) : (
-                <Volume2 className="h-4 w-4" />
-              )}
-            </button>
-            <button
+            />
+            <IconButton
+              icon={isFullscreen ? <Minimize /> : <Maximize />}
+              label={isFullscreen ? '退出全屏' : '全屏'}
               onClick={handleFullscreen}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white backdrop-blur transition hover:bg-white/20"
-              title={isFullscreen ? '退出全屏' : '全屏'}
-            >
-              {isFullscreen ? (
-                <Minimize className="h-4 w-4" />
-              ) : (
-                <Maximize className="h-4 w-4" />
-              )}
-            </button>
+            />
+            <IconButton
+              icon={<RefreshCw />}
+              label="刷新"
+              onClick={handleRefresh}
+            />
           </div>
         </div>
       )}

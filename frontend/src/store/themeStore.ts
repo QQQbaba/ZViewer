@@ -47,8 +47,10 @@ interface ThemeState {
   isDark: boolean
   /** 圆角预设 */
   radius: RadiusPreset
-  /** 玻璃拟态背景强度，0-1 */
+  /** 玻璃拟态背景透明度，0-1 */
   glassStrength: number
+  /** 玻璃拟态模糊度，0-40px */
+  glassBlur: number
   /** 精简动画模式：去除 blur/3D/rotate 等浮夸效果，仅保留基础淡入与微交互 */
   reducedMotion: boolean
 
@@ -75,8 +77,10 @@ interface ThemeState {
   setDark: (value: boolean) => void
   /** 设置圆角预设 */
   setRadius: (value: RadiusPreset) => void
-  /** 设置玻璃拟态强度 */
+  /** 设置玻璃拟态透明度 */
   setGlassStrength: (value: number) => void
+  /** 设置玻璃拟态模糊度 */
+  setGlassBlur: (value: number) => void
   /** 设置精简动画模式 */
   setReducedMotion: (value: boolean) => void
   /** 设置自定义背景图片 */
@@ -102,6 +106,7 @@ export const useThemeStore = create<ThemeState>()(
       isDark: false,
       radius: DEFAULT_RADIUS_PRESET,
       glassStrength: 0.6,
+      glassBlur: 12,
       reducedMotion: true,
       backgroundImage: null,
       backgroundBlur: 0,
@@ -116,6 +121,7 @@ export const useThemeStore = create<ThemeState>()(
       setDark: (value: boolean) => set({ isDark: value }),
       setRadius: (value: RadiusPreset) => set({ radius: value }),
       setGlassStrength: (value: number) => set({ glassStrength: value }),
+      setGlassBlur: (value: number) => set({ glassBlur: value }),
       setReducedMotion: (value: boolean) => set({ reducedMotion: value }),
       setBackgroundImage: (value: string | null) =>
         set({ backgroundImage: value }),
@@ -136,6 +142,7 @@ export const useThemeStore = create<ThemeState>()(
         isDark: state.isDark,
         radius: state.radius,
         glassStrength: state.glassStrength,
+        glassBlur: state.glassBlur,
         reducedMotion: state.reducedMotion,
         // 仅持久化 URL 图片，不持久化 base64 数据（避免 localStorage 配额溢出）
         backgroundImage: state.backgroundImage?.startsWith('data:')

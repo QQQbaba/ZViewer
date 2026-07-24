@@ -46,10 +46,8 @@ export interface ResolveOptions {
   cookie?: string;
   /** 指定清晰度 qn。 */
   qn?: number;
-  /** fnval 格式标志位。 */
-  fnval?: number;
-  /** 优先返回 URL 中包含该字符串的 CDN 轨道。 */
-  preferCdn?: string;
+  /** 编码偏好：auto / avc / hevc / av1。 */
+  codec?: string;
   /** 解析进度回调，用于 NDJSON 流式输出。 */
   onProgress?: (msg: ResolveProgress) => void;
 }
@@ -109,13 +107,11 @@ async function fallbackToMp4(
   cid: number,
   cookie: string | undefined,
   qn: number | undefined,
-  preferCdn: string | undefined,
   isVip: boolean,
 ): Promise<{ videoUrl: string } | null> {
   const mp4PlayUrl = await getPlayUrl(bvid, cid, cookie, {
     qn,
     fnval: 1,
-    preferCdn,
     isVip,
   });
   if (mp4PlayUrl?.format === 'mp4' && mp4PlayUrl.durl?.[0]?.url) {
@@ -133,7 +129,7 @@ async function fallbackToMp4(
 export async function resolveBilibiliVideo(
   opts: ResolveOptions,
 ): Promise<ResolveResult> {
-  const { url, cookie, qn, fnval, preferCdn, onProgress } = opts;
+  const { url, cookie, qn, codec, onProgress } = opts;
 
   const bvid = extractBvid(url);
   if (!bvid) {
@@ -166,7 +162,7 @@ export async function resolveBilibiliVideo(
       info.bvid,
       info.cid,
       cookie,
-      { qn: requestedQn, fnval, preferCdn, isVip },
+      { qn: requestedQn, codec, isVip },
     );
   } catch (err) {
     // 权限错误：降级到 1080P 重试
@@ -176,7 +172,7 @@ export async function resolveBilibiliVideo(
         info.bvid,
         info.cid,
         cookie,
-        { qn: 80, fnval: undefined, preferCdn, isVip },
+        { qn: 80, codec, isVip },
       );
     } else {
       throw err;
@@ -198,8 +194,7 @@ export async function resolveBilibiliVideo(
     try {
       const refetched = await getPlayUrl(info.bvid, info.cid, cookie, {
         qn: effectiveQn,
-        fnval,
-        preferCdn,
+        codec,
         isVip,
       });
       if (refetched) {
@@ -237,7 +232,7 @@ export async function resolveBilibiliVideo(
 
     if (!videoUrl) {
       emit('fallback', 'DASH 地址不可用，尝试 MP4 直链...');
-      const mp4 = await fallbackToMp4(info.bvid, info.cid, cookie, effectiveQn, preferCdn, isVip);
+      const mp4 = await fallbackToMp4(info.bvid, info.cid, cookie, effectiveQn, isVip);
       if (mp4) {
         return {
           title: info.title,

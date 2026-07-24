@@ -50,7 +50,7 @@ function SharePage({
   const { shareMethod, updateShareMethod } = useShareMethod(
     socket,
     currentRoomId,
-    true,
+    true
   )
 
   const handleShareMethodChange = useCallback(
@@ -214,6 +214,12 @@ function SharePage({
     else pause()
   }, [isPaused, pause, resume])
 
+  const handleRefresh = useCallback(async () => {
+    stop()
+    cleanupPeerConnections()
+    await start()
+  }, [stop, cleanupPeerConnections, start])
+
   // 信令 channel（onJoinRequest 不在其中，单独订阅以保持 hook 通用性）
   useSignalingChannel({
     socket,
@@ -322,8 +328,8 @@ function SharePage({
     )
   }, [isSharing, socket, currentRoomId, shareMethod])
 
-  // 切换到 stream-push 子模式时强制标记为非 WebRTC 共享状态，
-  // 让 RoomLayout 用 min-h-[480px] 布局而非 aspect-video。
+  // 切换到 stream-push 子模式时强制标记为非 WebRTC 共享状态。
+  // stream-push 仍使用 aspect-video 布局，由 StreamPushPage 内部滚动承载配置 UI。
   useEffect(() => {
     if (shareMethod === 'stream-push') {
       setIsSharing(false)
@@ -381,10 +387,11 @@ function SharePage({
             onCopyLink={handleCopy}
             onClearAnnotations={handleClearAnnotations}
             onClose={() => setConfirmClose(true)}
+            onRefresh={handleRefresh}
           />
         </>
       ) : (
-        <div className="flex min-h-[480px] flex-col items-center justify-start gap-4 overflow-y-auto p-6 pt-20 text-center">
+        <div className="flex h-full min-h-0 flex-col items-center justify-start gap-4 overflow-y-auto p-6 pt-20 text-center">
           <Paragraph type="secondary" className="m-0">
             房间号
           </Paragraph>

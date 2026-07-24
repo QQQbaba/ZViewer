@@ -10,8 +10,8 @@
  * ├── index.ts              本文件：公共 API 入口
  * ├── services/             纯函数服务层（从 hooks 抽取的可复用逻辑）
  * │   ├── state-merge.ts            状态构建与比较（buildStateFromVideo / isStateEqual）
- * │   ├── broadcast-throttle.ts     广播节流与防抖（throttled / debounced seek）
  * │   ├── seek-strategy.ts          seek 跟随与缓冲检测（自适应阈值 / 未缓冲区域检测）
+ * │   ├── seek-service.ts           统一 seek 入口（调用 MsePlayer.seekTo，不重建 MediaSource）
  * │   └── index.ts                  服务层 barrel export
  * └── hooks/
  *     ├── useHostSync.ts             房主统一同步（组合广播+请求+心跳+事件绑定）
@@ -98,22 +98,13 @@ export type { SafePlayOptions } from './safePlay'
 export {
   buildStateFromVideo,
   isStateEqual,
-  createThrottledBroadcaster,
-  createForceThrottledBroadcaster,
-  createDebouncedSeek,
   getAdaptiveSeekThreshold,
   shouldSeekToHost,
   isInBufferedRange,
   isMseStream,
-  needsMseReloadForSeek,
-  waitForBuffered,
-  findNearestBufferedTime,
-  reloadMseAtTime,
+  executeSeek,
 } from './services'
-export type {
-  ReloadMseAtTimeOptions,
-  ReloadMseAtTimeResult,
-} from './services'
+export type { ExecuteSeekParams } from './services'
 
 // 常量与类型（供 useWatchTogether / useBilibiliQuality 引用）
 export { SOCKET_EVENT } from './constants'

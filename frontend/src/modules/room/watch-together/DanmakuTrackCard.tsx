@@ -94,13 +94,7 @@ export function DanmakuTrackCard() {
   }
 
   return (
-    <div
-      className="flex min-h-0 flex-col gap-3 rounded-[var(--md-sys-shape-corner)] border p-3"
-      style={{
-        backgroundColor: 'var(--md-sys-color-surface-container)',
-        borderColor: 'var(--md-sys-color-outline-variant)',
-      }}
-    >
+    <div className="glass flex min-h-0 flex-col gap-3 rounded-[var(--md-sys-shape-corner)] p-3">
       <div className="flex items-center justify-between">
         <Text className="text-sm font-medium">弹幕轨道</Text>
         <Text type="secondary" className="text-[10px]">
@@ -157,11 +151,11 @@ export function DanmakuTrackCard() {
               className="flex h-full min-h-[120px] flex-col items-center justify-center gap-2 rounded-[var(--md-sys-shape-corner)] border py-8"
               style={{
                 backgroundColor:
-                  'var(--md-sys-color-surface-container-high)',
+                  'var(--glass-bg)',
                 borderColor: 'var(--md-sys-color-outline-variant)',
               }}
             >
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--md-sys-color-surface-container-highest)]">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--glass-bg)]">
                 <Plus className="h-5 w-5 opacity-40" />
               </div>
               <Text type="secondary" className="text-xs">
@@ -173,13 +167,9 @@ export function DanmakuTrackCard() {
             <div
               key={track.trackId}
               className={cn(
-                'mb-2 flex flex-col gap-1.5 rounded-[var(--md-sys-radius-small)] border p-2',
+                'glass mb-2 flex flex-col gap-1.5 rounded-[var(--md-sys-radius-small)] p-2',
                 track.hidden && 'opacity-60'
               )}
-              style={{
-                backgroundColor: 'var(--md-sys-color-surface-container-high)',
-                borderColor: 'var(--md-sys-color-outline-variant)',
-              }}
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-1.5">

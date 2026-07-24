@@ -1,5 +1,5 @@
 /**
- * 播放器模块公共 API
+ * 播放器模块公共 API（v2 重写，导出契约保持不变）。
  *
  * 模块结构（分离式架构）：
  * ```
@@ -8,12 +8,20 @@
  * ├── utils.ts                    视频元素工具（resetVideoElement / waitForMetadata）
  * ├── engine-selector.ts          引擎选择器（按 format + audioUrl 选择）
  * ├── engines/
- * │   ├── mse-engine.ts           MSE DASH 引擎（流式合并 + 缓冲管理）
+ * │   ├── mse-engine.ts           MSE DASH 引擎适配器（含降级策略）
  * │   ├── hls-engine.ts           HLS 引擎（hls.js / Safari 原生）
  * │   ├── flv-engine.ts           FLV 引擎（flv.js）
- * │   └── direct-engine.ts        Direct 引擎（浏览器原生播放）
+ * │   ├── direct-engine.ts        Direct 引擎（浏览器原生播放）
+ * │   └── mse/
+ * │       ├── player.ts           MsePlayer 门面（状态机 + 双轨编排）
+ * │       ├── track.ts            MediaTrack 单轨生命周期
+ * │       ├── processor.ts        ReadableStream → SourceBuffer 管线
+ * │       ├── downloader.ts       Range 下载（重试 + 缓存 + 代理）
+ * │       ├── parser.ts           MP4 头部解析 + seek 偏移
+ * │       └── stream-cache.ts     IndexedDB 字节缓存（覆盖查询 + LRU + TTL）
  * ├── services/
- * │   ├── buffer-manager.ts       SourceBuffer 缓冲管理（prune / append / quota 恢复）
+ * │   ├── buffer-manager.ts       SourceBuffer 串行队列（append / prune / quota 恢复）
+ * │   ├── mp4-parser.ts           fMP4 box 解析（纯函数）
  * │   ├── audio-sync.ts           独立 Audio 元素音频同步
  * │   └── url-proxy.ts            B站 CDN 代理检测
  * └── index.ts                    本文件：公共 API 入口
@@ -43,8 +51,9 @@ export {
   clearSourceBuffer,
 } from './services/buffer-manager'
 
-// MSE 专用导出（供 useBilibiliQuality 等需要直接控制 MSE 的场景）
-export { createMseMediaUrl } from './engines/mse-engine'
+// MSE 专用导出
+export { MsePlayer } from './engines/mse'
+export type { SeekResult, MsePlayerOptions } from './engines/mse'
 
 // Hooks
 export {

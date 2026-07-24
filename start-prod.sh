@@ -2,6 +2,8 @@
 set -euo pipefail
 
 # ZViewer 生产服务统一管理脚本
+# 一键启动：自动检测并安装依赖（npm install）、自动构建缺失产物（npm run build）、启动服务。
+# 无需提前执行 npm install 即可直接运行本脚本。
 # 适配 npm workspaces（根目录统一安装依赖）
 # 支持子命令：start | stop | restart | status | logs | port | menu | help
 
@@ -37,9 +39,9 @@ usage() {
 用法: $0 <command> [options]
 
 命令：
-  start     构建并启动服务
+  start     一键启动：自动安装依赖、自动构建缺失产物、启动服务
   stop      停止服务
-  restart   重启服务（不重新构建）
+  restart   重启服务（跳过构建，加快重启）
   status    查看服务状态
   logs      查看日志（默认 backend，可选 frontend）
   port      交互式修改端口配置（持久化到 .prod.ports.json）
@@ -47,21 +49,29 @@ usage() {
   help      显示此帮助
 
 选项：
-  --skip-build           跳过构建步骤
+  --skip-build           跳过构建步骤（仅使用已有产物启动）
   --auto-build           智能构建：产物新于源代码时自动跳过（默认行为）
   --no-auto-build        禁用智能构建跳过，强制构建
-  --force-deps           强制重新安装依赖（默认跳过已安装）
+  --force-deps           强制重新安装依赖（默认按需自动安装）
   -p, --port <int>       后端端口（默认 3333，优先级高于配置文件）
   --frontend-port <int>  前端端口（默认 4173，优先级高于配置文件）
   -d, --database <url>   数据库 URL
+
+一键启动说明：
+  无需提前执行 npm install 或 npm run build，脚本会自动检测：
+    1. node_modules 缺失 -> 自动执行 npm ci / npm install
+    2. 构建产物缺失或源代码已更新 -> 自动执行 npm run build
+    3. 构建产物已是最新 -> 跳过构建，直接启动
+  如需跳过自动构建（仅使用已有产物启动），请加 --skip-build
 
 端口优先级：
   命令行参数 > .prod.ports.json 配置文件 > 默认值
 
 示例：
-  $0 start
-  $0 start --skip-build -p 3001
-  $0 start --no-auto-build     # 强制重新构建
+  $0 start                       # 一键启动（自动安装+构建）
+  $0 start --skip-build -p 3001  # 跳过构建，指定端口
+  $0 start --force-deps          # 强制重新安装依赖
+  $0 start --no-auto-build       # 强制重新构建
   $0 port
   $0 logs frontend
 
@@ -186,7 +196,9 @@ deps_installed() {
 
 install_deps() {
   # npm workspaces：仅在根目录安装一次，子目录自动 hoist
-  echo "  [$ROOT_DIR] 检测到 package-lock.json，执行 npm ci ..."
+  # 优先 npm ci（要求 package-lock.json，可重现依赖树，更快更稳定）
+  # 失败则回退到 npm install（兼容 lock 文件缺失或损坏的情况）
+  echo "  [$ROOT_DIR] 安装依赖（npm workspaces）..."
   (cd "$ROOT_DIR" && npm ci --no-audit --no-fund --prefer-offline) || {
     echo "  npm ci 失败，回退到 npm install ..." >&2
     (cd "$ROOT_DIR" && npm install --no-audit --no-fund) || { echo "依赖安装失败" >&2; exit 1; }
@@ -365,18 +377,23 @@ do_start() {
   echo "  Node.js: $(node --version)"
   echo "  npm: $(npm --version)"
 
-  if deps_installed && [[ "$FORCE_DEPS" -eq 0 ]]; then
-    echo "[2/5] 依赖已安装，跳过（如需重装加 --force-deps）"
+  # 依赖：node_modules 缺失则自动安装；--force-deps 强制重装
+  if [[ "$FORCE_DEPS" -eq 1 ]]; then
+    echo "[2/5] 强制重新安装依赖 ..."
+    install_deps
+  elif deps_installed; then
+    echo "[2/5] 检查依赖 ... 已就绪"
   else
-    echo "[2/5] 安装依赖 ..."
+    echo "[2/5] 检查依赖 ... node_modules 缺失，自动安装"
     install_deps
   fi
 
   # 构建阶段：支持 --skip-build / --no-auto-build / 智能跳过
+  echo "[3/5] 检查并构建产物 ..."
   local backend_artifact="$BACKEND_DIR/dist/index.js"
   local frontend_artifact="$FRONTEND_DIR/dist/index.html"
   if [[ "$SKIP_BUILD" -eq 1 ]]; then
-    echo "[3/5] 跳过构建（--skip-build）"
+    echo "  跳过构建（--skip-build）"
   else
     local need_build=1
 
@@ -389,11 +406,11 @@ do_start() {
     fi
 
     if [[ "$need_build" -eq 0 ]]; then
-      echo "[3/5] 构建产物已是最新（源代码未修改），跳过构建"
+      echo "  构建产物已是最新（源代码未修改），跳过构建"
     else
-      echo "[3/5] 构建后端 ..."
+      echo "  构建后端 ..."
       (cd "$BACKEND_DIR" && npm run build)
-      echo "[3/5] 构建前端 ..."
+      echo "  构建前端 ..."
       (cd "$FRONTEND_DIR" && npm run build)
     fi
   fi

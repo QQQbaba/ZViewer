@@ -11,14 +11,15 @@ import {
   AtSign,
   Pencil,
   Crown,
+  Camera,
+  Trash2,
 } from 'lucide-react'
 import { PageBackButton } from '@/components/PageBackButton'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
-import { Space } from '@/components/ui/Space'
 import { Avatar } from '@/components/ui/Avatar'
-import { Modal } from '@/components/ui/Modal'
+import { Modal, ConfirmModal } from '@/components/ui/Modal'
 import { Spinner } from '@/components/ui/Spinner'
 import { Tag } from '@/components/ui/Tag'
 import { Title, Text, Paragraph } from '@/components/ui/Typography'
@@ -33,7 +34,24 @@ import {
   type BilibiliUserInfo,
 } from '@/modules/room/watch-together/resolveSource'
 import MountManager from '@/modules/mounts/MountManager'
+import ServerFileManager from '@/modules/server-files/ServerFileManager'
 import { apiFetch, API_URL } from '@/lib/api'
+
+/** 构建头像完整 URL（后端返回相对路径，前端拼接 API_URL） */
+function buildAvatarUrl(
+  avatar: string | null | undefined,
+  username?: string
+): string | undefined {
+  if (!avatar) {
+    if (username === 'root') {
+      return `${API_URL}/root-avatar.jpg`
+    }
+    return undefined
+  }
+  if (avatar.startsWith('http://') || avatar.startsWith('https://'))
+    return avatar
+  return `${API_URL}${avatar}`
+}
 
 export default function ProfilePage() {
   const navigate = useNavigate()
@@ -65,6 +83,11 @@ export default function ProfilePage() {
   const [newUsername, setNewUsername] = useState('')
   const [usernameLoading, setUsernameLoading] = useState(false)
   const [editInfoModalOpen, setEditInfoModalOpen] = useState(false)
+
+  // 头像上传
+  const [avatarLoading, setAvatarLoading] = useState(false)
+  const [avatarDeleteTarget, setAvatarDeleteTarget] = useState(false)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
 
   const loadBilibiliUser = useCallback(async () => {
     const info = await getBilibiliUserInfo()
@@ -254,6 +277,81 @@ export default function ProfilePage() {
     }
   }, [newUsername, setUser])
 
+  // 头像上传
+  const handleAvatarUpload = useCallback(
+    async (file: File) => {
+      if (user?.role === 'guest') {
+        message.warning('游客无法设置头像')
+        return
+      }
+      const allowedTypes = [
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp',
+      ]
+      if (!allowedTypes.includes(file.type)) {
+        message.error('仅支持 JPG / PNG / GIF / WEBP 格式')
+        return
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        message.error('头像文件不能超过 5MB')
+        return
+      }
+      setAvatarLoading(true)
+      try {
+        const formData = new FormData()
+        formData.append('avatar', file)
+        const res = await apiFetch(`${API_URL}/api/auth/avatar`, {
+          method: 'POST',
+          body: formData,
+        })
+        const data = (await res.json()) as {
+          success: boolean
+          message?: string
+          user?: AuthUser
+        }
+        if (data.success && data.user) {
+          message.success('头像更新成功')
+          setUser(data.user)
+        } else {
+          message.error(data.message ?? '头像上传失败')
+        }
+      } catch {
+        message.error('头像上传失败')
+      } finally {
+        setAvatarLoading(false)
+      }
+    },
+    [user, setUser]
+  )
+
+  // 头像删除
+  const handleAvatarDelete = useCallback(async () => {
+    setAvatarDeleteTarget(false)
+    setAvatarLoading(true)
+    try {
+      const res = await apiFetch(`${API_URL}/api/auth/avatar`, {
+        method: 'DELETE',
+      })
+      const data = (await res.json()) as {
+        success: boolean
+        message?: string
+        user?: AuthUser
+      }
+      if (data.success && data.user) {
+        message.success('头像已删除')
+        setUser(data.user)
+      } else {
+        message.error(data.message ?? '删除头像失败')
+      }
+    } catch {
+      message.error('删除头像失败')
+    } finally {
+      setAvatarLoading(false)
+    }
+  }, [setUser])
+
   useEffect(() => {
     return () => {
       stopQrPolling()
@@ -276,15 +374,12 @@ export default function ProfilePage() {
         <PageBackButton to={-1} />
 
         <div className="mb-6 pt-8 text-center">
-          <div
-            className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
-            style={{
-              backgroundColor: 'var(--md-sys-color-primary-container)',
-              color: 'var(--md-sys-color-on-primary-container)',
-            }}
-          >
-            <User className="h-7 w-7" />
-          </div>
+          <Avatar
+            size="lg"
+            alt={user.username}
+            src={buildAvatarUrl(user.avatar, user.username)}
+            className="mx-auto mb-3 h-14 w-14"
+          />
           <Title level={3} className="m-0">
             个人中心
           </Title>
@@ -295,13 +390,7 @@ export default function ProfilePage() {
 
         <div className="grid gap-4 sm:grid-cols-2">
           {/* ZViewer 账号信息 */}
-          <div
-            className="rounded-[var(--md-sys-shape-corner)] border p-4"
-            style={{
-              borderColor: 'var(--md-sys-color-outline)',
-              backgroundColor: 'var(--md-sys-color-surface-container-high)',
-            }}
-          >
+          <div className="glass-card p-4">
             <div className="mb-3 flex items-center gap-2">
               <div
                 className="flex h-8 w-8 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
@@ -317,7 +406,11 @@ export default function ProfilePage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-3">
-                  <Avatar size="md" alt={user.username} />
+                  <Avatar
+                    size="md"
+                    alt={user.username}
+                    src={buildAvatarUrl(user.avatar, user.username)}
+                  />
                   <div>
                     <p className="text-base font-medium text-[var(--md-sys-color-on-surface)]">
                       {user.username}
@@ -341,7 +434,7 @@ export default function ProfilePage() {
                 style={{
                   backgroundColor: isAdmin
                     ? 'var(--md-sys-color-primary-container)'
-                    : 'var(--md-sys-color-surface-container)',
+                    : 'var(--glass-bg)',
                   color: isAdmin
                     ? 'var(--md-sys-color-on-primary-container)'
                     : 'var(--md-sys-color-on-surface)',
@@ -364,13 +457,7 @@ export default function ProfilePage() {
           </div>
 
           {/* B站 绑定状态 */}
-          <div
-            className="rounded-[var(--md-sys-shape-corner)] border p-4"
-            style={{
-              borderColor: 'var(--md-sys-color-outline)',
-              backgroundColor: 'var(--md-sys-color-surface-container-high)',
-            }}
-          >
+          <div className="glass-card p-4">
             <div className="mb-3 flex items-center gap-2">
               <div
                 className="flex h-8 w-8 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
@@ -397,25 +484,31 @@ export default function ProfilePage() {
                     alt={bilibiliUser.name}
                   />
                   <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="truncate text-base font-medium text-[var(--md-sys-color-on-surface)]">
-                    {bilibiliUser.name}
-                  </p>
-                  {bilibiliUser.vipStatus === 1 ? (
-                    <Tag color="warning" className="shrink-0 px-1.5 py-0 text-[10px]">
-                      <Crown className="mr-0.5 h-3 w-3" />
-                      大会员
-                    </Tag>
-                  ) : (
-                    <Tag color="default" className="shrink-0 px-1.5 py-0 text-[10px]">
-                      普通账号
-                    </Tag>
-                  )}
-                </div>
-                <p className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                  已绑定 B站 账号
-                </p>
-              </div>
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-base font-medium text-[var(--md-sys-color-on-surface)]">
+                        {bilibiliUser.name}
+                      </p>
+                      {bilibiliUser.vipStatus === 1 ? (
+                        <Tag
+                          color="warning"
+                          className="shrink-0 px-1.5 py-0 text-[10px]"
+                        >
+                          <Crown className="mr-0.5 h-3 w-3" />
+                          大会员
+                        </Tag>
+                      ) : (
+                        <Tag
+                          color="default"
+                          className="shrink-0 px-1.5 py-0 text-[10px]"
+                        >
+                          普通账号
+                        </Tag>
+                      )}
+                    </div>
+                    <p className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                      已绑定 B站 账号
+                    </p>
+                  </div>
                 </div>
                 <Button
                   variant="danger"
@@ -447,6 +540,12 @@ export default function ProfilePage() {
         <div className="mt-6">
           <MountManager />
         </div>
+
+        {user.role === 'root' && (
+          <div className="mt-6">
+            <ServerFileManager />
+          </div>
+        )}
 
         {!bilibiliLoading && bilibiliUser && (
           <div className="mt-4 flex justify-end">
@@ -486,11 +585,10 @@ export default function ProfilePage() {
             />
           ) : (
             <div
-              className="rounded-lg flex items-center justify-center"
+              className="glass rounded-lg flex items-center justify-center"
               style={{
                 width: 200,
                 height: 200,
-                backgroundColor: 'var(--md-sys-color-surface-container)',
               }}
             >
               <Spinner tip="正在生成二维码…" size={28} />
@@ -519,6 +617,7 @@ export default function ProfilePage() {
         open={editInfoModalOpen}
         onClose={() => setEditInfoModalOpen(false)}
         title="编辑账号信息"
+        className="max-w-2xl"
         footer={
           <Button
             variant="secondary"
@@ -529,85 +628,255 @@ export default function ProfilePage() {
           </Button>
         }
       >
-        <div className="flex w-[320px] flex-col gap-5 sm:w-[360px]">
-          <div>
-            <div className="mb-3 flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-[var(--md-sys-color-primary)]" />
-              <Text className="text-sm font-medium">修改密码</Text>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/* 左侧列：头像 + 用户名 */}
+          <div className="flex flex-col gap-3">
+            {/* 修改头像区块 */}
+            <div className="glass-card overflow-hidden rounded-[var(--md-sys-shape-corner)]">
+              <div className="flex items-center gap-2.5 border-b border-[var(--glass-border)] px-4 py-3">
+                <span
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
+                  style={{
+                    background:
+                      'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-secondary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent))',
+                  }}
+                >
+                  <Camera
+                    className="h-4 w-4"
+                    style={{ color: 'var(--md-sys-color-primary)' }}
+                  />
+                </span>
+                <div className="flex min-w-0 flex-col">
+                  <Text className="text-sm font-semibold leading-tight">
+                    修改头像
+                  </Text>
+                  <Text
+                    type="secondary"
+                    className="text-[10px] uppercase tracking-wide"
+                  >
+                    上传自定义头像图片
+                  </Text>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2.5 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <Avatar
+                      size="lg"
+                      alt={user.username}
+                      src={buildAvatarUrl(user.avatar, user.username)}
+                    />
+                    {avatarLoading && (
+                      <div
+                        className="absolute inset-0 flex items-center justify-center rounded-full"
+                        style={{
+                          backgroundColor:
+                            'color-mix(in srgb, var(--md-sys-color-surface) 70%, transparent)',
+                        }}
+                      >
+                        <Spinner size={16} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <input
+                      ref={avatarInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) {
+                          void handleAvatarUpload(file)
+                        }
+                        // 重置 input value 以便重复选择同一文件
+                        e.target.value = ''
+                      }}
+                    />
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={<Camera className="h-3.5 w-3.5" />}
+                      loading={avatarLoading}
+                      onClick={() => avatarInputRef.current?.click()}
+                    >
+                      {user.avatar ? '更换头像' : '上传头像'}
+                    </Button>
+                    {user.avatar && (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        icon={<Trash2 className="h-3.5 w-3.5" />}
+                        disabled={avatarLoading}
+                        onClick={() => setAvatarDeleteTarget(true)}
+                      >
+                        删除头像
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <Text type="secondary" className="text-[10px] leading-relaxed">
+                  支持 JPG / PNG / GIF / WEBP，最大 5MB
+                </Text>
+              </div>
             </div>
-            <Space direction="vertical" className="w-full" size="sm">
-              <Input
-                type="password"
-                size="sm"
-                placeholder="原密码"
-                value={oldPassword}
-                onChange={(e) => setOldPassword(e.target.value)}
-              />
-              <Input
-                type="password"
-                size="sm"
-                placeholder="新密码"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-              />
-              <Input
-                type="password"
-                size="sm"
-                placeholder="确认新密码"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    void handleChangePassword()
-                  }
+
+            {/* 修改用户名区块 */}
+            {user.role === 'root' && (
+              <div className="glass-card overflow-hidden rounded-[var(--md-sys-shape-corner)]">
+                <div className="flex items-center gap-2.5 border-b border-[var(--glass-border)] px-4 py-3">
+                  <span
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
+                    style={{
+                      background:
+                        'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-tertiary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-secondary) 18%, transparent))',
+                    }}
+                  >
+                    <AtSign
+                      className="h-4 w-4"
+                      style={{ color: 'var(--md-sys-color-primary)' }}
+                    />
+                  </span>
+                  <div className="flex min-w-0 flex-col">
+                    <Text className="text-sm font-semibold leading-tight">
+                      修改用户名
+                    </Text>
+                    <Text
+                      type="secondary"
+                      className="text-[10px] uppercase tracking-wide"
+                    >
+                      更改登录账户名称
+                    </Text>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2.5 px-4 py-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
+                      新用户名
+                    </label>
+                    <Input
+                      size="sm"
+                      placeholder="请输入新用户名"
+                      value={newUsername}
+                      onChange={(e) => setNewUsername(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void handleChangeUsername()
+                        }
+                      }}
+                    />
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={usernameLoading}
+                    icon={<AtSign className="h-4 w-4" />}
+                    onClick={() => void handleChangeUsername()}
+                    className="mt-1"
+                  >
+                    确认修改
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 右侧列：修改密码 */}
+          <div className="glass-card overflow-hidden rounded-[var(--md-sys-shape-corner)]">
+            <div className="flex items-center gap-2.5 border-b border-[var(--glass-border)] px-4 py-3">
+              <span
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
+                style={{
+                  background:
+                    'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-tertiary) 18%, transparent))',
                 }}
-              />
+              >
+                <KeyRound
+                  className="h-4 w-4"
+                  style={{ color: 'var(--md-sys-color-primary)' }}
+                />
+              </span>
+              <div className="flex min-w-0 flex-col">
+                <Text className="text-sm font-semibold leading-tight">
+                  修改密码
+                </Text>
+                <Text
+                  type="secondary"
+                  className="text-[10px] uppercase tracking-wide"
+                >
+                  更新账户登录密码
+                </Text>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2.5 px-4 py-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
+                  原密码
+                </label>
+                <Input
+                  type="password"
+                  size="sm"
+                  placeholder="请输入原密码"
+                  value={oldPassword}
+                  onChange={(e) => setOldPassword(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
+                  新密码
+                </label>
+                <Input
+                  type="password"
+                  size="sm"
+                  placeholder="至少 4 位"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
+                  确认新密码
+                </label>
+                <Input
+                  type="password"
+                  size="sm"
+                  placeholder="再次输入新密码"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void handleChangePassword()
+                    }
+                  }}
+                />
+              </div>
               <Button
                 variant="primary"
                 size="sm"
                 loading={passwordLoading}
                 icon={<KeyRound className="h-4 w-4" />}
                 onClick={() => void handleChangePassword()}
+                className="mt-1"
               >
-                修改密码
+                确认修改
               </Button>
-            </Space>
-          </div>
-
-          {user.role === 'root' && (
-            <div className="border-t border-[var(--md-sys-color-outline-variant)] pt-4">
-              <div className="mb-3 flex items-center gap-2">
-                <AtSign className="h-4 w-4 text-[var(--md-sys-color-primary)]" />
-                <Text className="text-sm font-medium">修改用户名</Text>
-              </div>
-              <Space direction="vertical" className="w-full" size="sm">
-                <Input
-                  size="sm"
-                  placeholder="新用户名"
-                  value={newUsername}
-                  onChange={(e) => setNewUsername(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      void handleChangeUsername()
-                    }
-                  }}
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  loading={usernameLoading}
-                  icon={<AtSign className="h-4 w-4" />}
-                  onClick={() => void handleChangeUsername()}
-                >
-                  修改用户名
-                </Button>
-              </Space>
             </div>
-          )}
+          </div>
         </div>
       </Modal>
+
+      <ConfirmModal
+        open={avatarDeleteTarget}
+        onClose={() => setAvatarDeleteTarget(false)}
+        title="删除头像"
+        okText="删除"
+        onOk={() => void handleAvatarDelete()}
+        onCancel={() => setAvatarDeleteTarget(false)}
+      >
+        <Text className="text-sm">确定要删除当前头像并恢复默认头像吗？</Text>
+      </ConfirmModal>
     </div>
   )
 }

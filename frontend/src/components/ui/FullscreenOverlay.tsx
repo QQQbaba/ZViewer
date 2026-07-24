@@ -32,7 +32,12 @@ export function FullscreenOverlay({
   return createPortal(
     <div className="fullscreen-overlay fixed inset-0 z-[999]">
       <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/40"
+        style={{
+          // 蒙层模糊度跟随主题设置（取 glass-blur 的 40%，与 Modal 保持一致）
+          backdropFilter: 'blur(var(--glass-blur-mask))',
+          WebkitBackdropFilter: 'blur(var(--glass-blur-mask))',
+        }}
         onClick={onClose}
         aria-hidden="true"
       />

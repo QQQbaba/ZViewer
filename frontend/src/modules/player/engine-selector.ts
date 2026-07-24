@@ -23,12 +23,7 @@ const ENGINES: Record<EngineType, PlayerEngine> = {
   direct: directEngine,
 }
 
-/**
- * 根据源数据选择合适的播放引擎。
- *
- * @param source 播放源数据
- * @returns 对应的 PlayerEngine 实例
- */
+/** 根据源数据选择合适的播放引擎。 */
 export function selectEngine(source: PlayerSource): PlayerEngine {
   if (source.format === 'dash' || source.audioUrl) {
     return ENGINES.mse

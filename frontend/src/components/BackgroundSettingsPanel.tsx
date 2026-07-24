@@ -1,5 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
-import { createPortal } from 'react-dom'
+import { useState, useEffect, useRef } from 'react'
 import { Image, Link2, Upload, Trash2, Check } from 'lucide-react'
 import { Slider } from '@/components/ui/Slider'
 import { Input } from '@/components/ui/Input'
@@ -9,9 +8,9 @@ import { message } from '@/components/ui/message'
 import { cn } from '@/lib/utils'
 
 interface BackgroundSettingsPanelProps {
+  /** 是否展开 */
   open: boolean
   onClose: () => void
-  anchorRef: React.RefObject<HTMLElement | null>
 }
 
 type TabKey = 'url' | 'upload'
@@ -36,10 +35,11 @@ const DEFAULT_CONFIG: BackgroundConfig = {
   backgroundRotate: 0,
 }
 
+/** 左列宽度（px） */
+export const COLUMN_WIDTH = 300
 export function BackgroundSettingsPanel({
   open,
   onClose,
-  anchorRef,
 }: BackgroundSettingsPanelProps) {
   const store = useThemeStore()
   const isSavedUpload = store.backgroundImage?.startsWith('data:') ?? false
@@ -62,58 +62,9 @@ export function BackgroundSettingsPanel({
     backgroundRotate: store.backgroundRotate,
   })
 
-  const [position, setPosition] = useState<{
-    top: number
-    left: number
-  } | null>(null)
-  const [isClosing, setIsClosing] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
 
-  const PANEL_WIDTH = 320 // w-80 = 20rem = 320px
-  const PANEL_GAP = 8
-
-  const computePosition = useCallback(() => {
-    if (!anchorRef.current) return
-    const rect = anchorRef.current.getBoundingClientRect()
-    // 优先从左侧弹出（面板在按钮左方），避免遮挡下方菜单内容
-    const spaceLeft = rect.left
-    let left: number
-    if (spaceLeft >= PANEL_WIDTH + PANEL_GAP) {
-      // 左侧空间足够，面板在按钮左方
-      left = rect.left - PANEL_WIDTH - PANEL_GAP
-    } else {
-      // 左侧空间不够，回退到右侧
-      left = rect.right + PANEL_GAP
-      // 若右侧也溢出屏幕，贴齐右边缘
-      if (left + PANEL_WIDTH > window.innerWidth - 8) {
-        left = Math.max(8, window.innerWidth - PANEL_WIDTH - 8)
-      }
-    }
-    // 垂直方向与按钮顶部对齐，底部溢出时上移
-    let top = rect.top
-    const estimatedPanelHeight = 520 // 预估面板高度（含滑块）
-    if (top + estimatedPanelHeight > window.innerHeight - 8) {
-      top = Math.max(8, window.innerHeight - estimatedPanelHeight - 8)
-    }
-    setPosition({ top, left })
-  }, [anchorRef])
-
-  useEffect(() => {
-    if (!open) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- 面板关闭时清理定位与动画状态
-      setPosition(null)
-      setIsClosing(false)
-      return
-    }
-    computePosition()
-    const handler = () => computePosition()
-    window.addEventListener('resize', handler)
-    window.addEventListener('scroll', handler, true)
-    return () => {
-      window.removeEventListener('resize', handler)
-      window.removeEventListener('scroll', handler, true)
-    }
-  }, [open, computePosition])
-
+  // 打开时同步当前背景配置到表单
   useEffect(() => {
     if (!open) return
     savedConfigRef.current = {
@@ -168,8 +119,6 @@ export function BackgroundSettingsPanel({
     e.target.value = ''
   }
 
-  const [isDragOver, setIsDragOver] = useState(false)
-
   const handleFile = (file: File) => {
     if (!file.type.startsWith('image/')) {
       message.error('请选择图片文件')
@@ -188,7 +137,6 @@ export function BackgroundSettingsPanel({
         return
       }
       setUploadImage(result)
-      // 使用 getState() 确保在异步回调中使用最新的 store 引用
       try {
         useThemeStore.getState().setBackgroundImage(result)
       } catch (err) {
@@ -214,15 +162,11 @@ export function BackgroundSettingsPanel({
 
   const handleClear = () => {
     applyToStore(DEFAULT_CONFIG)
+    setActiveTab('url')
+    setUrlInput('')
+    setUploadImage(null)
+    message.success('已清除自定义背景')
     onClose()
-  }
-
-  const handleClose = () => {
-    setIsClosing(true)
-    setTimeout(() => {
-      onClose()
-      setIsClosing(false)
-    }, 180)
   }
 
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
@@ -236,195 +180,192 @@ export function BackgroundSettingsPanel({
 
   const previewImage = store.backgroundImage
 
-  if (!open || !position) return null
-
-  return createPortal(
+  return (
     <div
-      className={cn(
-        'glass-strong fixed w-80 max-h-[calc(100vh-32px)] overflow-y-auto rounded-[var(--md-sys-shape-corner)] p-4 shadow-lg',
-        isClosing ? 'zen-panel-exit-left' : 'zen-panel-enter-left'
-      )}
+      className="h-full flex-shrink-0 overflow-hidden"
       style={{
-        top: `${position.top}px`,
-        left: `${position.left}px`,
-        zIndex: 60,
-        boxShadow:
-          '0 8px 24px -8px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent)',
+        width: open ? COLUMN_WIDTH : 0,
+        transition: `width 240ms var(--ease-out-expo)`,
+        willChange: 'width',
       }}
     >
-      {/* 标题栏 */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Image className="w-4 h-4 text-[var(--md-sys-color-primary)]" />
-          <span className="text-sm font-medium text-[var(--md-sys-color-on-surface)]">
-            自定义背景
-          </span>
-        </div>
-        <button
-          onClick={handleClose}
-          className="p-1 rounded-[var(--md-sys-shape-corner)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)] transition-colors"
-        >
-          <Check className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* 标签页 */}
-      <div className="flex p-1 rounded-[var(--md-sys-shape-corner)] bg-[var(--md-sys-color-surface-container-high)]">
-        {tabs.map((tab) => (
+      <div className="flex h-full flex-col overflow-hidden border-r border-[var(--glass-border)] p-4">
+        {/* 标题栏 */}
+        <div className="mb-3 flex shrink-0 items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Image className="h-4 w-4 text-[var(--md-sys-color-primary)]" />
+            <span className="text-sm font-medium text-[var(--md-sys-color-on-surface)]">
+              自定义背景
+            </span>
+          </div>
           <button
-            key={tab.key}
-            onClick={() => switchTab(tab.key)}
-            className={cn(
-              'flex-1 flex items-center justify-center gap-1 py-1.5 text-xs font-medium rounded-[var(--md-sys-shape-corner)] transition-all',
-              activeTab === tab.key
-                ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
-                : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-            )}
+            onClick={onClose}
+            className="rounded-[var(--md-sys-shape-corner)] p-1 text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
           >
-            {tab.icon}
-            {tab.label}
+            <Check className="h-4 w-4" />
           </button>
-        ))}
-      </div>
-
-      {/* 网络图片 */}
-      {activeTab === 'url' && (
-        <div className="mt-3">
-          <Input
-            size="sm"
-            placeholder="https://example.com/image.jpg"
-            value={urlInput}
-            onChange={(e) => handleUrlChange(e.target.value)}
-          />
         </div>
-      )}
 
-      {/* 本地上传 */}
-      {activeTab === 'upload' && (
-        <div className="mt-3">
-          <label
-            onDragOver={(e) => {
-              e.preventDefault()
-              setIsDragOver(true)
-            }}
-            onDragLeave={(e) => {
-              e.preventDefault()
-              setIsDragOver(false)
-            }}
-            onDrop={handleDrop}
-            className={cn(
-              'flex flex-col items-center justify-center gap-2 w-full py-6 rounded-[var(--md-sys-shape-corner)] border border-dashed transition-all cursor-pointer',
-              isDragOver
-                ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)] scale-[1.02]'
-                : 'border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-            )}
-          >
-            <Upload
-              className={cn(
-                'w-6 h-6 transition-transform',
-                isDragOver && 'scale-110'
-              )}
+        {/* 可滚动内容区 */}
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
+          {/* 标签页 */}
+          <div className="flex rounded-[var(--md-sys-shape-corner)] bg-[var(--glass-bg)] p-1">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => switchTab(tab.key)}
+                className={cn(
+                  'flex flex-1 items-center justify-center gap-1 rounded-[var(--md-sys-shape-corner)] py-1.5 text-xs font-medium transition-all',
+                  activeTab === tab.key
+                    ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                    : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                )}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* 网络图片 */}
+          {activeTab === 'url' && (
+            <div className="mt-3">
+              <Input
+                size="sm"
+                placeholder="https://example.com/image.jpg"
+                value={urlInput}
+                onChange={(e) => handleUrlChange(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* 本地上传 */}
+          {activeTab === 'upload' && (
+            <div className="mt-3">
+              <label
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setIsDragOver(true)
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault()
+                  setIsDragOver(false)
+                }}
+                onDrop={handleDrop}
+                className={cn(
+                  'flex w-full flex-col items-center justify-center gap-2 rounded-[var(--md-sys-shape-corner)] border border-dashed py-6 transition-all cursor-pointer',
+                  isDragOver
+                    ? 'scale-[1.02] border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                    : 'border-[var(--md-sys-color-outline)] bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                )}
+              >
+                <Upload
+                  className={cn(
+                    'h-6 w-6 transition-transform',
+                    isDragOver && 'scale-110'
+                  )}
+                />
+                <span className="text-xs font-medium">
+                  {isDragOver ? '释放以上传图片' : '拖拽图片到此处或点击选择'}
+                </span>
+                <span className="text-[10px] opacity-70">
+                  支持 JPG / PNG / WebP，最大 5MB
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+              </label>
+            </div>
+          )}
+
+          {/* 预览 */}
+          {previewImage && (
+            <div
+              className="mt-3 h-24 w-full overflow-hidden rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-cover bg-center bg-[var(--glass-bg)]"
+              style={{
+                backgroundImage: `url(${previewImage})`,
+                filter: `blur(${store.backgroundBlur}px)`,
+                opacity: store.backgroundOpacity,
+                // 位置由 transform: translate 控制，与 Layout 实际渲染保持一致
+                transform: `translate(${store.backgroundPositionX / 2}%, ${store.backgroundPositionY / 2}%) scale(${store.backgroundScale}) rotate(${store.backgroundRotate}deg)`,
+              }}
             />
-            <span className="text-xs font-medium">
-              {isDragOver ? '释放以上传图片' : '拖拽图片到此处或点击选择'}
-            </span>
-            <span className="text-[10px] opacity-70">
-              支持 JPG / PNG / WebP，最大 5MB
-            </span>
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleFileChange}
+          )}
+
+          {/* 参数滑块 */}
+          <div className="mt-3 space-y-2 px-2">
+            <Slider
+              label="模糊度"
+              value={store.backgroundBlur}
+              min={0}
+              max={20}
+              step={1}
+              valueFormatter={(v) => `${v}px`}
+              onChange={store.setBackgroundBlur}
             />
-          </label>
+            <Slider
+              label="透明度"
+              value={Math.round(store.backgroundOpacity * 100)}
+              min={0}
+              max={100}
+              step={1}
+              valueFormatter={(v) => `${v}%`}
+              onChange={(v) => store.setBackgroundOpacity(v / 100)}
+            />
+            <Slider
+              label="水平位置"
+              value={store.backgroundPositionX}
+              min={-100}
+              max={100}
+              step={1}
+              valueFormatter={(v) => `${v}%`}
+              onChange={store.setBackgroundPositionX}
+            />
+            <Slider
+              label="垂直位置"
+              value={store.backgroundPositionY}
+              min={-100}
+              max={100}
+              step={1}
+              valueFormatter={(v) => `${v}%`}
+              onChange={store.setBackgroundPositionY}
+            />
+            <Slider
+              label="缩放比例"
+              value={Math.round(store.backgroundScale * 100)}
+              min={50}
+              max={200}
+              step={1}
+              valueFormatter={(v) => `${v}%`}
+              onChange={(v) => store.setBackgroundScale(v / 100)}
+            />
+            <Slider
+              label="旋转角度"
+              value={store.backgroundRotate}
+              min={0}
+              max={360}
+              step={1}
+              valueFormatter={(v) => `${v}°`}
+              onChange={store.setBackgroundRotate}
+            />
+          </div>
         </div>
-      )}
 
-      {/* 预览 */}
-      {previewImage && (
-        <div
-          className="mt-3 w-full h-24 rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] bg-cover bg-center overflow-hidden"
-          style={{
-            backgroundImage: `url(${previewImage})`,
-            filter: `blur(${store.backgroundBlur}px)`,
-            opacity: store.backgroundOpacity,
-            backgroundPosition: `${store.backgroundPositionX}% ${store.backgroundPositionY}%`,
-            transform: `scale(${store.backgroundScale}) rotate(${store.backgroundRotate}deg)`,
-          }}
-        />
-      )}
-
-      {/* 参数滑块 */}
-      <div className="mt-3 space-y-2">
-        <Slider
-          label="模糊度"
-          value={store.backgroundBlur}
-          min={0}
-          max={20}
-          step={1}
-          valueFormatter={(v) => `${v}px`}
-          onChange={store.setBackgroundBlur}
-        />
-        <Slider
-          label="透明度"
-          value={Math.round(store.backgroundOpacity * 100)}
-          min={0}
-          max={100}
-          step={1}
-          valueFormatter={(v) => `${v}%`}
-          onChange={(v) => store.setBackgroundOpacity(v / 100)}
-        />
-        <Slider
-          label="水平位置"
-          value={store.backgroundPositionX}
-          min={-100}
-          max={100}
-          step={1}
-          valueFormatter={(v) => `${v}%`}
-          onChange={store.setBackgroundPositionX}
-        />
-        <Slider
-          label="垂直位置"
-          value={store.backgroundPositionY}
-          min={-100}
-          max={100}
-          step={1}
-          valueFormatter={(v) => `${v}%`}
-          onChange={store.setBackgroundPositionY}
-        />
-        <Slider
-          label="缩放比例"
-          value={Math.round(store.backgroundScale * 100)}
-          min={50}
-          max={200}
-          step={1}
-          valueFormatter={(v) => `${v}%`}
-          onChange={(v) => store.setBackgroundScale(v / 100)}
-        />
-        <Slider
-          label="旋转角度"
-          value={store.backgroundRotate}
-          min={0}
-          max={360}
-          step={1}
-          valueFormatter={(v) => `${v}°`}
-          onChange={store.setBackgroundRotate}
-        />
+        {/* 清除背景 */}
+        <Button
+          variant="danger"
+          size="sm"
+          block
+          className="mt-3 shrink-0"
+          icon={<Trash2 className="h-3.5 w-3.5" />}
+          onClick={handleClear}
+        >
+          清除背景
+        </Button>
       </div>
-
-      {/* 清除背景 */}
-      <Button
-        variant="danger"
-        size="sm"
-        block
-        className="mt-3"
-        icon={<Trash2 className="w-3.5 h-3.5" />}
-        onClick={handleClear}
-      >
-        清除背景
-      </Button>
-    </div>,
-    document.body
+    </div>
   )
 }

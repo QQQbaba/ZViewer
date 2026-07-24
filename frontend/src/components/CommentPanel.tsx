@@ -166,10 +166,7 @@ export function CommentPanel({
           <div className="flex h-full min-h-0 flex-col gap-3">
             <div
               ref={listRef}
-              className="flex-1 min-h-0 overflow-y-auto rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] p-3"
-              style={{
-                backgroundColor: 'var(--md-sys-color-surface-container)',
-              }}
+              className="glass flex-1 min-h-0 overflow-y-auto rounded-[var(--md-sys-shape-corner)] p-3"
             >
               <Space direction="vertical" className="w-full" size="sm">
                 {comments.length === 0 && (
@@ -192,7 +189,7 @@ export function CommentPanel({
                       'zen-comment-enter rounded-[var(--md-sys-shape-corner)] border p-3 transition-all hover:shadow-sm hover:-translate-y-0.5',
                       comment.isDanmaku
                         ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]'
-                        : 'border-transparent bg-[var(--md-sys-color-surface-container-high)] hover:border-[var(--md-sys-color-outline-variant)]'
+                        : 'border-transparent bg-[var(--glass-bg)] hover:border-[var(--md-sys-color-outline-variant)]'
                     )}
                     style={
                       {

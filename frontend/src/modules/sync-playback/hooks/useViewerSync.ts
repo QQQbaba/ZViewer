@@ -19,6 +19,7 @@
  */
 import type { RefObject, MutableRefObject } from 'react'
 import type { WatchTogetherState } from '../types'
+import type { SeekToResult } from '../services'
 import { useViewerStateSync } from './useViewerStateSync'
 import {
   useServerHeartbeat,
@@ -38,8 +39,10 @@ export interface UseViewerSyncOptions {
   ) => Promise<void>
   /** 当前播放状态（用于服务器心跳的 URL 过期检测） */
   watchTogether: WatchTogetherState
-  /** 已应用 sourceUrl 的 ref，供观众端 seek 到未缓冲区域时重置 */
-  appliedSourceUrlRef: MutableRefObject<string | null>
+  /** seek 到目标时间（MSE 流不重建 MediaSource，由 useVideoSource 提供） */
+  seekTo: (video: HTMLVideoElement, targetTime: number) => Promise<SeekToResult>
+  /** MSE seek 失败时调用（如 video.error），用 forceReload 重新加载 */
+  reloadVideo: (video: HTMLVideoElement) => Promise<void>
 }
 
 export type UseViewerSyncReturn = void
@@ -52,7 +55,8 @@ export function useViewerSync({
   setWatchTogether,
   applySourceToVideo,
   watchTogether,
-  appliedSourceUrlRef,
+  seekTo,
+  reloadVideo,
 }: UseViewerSyncOptions): UseViewerSyncReturn {
   // 1. 接收房主实时状态（房主在线时）
   useViewerStateSync({
@@ -62,7 +66,8 @@ export function useViewerSync({
     suppressEventsRef,
     setWatchTogether,
     applySourceToVideo,
-    appliedSourceUrlRef,
+    seekTo,
+    reloadVideo,
   })
 
   // 2. 从服务器请求初始状态（加入房间时，ack 直返）

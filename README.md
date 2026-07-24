@@ -209,14 +209,14 @@ npm run dev:frontend
 
 ### 一键启动脚本
 
-项目根目录提供跨平台启动脚本，支持启动、停止、重启、查看状态与日志。
+项目根目录提供跨平台启动脚本，**无需提前执行 `npm install` 或 `npm run build`**，脚本会自动检测并按需安装依赖、构建产物、启动服务。
 
 #### Windows (PowerShell)
 
 ```powershell
-.\start-prod.ps1 start                # 构建并启动
+.\start-prod.ps1 start                # 一键启动（自动安装+构建+启动）
 .\start-prod.ps1 stop                 # 停止
-.\start-prod.ps1 restart              # 重启
+.\start-prod.ps1 restart              # 重启（跳过构建，加快重启）
 .\start-prod.ps1 status               # 查看状态
 .\start-prod.ps1 logs backend         # 查看后端日志
 .\start-prod.ps1 logs frontend        # 查看前端日志
@@ -227,9 +227,9 @@ npm run dev:frontend
 #### Linux / macOS
 
 ```bash
-./start-prod.sh start                 # 构建并启动
+./start-prod.sh start                 # 一键启动（自动安装+构建+启动）
 ./start-prod.sh stop                  # 停止
-./start-prod.sh restart               # 重启
+./start-prod.sh restart               # 重启（跳过构建，加快重启）
 ./start-prod.sh status                # 查看状态
 ./start-prod.sh logs backend          # 查看后端日志
 ./start-prod.sh logs frontend         # 查看前端日志
@@ -239,22 +239,27 @@ npm run dev:frontend
 
 | 选项 | PowerShell | Bash | 说明 |
 |---|---|---|---|
-| 跳过构建 | `-SkipBuild` | `--skip-build` | 复用已有 `dist/` 产物 |
-| 智能跳过 | `-AutoBuild`（默认） | — | 源码未修改时自动跳过构建 |
-| 强制构建 | `-NoAutoBuild` | — | 禁用智能跳过，强制构建 |
-| 后端端口 | `-Port <int>` | `-p, --port <int>` | 默认 3000 |
+| 跳过构建 | `-SkipBuild` | `--skip-build` | 仅使用已有 `dist/` 产物启动 |
+| 智能跳过 | 默认行为 | `--auto-build`（默认） | 源码未修改时自动跳过构建 |
+| 强制构建 | — | `--no-auto-build` | 禁用智能跳过，强制构建 |
+| 重装依赖 | `-ForceDeps` | `--force-deps` | 强制重新安装依赖 |
+| 后端端口 | `-Port <int>` | `-p, --port <int>` | 默认 3333 |
 | 前端端口 | `-FrontendPort <int>` | `--frontend-port <int>` | 默认 4173 |
 | 数据库 | `-Database <url>` | `-d, --database <url>` | 覆盖 `DATABASE_URL` |
-| 重装依赖 | `-ForceDeps` | — | 强制重新安装依赖 |
 
 示例：
 
 ```powershell
-.\start-prod.ps1 start -SkipBuild -Port 3001
+.\start-prod.ps1 start                # 一键启动（自动安装+构建）
+.\start-prod.ps1 start -SkipBuild     # 跳过构建，仅启动
+.\start-prod.ps1 start -ForceDeps     # 强制重新安装依赖
+.\start-prod.ps1 start -Port 3001
 ```
 
 ```bash
-./start-prod.sh start --skip-build -p 3001
+./start-prod.sh start                       # 一键启动（自动安装+构建）
+./start-prod.sh start --skip-build -p 3001  # 跳过构建，指定端口
+./start-prod.sh start --force-deps          # 强制重新安装依赖
 ```
 
 #### 启动流程
@@ -262,9 +267,9 @@ npm run dev:frontend
 执行 `start` 时脚本自动完成：
 
 1. 检查 Node.js / npm 环境
-2. 安装依赖（npm workspaces 根目录统一安装）
-3. 智能构建（源码未修改时跳过）
-4. 校验后端产物 `backend/dist/index.js`
+2. 检查依赖：`node_modules` 缺失则自动 `npm ci` / `npm install`；`-ForceDeps` 强制重装
+3. 智能构建：产物缺失或源码已更新时自动 `npm run build`；源码未修改时跳过
+4. 校验后端产物 `backend/dist/index.js` 与前端产物 `frontend/dist/index.html`
 5. 后台启动后端 API 与前端静态服务
 
 PID 写入 `.prod.pids.json`，日志写入 `backend-prod.log` 与 `frontend-prod.log`。

@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import multer from 'multer';
+import path from 'node:path';
+import fs from 'node:fs';
 import { AppDataSource } from '../data-source';
 import { User } from '../entities/User';
+import { getSystemSettings } from '../index';
 import {
   generateTokens,
   verifyRefreshToken,
@@ -14,6 +18,37 @@ import {
 
 const router = Router();
 const userRepository = () => AppDataSource.getRepository(User);
+
+/** 头像存储目录（backend/uploads/avatars）。 */
+const AVATARS_DIR = path.resolve(process.cwd(), 'uploads', 'avatars');
+
+/** 头像上传 multer 配置：仅接受图片，存储到 AVATARS_DIR。 */
+const avatarStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    if (!fs.existsSync(AVATARS_DIR)) {
+      fs.mkdirSync(AVATARS_DIR, { recursive: true });
+    }
+    cb(null, AVATARS_DIR);
+  },
+  filename: (req, file, cb) => {
+    const userId = (req as AuthenticatedRequest).user?.userId ?? 0;
+    const ext = path.extname(file.originalname).toLowerCase() || '.png';
+    // 文件名格式：<userId>-<timestamp>.<ext>，避免冲突并便于清理
+    cb(null, `${userId}-${Date.now()}${ext}`);
+  },
+});
+const avatarUpload = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('仅支持 JPG / PNG / GIF / WEBP 格式'));
+    }
+  },
+});
 
 router.post(
   '/register',
@@ -37,6 +72,14 @@ router.post(
         return;
       }
 
+      const settings = await getSystemSettings();
+      const mode = settings.registrationMode;
+
+      if (mode === 'closed') {
+        res.status(403).json({ success: false, message: '注册已关闭' });
+        return;
+      }
+
       const trimmedUsername = username.trim();
       const existing = await userRepository().findOneBy({
         username: trimmedUsername,
@@ -47,24 +90,31 @@ router.post(
       }
 
       const passwordHash = bcrypt.hashSync(password, 10);
+      const isOpen = mode === 'open';
       const user = userRepository().create({
         username: trimmedUsername,
         passwordHash,
         role: 'user',
-        status: 'pending',
+        status: isOpen ? 'active' : 'pending',
       });
       await userRepository().save(user);
 
-      const tokens = generateTokens(user.id, user.role, user.username);
-      setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+      if (isOpen) {
+        const tokens = generateTokens(user.id, user.role, user.username);
+        setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+      }
+
       res.status(201).json({
         success: true,
-        ...tokens,
+        message: isOpen
+          ? '注册成功'
+          : '注册成功，请等待管理员审核通过后再登录',
         user: {
           id: user.id,
           username: user.username,
           role: user.role,
           status: user.status,
+          avatar: user.avatar,
         },
       });
     } catch (err) {
@@ -115,6 +165,7 @@ router.post(
           username: user.username,
           role: user.role,
           status: user.status,
+          avatar: user.avatar,
         },
       });
     } catch (err) {
@@ -178,6 +229,26 @@ router.post(
   },
 );
 
+/** 公开接口：获取当前注册模式，供登录/注册页展示用。 */
+router.get(
+  '/registration-mode',
+  async (
+    _req: import('express').Request,
+    res: import('express').Response,
+  ): Promise<void> => {
+    try {
+      const settings = await getSystemSettings();
+      res.json({
+        success: true,
+        mode: settings.registrationMode,
+      });
+    } catch (err) {
+      console.error('registration-mode error:', err);
+      res.status(500).json({ success: false, message: '获取注册模式失败' });
+    }
+  },
+);
+
 router.get(
   '/me',
   authenticateToken,
@@ -189,7 +260,7 @@ router.get(
       if (req.user!.userId === 0 && req.user!.role === 'guest') {
         res.json({
           success: true,
-          user: { id: 0, username: 'guest', role: 'guest', status: 'active' },
+          user: { id: 0, username: 'guest', role: 'guest', status: 'active', avatar: null },
         });
         return;
       }
@@ -206,6 +277,7 @@ router.get(
           username: user.username,
           role: user.role,
           status: user.status,
+          avatar: user.avatar,
         },
       });
     } catch (err) {
@@ -309,11 +381,122 @@ router.patch(
           username: user.username,
           role: user.role,
           status: user.status,
+          avatar: user.avatar,
         },
       });
     } catch (err) {
       console.error('change username error:', err);
       res.status(500).json({ success: false, message: '修改用户名失败' });
+    }
+  },
+);
+
+/** 上传/更新当前用户头像 */
+router.post(
+  '/avatar',
+  authenticateToken,
+  avatarUpload.single('avatar'),
+  async (
+    req: AuthenticatedRequest & { file?: Express.Multer.File },
+    res: import('express').Response,
+  ): Promise<void> => {
+    try {
+      if (req.user!.userId === 0 && req.user!.role === 'guest') {
+        res.status(403).json({ success: false, message: '游客无法设置头像' });
+        return;
+      }
+      if (!req.file) {
+        res.status(400).json({ success: false, message: '未接收到头像文件' });
+        return;
+      }
+
+      const userRepo = userRepository();
+      const user = await userRepo.findOneBy({ id: req.user!.userId });
+      if (!user) {
+        res.status(404).json({ success: false, message: '用户不存在' });
+        return;
+      }
+
+      // 删除旧头像文件（非 root 默认头像）
+      const oldAvatar = user.avatar;
+      if (oldAvatar && oldAvatar.startsWith('/uploads/avatars/')) {
+        const oldPath = path.join(AVATARS_DIR, path.basename(oldAvatar));
+        try {
+          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        } catch {
+          // 旧文件删除失败不阻断流程
+        }
+      }
+
+      // 存储相对路径，前端拼接 API_URL 使用
+      const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+      user.avatar = avatarUrl;
+      await userRepo.save(user);
+
+      res.json({
+        success: true,
+        message: '头像更新成功',
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          status: user.status,
+          avatar: user.avatar,
+        },
+      });
+    } catch (err) {
+      console.error('upload avatar error:', err);
+      res.status(500).json({
+        success: false,
+        message: err instanceof Error ? err.message : '头像上传失败',
+      });
+    }
+  },
+);
+
+/** 删除当前用户头像（恢复默认） */
+router.delete(
+  '/avatar',
+  authenticateToken,
+  async (
+    req: AuthenticatedRequest,
+    res: import('express').Response,
+  ): Promise<void> => {
+    try {
+      if (req.user!.userId === 0 && req.user!.role === 'guest') {
+        res.status(403).json({ success: false, message: '游客无头像' });
+        return;
+      }
+      const userRepo = userRepository();
+      const user = await userRepo.findOneBy({ id: req.user!.userId });
+      if (!user) {
+        res.status(404).json({ success: false, message: '用户不存在' });
+        return;
+      }
+      if (user.avatar && user.avatar.startsWith('/uploads/avatars/')) {
+        const oldPath = path.join(AVATARS_DIR, path.basename(user.avatar));
+        try {
+          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        } catch {
+          // ignore
+        }
+      }
+      user.avatar = null;
+      await userRepo.save(user);
+      res.json({
+        success: true,
+        message: '头像已删除',
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          status: user.status,
+          avatar: user.avatar,
+        },
+      });
+    } catch (err) {
+      console.error('delete avatar error:', err);
+      res.status(500).json({ success: false, message: '删除头像失败' });
     }
   },
 );
@@ -331,7 +514,7 @@ router.post(
       res.json({
         success: true,
         ...tokens,
-        user: { id: 0, username: 'guest', role: 'guest', status: 'active' },
+        user: { id: 0, username: 'guest', role: 'guest', status: 'active', avatar: null },
       });
     } catch (err) {
       console.error('guest token error:', err);

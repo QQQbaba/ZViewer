@@ -15,7 +15,7 @@ export function Tag({
 }: TagProps) {
   const colors = {
     default:
-      'bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface)] border-[var(--md-sys-color-outline)]',
+      'bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface)] border-[var(--md-sys-color-outline)]',
     primary:
       'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)] border-[var(--md-sys-color-primary)]',
     success:

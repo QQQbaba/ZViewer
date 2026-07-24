@@ -12,10 +12,13 @@ import { DEFAULT_SEED } from '@/lib/themes'
  */
 const GLASS_VARS = [
   '--glass-strength',
+  '--glass-strong-strength',
   '--glass-blur',
+  '--glass-blur-strong',
+  '--glass-blur-mask',
+  '--glass-blur-loading',
   '--glass-bg',
   '--glass-border',
-  '--glass-strong-strength',
 ]
 
 /**
@@ -45,7 +48,8 @@ function glassBorderAlpha(strength: number): number {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const { sourceColor, isDark, radius, glassStrength } = useThemeStore()
+  const { sourceColor, isDark, radius, glassStrength, glassBlur } =
+    useThemeStore()
 
   // 根据当前种子色与深浅模式生成并应用 Material You CSS 变量
   useEffect(() => {
@@ -70,19 +74,20 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       )
     })
     root.style.setProperty('--glass-strength', String(glassStrength))
-    root.style.setProperty('--glass-blur', '12px')
+    root.style.setProperty('--glass-strong-strength', String(Math.min(0.95, glassStrength + 0.25)))
 
+    // 玻璃模糊统一由主题设置驱动，所有卡片/遮罩直接使用对应变量，避免各组件自行 calc 缩放
+    root.style.setProperty('--glass-blur', `${glassBlur}px`)
+    root.style.setProperty('--glass-blur-strong', `${Math.min(40, glassBlur + 4)}px`)
+    root.style.setProperty('--glass-blur-mask', `${Math.max(0, Math.round(glassBlur * 0.4))}px`)
+    root.style.setProperty('--glass-blur-loading', `${Math.max(0, Math.round(glassBlur * 0.2))}px`)
+
+    // 玻璃背景色跟随主题透明度与 surface 色，供所有 glass 工具类统一使用
     const rgb = colors['--md-sys-color-surface-container-rgb']
     root.style.setProperty('--glass-bg', `rgba(${rgb}, ${glassStrength})`)
     root.style.setProperty(
       '--glass-border',
       `rgba(${rgb}, ${glassBorderAlpha(glassStrength)})`
-    )
-
-    const glassStrongStrength = Math.min(0.95, glassStrength + 0.25)
-    root.style.setProperty(
-      '--glass-strong-strength',
-      String(glassStrongStrength)
     )
 
     // 同步 .dark 类到 html 元素
@@ -101,7 +106,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       GLASS_VARS.forEach((key) => root.style.removeProperty(key))
       root.classList.remove('dark')
     }
-  }, [sourceColor, isDark, radius, glassStrength])
+  }, [sourceColor, isDark, radius, glassStrength, glassBlur])
 
   return <>{children}</>
 }

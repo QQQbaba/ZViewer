@@ -56,7 +56,7 @@ router.get(
     try {
       const users = await userRepository().find({
         order: { createdAt: 'DESC' },
-        select: ['id', 'username', 'role', 'status', 'createdAt', 'updatedAt'],
+        select: ['id', 'username', 'role', 'status', 'avatar', 'createdAt', 'updatedAt'],
       });
       res.json({
         success: true,
@@ -65,6 +65,7 @@ router.get(
           username: u.username,
           role: u.role,
           status: u.status,
+          avatar: u.avatar,
           createdAt: u.createdAt.toISOString(),
           updatedAt: u.updatedAt.toISOString(),
         })),
@@ -402,6 +403,8 @@ router.get(
           autoDeleteInactiveRooms: settings.autoDeleteInactiveRooms,
           autoDeleteAfterHours: settings.autoDeleteAfterHours,
           dataSourceConfig: settings.dataSourceConfig,
+          registrationMode: settings.registrationMode,
+          betaFeaturesEnabled: settings.betaFeaturesEnabled,
         },
       });
     } catch (err) {
@@ -419,7 +422,7 @@ router.put(
     res: import('express').Response,
   ): Promise<void> => {
     try {
-      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig } = req.body;
+      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, betaFeaturesEnabled } = req.body;
 
       if (typeof autoDeleteInactiveRooms !== 'boolean') {
         res.status(400).json({
@@ -448,6 +451,21 @@ router.put(
         });
         return;
       }
+      const allowedModes = ['open', 'approval', 'closed'];
+      if (registrationMode !== undefined && !allowedModes.includes(registrationMode)) {
+        res.status(400).json({
+          success: false,
+          message: 'registrationMode 必须是 open / approval / closed 之一',
+        });
+        return;
+      }
+      if (betaFeaturesEnabled !== undefined && typeof betaFeaturesEnabled !== 'boolean') {
+        res.status(400).json({
+          success: false,
+          message: 'betaFeaturesEnabled 必须是布尔值',
+        });
+        return;
+      }
 
       const settingsRepo = AppDataSource.getRepository(SystemSettings);
       const settings = await getSystemSettings();
@@ -459,6 +477,12 @@ router.put(
         clearKazumiCache();
         clearAniSubsCache();
       }
+      if (registrationMode !== undefined) {
+        settings.registrationMode = registrationMode as 'open' | 'approval' | 'closed';
+      }
+      if (betaFeaturesEnabled !== undefined) {
+        settings.betaFeaturesEnabled = betaFeaturesEnabled;
+      }
       await settingsRepo.save(settings);
 
       res.json({
@@ -467,6 +491,8 @@ router.put(
           autoDeleteInactiveRooms: settings.autoDeleteInactiveRooms,
           autoDeleteAfterHours: settings.autoDeleteAfterHours,
           dataSourceConfig: settings.dataSourceConfig,
+          registrationMode: settings.registrationMode,
+          betaFeaturesEnabled: settings.betaFeaturesEnabled,
         },
       });
     } catch (err) {

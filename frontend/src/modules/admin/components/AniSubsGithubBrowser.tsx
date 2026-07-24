@@ -190,13 +190,7 @@ export function AniSubsGithubBrowser({
     item.type === 'file' && item.name.endsWith('.json')
 
   return (
-    <div
-      className="rounded-[var(--md-sys-shape-corner)] border p-4"
-      style={{
-        borderColor: 'var(--md-sys-color-outline)',
-        backgroundColor: 'var(--md-sys-color-surface-container)',
-      }}
-    >
+    <div className="glass-card p-4">
       <div className="mb-3 flex items-center gap-2">
         <Globe
           className="h-4 w-4"

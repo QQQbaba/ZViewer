@@ -6,12 +6,8 @@ import { useRoomStore } from '@/store/roomStore'
 import type { WatchTogetherState, StatePayload, ControlPayload } from '../types'
 import { SOCKET_EVENT } from '../constants'
 import { safePlay } from '../safePlay'
-import {
-  shouldSeekToHost,
-  needsMseReloadForSeek,
-  isMseStream,
-  reloadMseAtTime,
-} from '../services'
+import { shouldSeekToHost, executeSeek } from '../services'
+import type { SeekToResult } from '../services'
 
 export interface UseViewerStateSyncOptions {
   roomId: string
@@ -24,8 +20,10 @@ export interface UseViewerStateSyncOptions {
     state: WatchTogetherState,
     startTime?: number
   ) => Promise<void>
-  /** 已应用 sourceUrl 的 ref，seek 到未缓冲区域时重置以允许重新加载 */
-  appliedSourceUrlRef: MutableRefObject<string | null>
+  /** seek 到目标时间（MSE 流不重建 MediaSource，由 useVideoSource 提供） */
+  seekTo: (video: HTMLVideoElement, targetTime: number) => Promise<SeekToResult>
+  /** MSE seek 失败时调用（如 video.error），用 forceReload 重新加载 */
+  reloadVideo: (video: HTMLVideoElement) => Promise<void>
 }
 
 export type UseViewerStateSyncReturn = void
@@ -46,9 +44,9 @@ export type UseViewerStateSyncReturn = void
  *    使用 `shouldSeekToHost` 服务函数按播放倍速自适应判断是否需要 seek，
  *    避免高倍速下高频 seek 抖动。
  *
- * 3. **seek 到未缓冲区域的重新加载**：
+ * 3. **seek 到未缓冲区域的 MSE seek**：
  *    观众端跟随房主 seek 时，若目标位置不在缓冲范围内且为 MSE 流，
- *    调用 reloadMseAtTime 重新创建 MSE 流。用 isReloadingRef 锁防止并发。
+ *    调用 executeSeek → MsePlayer.seekTo（不重建 MediaSource）。用 isReloadingRef 锁防止并发。
  *
  * 4. **初始状态请求由 usePlaybackStateRequest 负责**：
  *    该 Hook 仅处理实时 state/control 事件，加入房间时的初始状态请求
@@ -61,14 +59,15 @@ export function useViewerStateSync({
   suppressEventsRef,
   setWatchTogether,
   applySourceToVideo,
-  appliedSourceUrlRef,
+  seekTo,
+  reloadVideo,
 }: UseViewerStateSyncOptions): UseViewerStateSyncReturn {
   const { socket } = useSocket()
 
   // Bug #8 修复：handleState 串行化处理
   const isApplyingRef = useRef(false)
   const pendingStateRef = useRef<WatchTogetherState | null>(null)
-  // seek 重新加载锁：防止 reloadMseAtTime 期间重复触发
+  // seek 并发锁：防止 executeSeek 期间重复触发
   const isReloadingRef = useRef(false)
 
   useEffect(() => {
@@ -113,34 +112,21 @@ export function useViewerStateSync({
               s.playbackRate
             )
           ) {
-            // 仅 seek 到过去已清理区域才需要 reload；
-            // 未来未缓冲区域 MSE 会继续下载，浏览器自然等待
-            if (
-              !isReloadingRef.current &&
-              needsMseReloadForSeek(currentVideo, s.currentTime) &&
-              isMseStream(s) &&
-              s.sourceUrl
-            ) {
-              isReloadingRef.current = true
-              useRoomStore.getState().setReloadingState(true, s.currentTime)
-              void reloadMseAtTime({
-                video: currentVideo,
-                targetTime: s.currentTime,
-                state: s,
-                applySourceToVideo,
-                appliedSourceUrlRef,
-                suppressEventsRef,
-              })
-                .then((result) => {
-                  if (!result.success && result.message) {
-                    message.warning(result.message)
-                  }
-                })
-                .finally(() => {
-                  isReloadingRef.current = false
-                  useRoomStore.getState().setReloadingState(false, null)
-                })
-            }
+            // executeSeek 内部检查 isMseStream + isInBufferedRange，
+            // 若不需要 MSE seek 则返回 false，由调用方执行普通 seek
+            void executeSeek({
+              video: currentVideo,
+              targetTime: s.currentTime,
+              state: s,
+              seekTo,
+              suppressEventsRef,
+              isReloadingRef,
+              onSeekFailed: reloadVideo,
+            }).then((didSeek) => {
+              if (!didSeek) {
+                currentVideo.currentTime = s.currentTime
+              }
+            })
           } else {
             currentVideo.currentTime = s.currentTime
           }
@@ -180,40 +166,27 @@ export function useViewerStateSync({
       const video = videoRef.current
       if (!video) return
 
-      // seek 到未缓冲区域：交给 reloadMseAtTime 处理（内部管理 suppressEventsRef）
-      if (
-        payload.action === 'seek' &&
-        typeof payload.value === 'number' &&
-        !isReloadingRef.current
-      ) {
+      // seek 到未缓冲区域：交给 executeSeek 处理（内部管理锁 + suppressEventsRef）
+      if (payload.action === 'seek' && typeof payload.value === 'number') {
         const targetTime = payload.value
         const state = useRoomStore.getState().watchTogether
-        if (
-          needsMseReloadForSeek(video, targetTime) &&
-          isMseStream(state) &&
-          state.sourceUrl
-        ) {
-          isReloadingRef.current = true
-          useRoomStore.getState().setReloadingState(true, targetTime)
-          void reloadMseAtTime({
-            video,
-            targetTime,
-            state,
-            applySourceToVideo,
-            appliedSourceUrlRef,
-            suppressEventsRef,
-          })
-            .then((result) => {
-              if (!result.success && result.message) {
-                message.warning(result.message)
-              }
-            })
-            .finally(() => {
-              isReloadingRef.current = false
-              useRoomStore.getState().setReloadingState(false, null)
-            })
-          return
-        }
+        void executeSeek({
+          video,
+          targetTime,
+          state,
+          seekTo,
+          suppressEventsRef,
+          isReloadingRef,
+          onSeekFailed: reloadVideo,
+        }).then((didSeek) => {
+          // 未触发 MSE seek 时执行普通 seek
+          if (!didSeek) {
+            suppressEventsRef.current = true
+            video.currentTime = targetTime
+            suppressEventsRef.current = false
+          }
+        })
+        return
       }
 
       // 普通控制：使用 suppressEventsRef 包围，防止本地事件回环
@@ -224,11 +197,6 @@ export function useViewerStateSync({
           break
         case 'pause':
           video.pause()
-          break
-        case 'seek':
-          if (typeof payload.value === 'number') {
-            video.currentTime = payload.value
-          }
           break
         case 'rate':
           if (typeof payload.value === 'number') {
@@ -254,8 +222,9 @@ export function useViewerStateSync({
     videoRef,
     setWatchTogether,
     applySourceToVideo,
+    seekTo,
+    reloadVideo,
     suppressEventsRef,
     isHostRef,
-    appliedSourceUrlRef,
   ])
 }

@@ -94,8 +94,8 @@ function StatCard({
   sub?: string
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-[var(--md-sys-color-surface-container-highest)] p-3">
-      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--md-sys-color-surface-container-high)]">
+    <div className="glass flex items-center gap-3 rounded-xl p-3">
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--glass-bg)]">
         {icon}
       </div>
       <div className="min-w-0 flex-1">
@@ -210,7 +210,7 @@ export const StreamStatusPanel = memo(function StreamStatusPanel({
       </div>
 
       {/* 提示信息 */}
-      <div className="mt-3 rounded-lg bg-[var(--md-sys-color-surface-container-high)] px-3 py-2">
+      <div className="glass mt-3 rounded-lg px-3 py-2">
         <div className="flex items-center gap-2 text-xs text-[var(--md-sys-color-on-surface-variant)]">
           <Gauge className="h-3.5 w-3.5 flex-shrink-0" />
           <span>

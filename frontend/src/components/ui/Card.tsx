@@ -32,6 +32,7 @@ export function Card({
         !disableAnimation && 'zen-card',
         className
       )}
+      style={{ backgroundColor: 'var(--glass-bg)', ...props.style }}
       {...props}
     >
       {children}

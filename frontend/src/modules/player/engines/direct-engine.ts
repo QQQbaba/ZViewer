@@ -2,7 +2,8 @@
  * Direct 引擎：直接设置 video.src 播放原生支持的格式（mp4/webm/mov）。
  *
  * 无需 MSE / hls.js / flv.js，浏览器原生解码。
- * 仅负责设置 src 与 load，metadata 等待由调用方处理。
+ * attach 在 metadata 就绪后 resolve，cleanup 无需额外操作
+ * （video 元素本身由调用方管理）。
  */
 import type { PlayerEngine, PlayerSource, EngineAttachResult } from '../types'
 import { resetVideoElement, waitForMetadata } from '../utils'

@@ -55,10 +55,13 @@ function show(
 
   const el = document.createElement('div')
   el.className =
-    'zen-toast-enter pointer-events-auto relative flex min-w-[200px] items-center gap-2 overflow-hidden rounded-[var(--md-sys-shape-corner)] border px-4 py-2.5 text-sm font-medium shadow-lg backdrop-blur-md ' +
+    'zen-toast-enter pointer-events-auto relative flex min-w-[200px] items-center gap-2 overflow-hidden rounded-[var(--md-sys-shape-corner)] border px-4 py-2.5 text-sm font-medium shadow-lg ' +
     colors[type]
   el.style.backgroundColor =
     'rgba(var(--md-sys-color-surface-container-rgb), var(--glass-strong-strength))'
+  // 使用 --glass-blur 变量，使模糊度跟随主题设置（toast 使用标准玻璃强度）
+  el.style.backdropFilter = 'blur(var(--glass-blur))'
+  el.style.setProperty('-webkit-backdrop-filter', 'blur(var(--glass-blur))')
   el.style.setProperty('--toast-duration', `${duration}ms`)
 
   const iconWrapper = document.createElement('span')

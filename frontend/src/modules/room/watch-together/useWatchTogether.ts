@@ -8,7 +8,6 @@ import {
   type MovieDto,
   mapDtoToMovie,
 } from '@/store/roomStore'
-import { resolveBilibiliWithOptions } from '@/modules/bilibili/bilibiliApi'
 import { type QualityOption } from './resolveSource'
 import { useBilibiliQuality } from '@/modules/bilibili/useBilibiliQuality'
 import {
@@ -21,6 +20,11 @@ import {
   safePlay,
 } from '@/modules/sync-playback'
 import { type MediaFormat } from '@/lib/mediaFormat'
+import {
+  resolveMovieSource,
+  resolveBilibiliOnline,
+  type ResolvedMovieSource,
+} from './movie-source-resolver'
 
 // 格式化跳转时间用于提示信息（mm:ss 或 h:mm:ss）
 function formatSeekTime(seconds: number): string {
@@ -70,6 +74,9 @@ interface UseWatchTogetherOptions {
 /**
  * 一起看聚合 Hook：组合 useVideoSource（视频源管理）与 useSyncPlayback（同步核心），
  * 并保留 B站 清晰度切换、影片列表/当前影片同步、pendingQualityChange 消费等业务逻辑。
+ *
+ * v2 重构：影片 → 播放源的解析决策抽取到 movie-source-resolver.ts，
+ * loadMovie 只保留编排（状态构建 / attach / 恢复进度 / 失败回退）。
  *
  * 对外导出签名与重构前完全一致，WatchTogetherPanel.tsx 无需修改。
  */
@@ -125,14 +132,19 @@ export function useWatchTogether({
 
   // B站 视频解析进度：用于在播放器上显示后台解析过程
   const [isResolving, setIsResolving] = useState(false)
-  const [resolvingMessage, setResolvingMessage] = useState('')
+
+  // reloadBilibili 并发重入保护：手动点击重载与 stalled/error 自动重载可能重叠，
+  // 若上一次解析尚未结束又发起新请求，会导致 suppressEventsRef 状态错乱
+  // （先结束的 finally 把 suppressEventsRef 重置为 false，但后结束的仍在解析中）
+  // 以及重复 UI 闪烁。ref 标记确保同一时刻只有一个 reloadBilibili 在执行。
+  const isReloadingBilibiliRef = useRef(false)
 
   useEffect(() => {
     isHostRef.current = isHost
   }, [isHost])
 
-  // 1. 视频源管理：applySourceToVideo / cleanupMedia / restoredRef
-  const { applySourceToVideo, cleanupMedia, appliedSourceUrlRef } = useVideoSource({
+  // 1. 视频源管理：applySourceToVideo / cleanupMedia / restoredRef / seekTo / reloadVideo
+  const { applySourceToVideo, cleanupMedia, seekTo, reloadVideo } = useVideoSource({
     videoRef,
     suppressEventsRef,
     watchTogether,
@@ -157,7 +169,8 @@ export function useWatchTogether({
     setWatchTogether,
     applySourceToVideo,
     watchTogether,
-    appliedSourceUrlRef,
+    seekTo,
+    reloadVideo,
   })
 
   // 4. 房主与观众：同步在线观众列表（viewer-joined / viewer-left）
@@ -188,7 +201,6 @@ export function useWatchTogether({
     setWatchTogether,
     broadcastState,
     setIsResolving,
-    setResolvingMessage,
   })
 
   // 监听影片列表与当前播放影片的同步事件
@@ -331,7 +343,6 @@ export function useWatchTogether({
 
       await quality.applyQualityChange(movie, qualityId, {
         broadcast: true,
-        message: '正在切换清晰度...',
       })
     },
     [quality]
@@ -339,49 +350,60 @@ export function useWatchTogether({
 
   // 房主：重新解析当前 B站 视频（用于解析偏好变更后即时生效）
   const reloadBilibili = useCallback(async () => {
+    // 并发重入保护：上一次解析仍在进行中（含超时未返回的挂起场景）时直接跳过，
+    // 避免多个解析请求并发导致 suppressEventsRef / isResolving 状态错乱。
+    if (isReloadingBilibiliRef.current) {
+      console.log('[useWatchTogether] reloadBilibili 已在进行中，跳过本次请求')
+      return
+    }
+    isReloadingBilibiliRef.current = true
+
     const video = videoRef.current
-    if (!video || !isHostRef.current) return
+    if (!video || !isHostRef.current) {
+      isReloadingBilibiliRef.current = false
+      return
+    }
 
     const state = useRoomStore.getState().watchTogether
-    if (state.sourceType !== 'bilibili') return
+    if (state.sourceType !== 'bilibili') {
+      isReloadingBilibiliRef.current = false
+      return
+    }
 
     const storeState = useRoomStore.getState()
     const movie = storeState.movies.find(
       (m) => m.id === storeState.currentMovieId
     )
-    if (!movie?.url) return
+    if (!movie?.url) {
+      isReloadingBilibiliRef.current = false
+      return
+    }
 
     setIsResolving(true)
-    setResolvingMessage('正在重新解析...')
     suppressEventsRef.current = true
 
     const preserveTime = video.currentTime
     const shouldPlay = !video.paused
 
     try {
-      const resolved = await resolveBilibiliWithOptions(
-        movie.url,
-        quality.currentQuality ?? movie.currentQn,
-        (_step, msg) => setResolvingMessage(msg)
-      )
-      if (!resolved.videoUrl) {
-        throw new Error('未获取到对应清晰度的播放地址')
-      }
+      const resolved = await resolveBilibiliOnline(movie)
 
       const newState: WatchTogetherState = {
         ...state,
-        sourceUrl: resolved.videoUrl,
+        sourceUrl: resolved.sourceUrl,
         audioUrl: resolved.audioUrl,
         videoCodec: resolved.videoCodec,
         audioCodec: resolved.audioCodec,
         format: resolved.format,
-        currentQn:
-          resolved.currentQn ?? quality.currentQuality ?? movie.currentQn,
+        currentQn: resolved.currentQn ?? quality.currentQuality ?? movie.currentQn,
         acceptQuality: resolved.acceptQuality,
       }
       setWatchTogether(newState)
 
-      await applySourceToVideo(video, newState)
+      // 传入 preserveTime 作为 startTime：MsePlayer.attach 会从该时间对应的字节偏移
+      // 开始 Range 下载，而非从文件头 0 字节顺序下载。否则大跨度跳转后重载会
+      // 从头加载到目标位置才播放（用户看到的"加载跳转之前的部分"现象）。
+      await applySourceToVideo(video, newState, preserveTime)
       video.currentTime = preserveTime
       if (shouldPlay) {
         void safePlay(video)
@@ -395,7 +417,7 @@ export function useWatchTogether({
       console.error('[useWatchTogether] 重新解析 B站 视频失败:', err)
       message.error(err instanceof Error ? err.message : '重新解析失败')
       try {
-        await applySourceToVideo(video, state)
+        await applySourceToVideo(video, state, preserveTime)
         if (preserveTime > 0) {
           video.currentTime = preserveTime
         }
@@ -409,7 +431,7 @@ export function useWatchTogether({
       suppressEventsRef.current = false
       quality.setIsSwitchingQuality(false)
       setIsResolving(false)
-      setResolvingMessage('')
+      isReloadingBilibiliRef.current = false
     }
   }, [videoRef, quality, applySourceToVideo, setWatchTogether, broadcastState])
 
@@ -431,7 +453,7 @@ export function useWatchTogether({
   // 重构后移除该事件，房主切换清晰度时通过 applyQualityChange 内的
   // broadcastState(newState) 立即推送完整状态（含 currentQn），
   // 观众端 useViewerStateSync 接收后由 quality.syncFromState 自动更新 UI。
-  // 见下方 syncFromState effect（依赖 watchTogether.currentQn）。
+  // 见上方 syncFromState effect（依赖 watchTogether.currentQn）。
 
   // 响应 MovieListPanel 触发的清晰度切换请求：若对应影片正在播放，立即应用新源。
   useEffect(() => {
@@ -456,7 +478,6 @@ export function useWatchTogether({
       await quality.applyQualityChange(movie, undefined, {
         broadcast: isHostRef.current,
         resolved: pending.resolved,
-        message: '正在应用清晰度...',
       })
     }
 
@@ -496,19 +517,17 @@ export function useWatchTogether({
     suppressEventsRef.current = true
     lastLoadedMovieRef.current = { id: movie.id, url: movie.url }
 
-    const loadMovie = async () => {
-      let sourceUrl = movie.url
-      let audioUrl = movie.audioUrl
-      let format = movie.format
-      let videoCodec = movie.videoCodec
-      let audioCodec = movie.audioCodec
-      let cid = movie.cid
-      let duration = movie.duration || 0
-      let currentQn: number | undefined = movie.currentQn
-      let acceptQuality: QualityOption[] | undefined = movie.acceptQuality
-      // 防盗链 headers（ani-subs / Kazumi 等需要）
-      let headers: Record<string, string> | undefined = undefined
+    /** 带解析进度 UI 的在线解析（B站） */
+    const resolveOnline = async (): Promise<ResolvedMovieSource> => {
+      setIsResolving(true)
+      try {
+        return await resolveBilibiliOnline(movie)
+      } finally {
+        setIsResolving(false)
+      }
+    }
 
+    const loadMovie = async () => {
       // 房主刷新恢复：若 initialPlayback.currentMovieId 与当前加载的影片 ID 匹配，
       // 则使用 initialPlayback.currentTime 替代 0，并强制暂停而非自动播放。
       // B站 URL 每次解析都会变，因此通过 currentMovieId 匹配而非 sourceUrl。
@@ -523,102 +542,74 @@ export function useWatchTogether({
         appliedPlaybackRef.current = true
       }
 
-      // B站 地址带有快速过期的签名（通常 1-2 小时）。
-      // 房主刷新恢复时优先复用 recovery 中的旧 sourceUrl（刚过期几秒到几分钟，大概率仍有效），
-      // 仅在 attach 失败（403/404）时才重新解析。非 recovery 路径仍直接解析以获取最新地址。
-      let biliReplayed = false
-      if (sourceType === 'bilibili' && isRecovery && recovery?.sourceUrl) {
-        // 复用旧 URL，跳过解析
-        sourceUrl = recovery.sourceUrl
-        audioUrl = recovery.audioUrl
-        format = recovery.format
-        videoCodec = recovery.videoCodec
-        audioCodec = recovery.audioCodec
-        cid = recovery.cid
-        duration = recovery.duration ?? duration
-        currentQn = recovery.currentQn ?? movie.currentQn
-        acceptQuality = recovery.acceptQuality ?? movie.acceptQuality
-        headers = recovery.headers
-        biliReplayed = true
-      } else if (sourceType === 'bilibili') {
-        setIsResolving(true)
-        setResolvingMessage('正在初始化解析...')
-        try {
-          const resolved = await resolveBilibiliWithOptions(
-            movie.url,
-            movie.currentQn,
-            (_step, msg) => setResolvingMessage(msg)
-          )
-          sourceUrl = resolved.videoUrl
-          audioUrl = resolved.audioUrl
-          format = resolved.format
-          videoCodec = resolved.videoCodec
-          audioCodec = resolved.audioCodec
-          cid = resolved.cid
-          duration = resolved.duration ?? duration
-          currentQn = resolved.currentQn ?? movie.currentQn
-          acceptQuality = resolved.acceptQuality ?? movie.acceptQuality
-          if (acceptQuality?.length) {
-            quality.setAvailableQualities(acceptQuality)
-          }
-          quality.setCurrentQuality(currentQn ?? acceptQuality?.[0]?.id ?? null)
-        } catch (err) {
-          console.error('[useWatchTogether] 解析 B站 视频失败:', err)
-          message.error(err instanceof Error ? err.message : 'B站视频解析失败，尝试使用缓存地址')
-          // 解析失败时回退到 recovery 中的旧 sourceUrl（大概率尚未过期），
-          // 避免 return 导致 setWatchTogether 不被调用、播放器显示空白黑框。
-          // 若旧 URL 也已过期，applyAndRecover 的 catch 块会通过 biliReplayed 回退重新解析。
-          if (isRecovery && recovery?.sourceUrl) {
-            sourceUrl = recovery.sourceUrl
-            audioUrl = recovery.audioUrl
-            format = recovery.format
-            videoCodec = recovery.videoCodec
-            audioCodec = recovery.audioCodec
-            cid = recovery.cid
-            duration = recovery.duration ?? duration
-            currentQn = recovery.currentQn ?? movie.currentQn
-            acceptQuality = recovery.acceptQuality ?? movie.acceptQuality
-            headers = recovery.headers
-            biliReplayed = true
-          } else {
-            // 非 recovery 或无旧 URL 可用：重置状态，允许用户手动重试
-            suppressEventsRef.current = false
-            lastLoadedMovieRef.current = null
-            if (isRecovery) {
-              appliedPlaybackRef.current = false
-            }
-            return
-          }
-        } finally {
-          setIsResolving(false)
-          setResolvingMessage('')
+      // 重置加载失败标记的辅助：允许用户手动重试
+      const resetForRetry = () => {
+        suppressEventsRef.current = false
+        lastLoadedMovieRef.current = null
+        if (isRecovery) {
+          appliedPlaybackRef.current = false
         }
       }
 
-      // 构建 newState 的辅助函数（recovery 复用旧 URL 失败后重新解析时也需要）
-      const buildNewState = (): WatchTogetherState => ({
-        sourceUrl,
+      // 1. 解析播放源（B站 在线解析 / recovery 复用旧 URL / 其他源直用记录字段）
+      let resolved: ResolvedMovieSource
+      try {
+        const willResolveOnline =
+          sourceType === 'bilibili' && !(isRecovery && recovery?.sourceUrl)
+        resolved = willResolveOnline
+          ? await resolveOnline()
+          : await resolveMovieSource({
+              movie,
+              sourceType,
+              recovery: isRecovery ? recovery : null,
+            })
+      } catch (err) {
+        console.error('[useWatchTogether] 解析视频源失败:', err)
+        message.error(
+          err instanceof Error ? err.message : '视频源解析失败'
+        )
+        resetForRetry()
+        return
+      }
+
+      // 2. 在线解析成功后同步清晰度 UI 状态（recovery 复用时保持现有值）
+      if (sourceType === 'bilibili' && !resolved.reusedRecoveryUrl) {
+        if (resolved.acceptQuality?.length) {
+          quality.setAvailableQualities(resolved.acceptQuality)
+        }
+        quality.setCurrentQuality(
+          resolved.currentQn ?? resolved.acceptQuality?.[0]?.id ?? null
+        )
+      }
+
+      // 3. 构建播放状态
+      const buildNewState = (r: ResolvedMovieSource): WatchTogetherState => ({
+        sourceUrl: r.sourceUrl,
         sourceType,
-        audioUrl,
-        format,
-        videoCodec,
-        audioCodec,
-        cid,
+        audioUrl: r.audioUrl,
+        format: r.format,
+        videoCodec: r.videoCodec,
+        audioCodec: r.audioCodec,
+        cid: r.cid,
         // Movie 类型不含 headers 字段，recovery 时从 initialPlayback.headers 获取，
         // 确保 ani-subs 等依赖防盗链的源在刷新恢复后仍能正确 MSE attach。
-        headers: isRecovery ? recovery!.headers : headers,
-        isPlaying: isRecovery ? false : true,
+        headers: r.headers,
+        isPlaying: !isRecovery,
         currentTime: recoveryTime,
         playbackRate: isRecovery
           ? (recovery!.playbackRate ?? watchTogether.playbackRate)
           : watchTogether.playbackRate,
-        duration,
-        currentQn,
-        acceptQuality,
+        duration: r.duration,
+        currentQn: r.currentQn,
+        acceptQuality: r.acceptQuality,
       })
 
+      // 4. attach 并恢复进度 / 自动播放 / 广播
       const applyAndRecover = async (state: WatchTogetherState) => {
-        await applySourceToVideo(video, state)
+        // 恢复进度时传入 recoveryTime 作为 startTime，MsePlayer 从该时间对应的
+        // 字节偏移开始下载，而非从文件头顺序下载到 recoveryTime 才播放。
+        const startTime = isRecovery && recoveryTime > 0 ? recoveryTime : undefined
+        await applySourceToVideo(video, state, startTime)
         if (isRecovery && recoveryTime > 0) {
           // 恢复进度：seek 到目标时间并强制暂停
           try {
@@ -646,50 +637,32 @@ export function useWatchTogether({
         }
       }
 
-      // 房主刷新恢复：若 initialPlayback.currentMovieId 与当前加载的影片 ID 匹配，
-      // 则使用 initialPlayback.currentTime 替代 0，并强制暂停而非自动播放。
-      // B站 URL 每次解析都会变，因此通过 currentMovieId 匹配而非 sourceUrl。
-      // （recovery / isRecovery / recoveryTime 已在上方 B站 分支前计算）
-
-      const newState = buildNewState()
+      const newState = buildNewState(resolved)
       setWatchTogether(newState)
 
       void applyAndRecover(newState).catch(async (err: unknown) => {
         // MSE attach 失败时必须释放 suppressEventsRef，否则房主端
         // play/pause/seek/timeupdate 事件全部被吞，broadcastState 永不调用，
-        // 观众端 appliedSourceUrlRef 永远不更新，导致永久黑屏。
+        // 导致观众端永久黑屏。
         console.error('[useWatchTogether] applySourceToVideo 失败:', err)
 
         // 房主刷新恢复 + 复用旧 B站 URL 失败（通常 403/404 deadline 过期）：
         // 回退到重新解析 B站 获取最新 URL，attach 后再次 applyAndRecover。
         // 非 B站 源或非 recovery 路径不回退（错误大概率不会自愈）。
-        if (biliReplayed) {
+        if (resolved.reusedRecoveryUrl) {
           console.log(
             '[useWatchTogether] 复用旧 B站 URL 失败，回退到重新解析'
           )
-          setIsResolving(true)
-          setResolvingMessage('正在重新解析...')
           try {
-            const resolved = await resolveBilibiliWithOptions(
-              movie.url,
-              movie.currentQn,
-              (_step, msg) => setResolvingMessage(msg)
-            )
-            sourceUrl = resolved.videoUrl
-            audioUrl = resolved.audioUrl
-            format = resolved.format
-            videoCodec = resolved.videoCodec
-            audioCodec = resolved.audioCodec
-            cid = resolved.cid
-            duration = resolved.duration ?? duration
-            currentQn = resolved.currentQn ?? movie.currentQn
-            acceptQuality = resolved.acceptQuality ?? movie.acceptQuality
-            if (acceptQuality?.length) {
-              quality.setAvailableQualities(acceptQuality)
+            const reResolved = await resolveOnline()
+            if (reResolved.acceptQuality?.length) {
+              quality.setAvailableQualities(reResolved.acceptQuality)
             }
-            quality.setCurrentQuality(currentQn ?? acceptQuality?.[0]?.id ?? null)
+            quality.setCurrentQuality(
+              reResolved.currentQn ?? reResolved.acceptQuality?.[0]?.id ?? null
+            )
 
-            const reResolvedState = buildNewState()
+            const reResolvedState = buildNewState(reResolved)
             setWatchTogether(reResolvedState)
             await applyAndRecover(reResolvedState)
             return
@@ -700,30 +673,14 @@ export function useWatchTogether({
                 ? retryErr.message
                 : 'B站视频解析失败'
             )
-          } finally {
-            setIsResolving(false)
-            setResolvingMessage('')
           }
-          // 回退失败：释放 suppressEventsRef 并允许重试
-          suppressEventsRef.current = false
-          lastLoadedMovieRef.current = null
-          if (isRecovery) {
-            appliedPlaybackRef.current = false
-          }
+          resetForRetry()
           return
         }
 
-        // 非 B站 回退路径：直接报错并允许重试
-        suppressEventsRef.current = false
-        // 重置 lastLoadedMovieRef 与 appliedPlaybackRef，允许用户手动重试。
-        // 否则 lastLoadedMovieRef 匹配会导致 loadMovie effect 跳过加载，
-        // appliedPlaybackRef=true 会导致重试时 isRecovery=false，进度不恢复。
-        lastLoadedMovieRef.current = null
-        if (isRecovery) {
-          appliedPlaybackRef.current = false
-        }
-        // 向用户展示错误（如不支持的视频格式），避免黑屏无反馈
+        // 非回退路径：报错并允许重试
         message.error(err instanceof Error ? err.message : '视频源加载失败')
+        resetForRetry()
       })
     }
 
@@ -909,6 +866,7 @@ export function useWatchTogether({
     suppressEventsRef,
     applySourceToVideo,
     cleanupMedia,
+    reloadVideo,
     previewPlay,
     // 清晰度相关
     currentQuality: quality.currentQuality,
@@ -917,7 +875,6 @@ export function useWatchTogether({
     changeQuality,
     // B站 解析进度
     isResolving,
-    resolvingMessage,
     // B站 重新解析
     reloadBilibili,
     // 轨道同步（合并事件）

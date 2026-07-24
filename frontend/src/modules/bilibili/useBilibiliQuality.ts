@@ -34,7 +34,6 @@ export interface BilibiliQualityContext {
   setWatchTogether: (state: WatchTogetherState) => void
   broadcastState: (state: WatchTogetherState) => void
   setIsResolving: (v: boolean) => void
-  setResolvingMessage: (s: string) => void
 }
 
 export interface ApplyQualityChangeOptions {
@@ -42,8 +41,6 @@ export interface ApplyQualityChangeOptions {
   broadcast?: boolean
   /** 已解析的结果（来自 MovieListPanel 预解析），不传则内部调用 resolveBilibiliWithOptions */
   resolved?: ResolvedSource
-  /** 解析进度消息 */
-  message?: string
 }
 
 /**
@@ -77,12 +74,10 @@ export function useBilibiliQuality(ctx: BilibiliQualityContext) {
       const {
         broadcast = false,
         resolved: preResolved,
-        message = '正在切换清晰度...',
       } = options
 
       setIsSwitchingQuality(true)
       ctx.setIsResolving(true)
-      ctx.setResolvingMessage(message)
       // eslint-disable-next-line react-hooks/immutability -- ref.current 设计为可变
       ctx.suppressEventsRef.current = true
 
@@ -94,11 +89,7 @@ export function useBilibiliQuality(ctx: BilibiliQualityContext) {
         if (preResolved) {
           resolved = preResolved
         } else {
-          resolved = await resolveBilibiliWithOptions(
-            movie.url,
-            qn,
-            (_step, msg) => ctx.setResolvingMessage(msg)
-          )
+          resolved = await resolveBilibiliWithOptions(movie.url, qn)
         }
 
         if (!resolved.videoUrl) {
@@ -154,7 +145,6 @@ export function useBilibiliQuality(ctx: BilibiliQualityContext) {
         ctx.suppressEventsRef.current = false
         setIsSwitchingQuality(false)
         ctx.setIsResolving(false)
-        ctx.setResolvingMessage('')
       }
     },
     // 仅依赖 ctx 中真正用到的稳定引用。
@@ -171,7 +161,6 @@ export function useBilibiliQuality(ctx: BilibiliQualityContext) {
       ctx.setWatchTogether,
       ctx.broadcastState,
       ctx.setIsResolving,
-      ctx.setResolvingMessage,
     ]
   )
 

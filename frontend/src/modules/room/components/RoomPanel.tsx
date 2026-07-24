@@ -24,7 +24,7 @@ export function RoomPanel({ onModeSelected }: RoomPanelProps) {
   const initialMode: RoomMode = storeMode || 'watch-together'
   const [selectedMode, setSelectedMode] = useState<RoomMode>(initialMode)
   const [creating, setCreating] = useState(false)
-  const [requireApproval, setRequireApproval] = useState(true)
+  const [requireApproval, setRequireApproval] = useState(false)
   const [password, setPassword] = useState('')
 
   const handleCreateRoom = () => {
@@ -95,7 +95,7 @@ export function RoomPanel({ onModeSelected }: RoomPanelProps) {
                 backgroundColor:
                   selectedMode === 'screen-share'
                     ? 'var(--md-sys-color-primary-container)'
-                    : 'var(--md-sys-color-surface-container)',
+                    : 'var(--glass-bg)',
               }}
             >
               <div
@@ -126,7 +126,7 @@ export function RoomPanel({ onModeSelected }: RoomPanelProps) {
                 backgroundColor:
                   selectedMode === 'watch-together'
                     ? 'var(--md-sys-color-primary-container)'
-                    : 'var(--md-sys-color-surface-container)',
+                    : 'var(--glass-bg)',
               }}
             >
               <div

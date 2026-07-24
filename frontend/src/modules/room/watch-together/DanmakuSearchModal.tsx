@@ -24,6 +24,7 @@ import { Space } from '@/components/ui/Space'
 import { Text } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
 import { Modal } from '@/components/ui/Modal'
+import { cn } from '@/lib/utils'
 import { useDanmakuStore } from '@/store/danmakuStore'
 import {
   searchDanmaku,
@@ -250,12 +251,7 @@ export function DanmakuSearchModal({
           <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
             {!hasResult && !loading && (
               <div
-                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-[var(--md-sys-shape-corner)] border p-6 text-center"
-                style={{
-                  backgroundColor:
-                    'var(--md-sys-color-surface-container-high)',
-                  borderColor: 'var(--md-sys-color-outline-variant)',
-                }}
+                className="glass flex flex-1 flex-col items-center justify-center gap-2 rounded-[var(--md-sys-shape-corner)] p-6 text-center"
               >
                 <Search className="h-8 w-8 opacity-40" />
                 <Text type="secondary" className="text-xs">
@@ -277,19 +273,16 @@ export function DanmakuSearchModal({
               return (
                 <div
                   key={result.identifier}
-                  className="flex items-start gap-3 rounded-[var(--md-sys-shape-corner)] border p-2.5 transition-all hover:bg-[var(--md-sys-color-surface-container-highest)]"
-                  style={{
-                    backgroundColor: isActive
-                      ? 'var(--md-sys-color-primary-container)'
-                      : 'var(--md-sys-color-surface-container-high)',
-                    borderColor: isActive
-                      ? 'var(--md-sys-color-primary)'
-                      : 'var(--md-sys-color-outline-variant)',
-                  }}
+                  className={cn(
+                    'flex items-start gap-3 rounded-[var(--md-sys-shape-corner)] p-2.5 transition-all',
+                    isActive
+                      ? 'border border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]'
+                      : 'glass hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                  )}
                 >
                   {/* 封面 */}
                   <div
-                    className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[var(--md-sys-shape-corner)] bg-[var(--md-sys-color-surface-container-highest)]"
+                    className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[var(--md-sys-shape-corner)] bg-[var(--glass-bg)]"
                     style={{
                       backgroundImage: coverUrl
                         ? `url(${coverUrl})`
@@ -402,12 +395,7 @@ export function DanmakuSearchModal({
               {episodes.map((episode) => (
                 <div
                   key={episode.id}
-                  className="flex items-center justify-between gap-3 rounded-[var(--md-sys-shape-corner)] border p-3"
-                  style={{
-                    backgroundColor:
-                      'var(--md-sys-color-surface-container-high)',
-                    borderColor: 'var(--md-sys-color-outline-variant)',
-                  }}
+                  className="glass flex items-center justify-between gap-3 rounded-[var(--md-sys-shape-corner)] p-3"
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <PlayCircle className="h-4 w-4 shrink-0 opacity-60" />

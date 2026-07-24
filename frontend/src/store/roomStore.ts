@@ -147,6 +147,15 @@ interface RoomState {
   password: string
   maxViewers: number
   mode: RoomMode
+  /**
+   * 当前活跃房间 ID。
+   * - 用户进入房间时设置（房主创建/观众加入）
+   * - 用户导航到非房间页面（如个人中心）时保留，RoomPage 卸载但不清除
+   * - 用户明确退出房间（点击返回按钮）时清除为 null
+   * 前端据此在非房间页面右上角显示"回到房间"浮动入口。
+   */
+  activeRoomId: string | null
+  setActiveRoomId: (id: string | null) => void
   // 投屏模式（mode === 'screen-share'）下的子模式
   shareMethod: ShareMethod
   viewers: Viewer[]
@@ -197,6 +206,12 @@ interface RoomState {
   setStreamKey: (key: string | null) => void
   setReloadingState: (isReloading: boolean, targetTime: number | null) => void
   toggleAutoApproveRequests: () => void
+  /**
+   * 退出房间：清除 activeRoomId 并重置全部房间状态。
+   * 用于用户明确离开房间（点击返回按钮）时调用，
+   * 与"导航到其他页面但保留房间"的场景区分。
+   */
+  exitRoom: () => void
   setRoomId: (id: string) => void
   setRoomName: (name: string) => void
   setPassword: (password: string) => void
@@ -279,6 +294,7 @@ const defaultState = {
   password: '',
   maxViewers: 10,
   mode: 'watch-together' as RoomMode,
+  activeRoomId: null as string | null,
   shareMethod: 'webrtc' as ShareMethod,
   viewers: [],
   mutedViewerIds: [] as number[],
@@ -304,7 +320,7 @@ const defaultState = {
   pendingReloadBilibili: 0,
   isReloading: false,
   reloadTargetTime: null,
-  autoApproveRequests: false,
+  autoApproveRequests: true,
   streamStatus: 'unknown' as StreamStatus,
   streamKey: null,
 }
@@ -403,6 +419,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     set({ isReloading, reloadTargetTime: targetTime }),
   toggleAutoApproveRequests: () =>
     set((state) => ({ autoApproveRequests: !state.autoApproveRequests })),
+  setActiveRoomId: (id) => set({ activeRoomId: id }),
+  exitRoom: () => set({ ...defaultState }),
   reset: () => set({ ...defaultState }),
 
   // REST API 调用：成功后由后端 socket 广播 movie-list 刷新本地 state；

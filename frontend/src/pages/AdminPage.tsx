@@ -22,12 +22,14 @@ import { Title, Text } from '@/components/ui/Typography'
 import { Tag } from '@/components/ui/Tag'
 import { Spinner } from '@/components/ui/Spinner'
 import { ConfirmModal } from '@/components/ui/Modal'
+import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/Switch'
 import { InputNumber } from '@/components/ui/InputNumber'
 import { Select } from '@/components/ui/Select'
 import { AniSubsGithubBrowser } from '@/modules/admin/components/AniSubsGithubBrowser'
 import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
+import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import { apiFetch, API_URL } from '@/lib/api'
 
 interface AdminUser {
@@ -61,9 +63,13 @@ interface UpdateInfo {
   publishedAt: string
 }
 
+type RegistrationMode = 'open' | 'approval' | 'closed'
+
 interface AdminSettings {
   autoDeleteInactiveRooms: boolean
   autoDeleteAfterHours: number
+  registrationMode: RegistrationMode
+  betaFeaturesEnabled: boolean
   dataSourceConfig?: {
     aniSubsSubscriptions?: string[]
     kazumiRules?: string[]
@@ -84,6 +90,7 @@ void rawApiUrl
 export default function AdminPage() {
   const navigate = useNavigate()
   const { isAuthenticated, user } = useAuthStore()
+  const { invalidate: invalidateSystemSettings } = useSystemSettingsStore()
   const [activeTab, setActiveTab] = useState<'users' | 'rooms' | 'settings'>(
     'users'
   )
@@ -92,6 +99,8 @@ export default function AdminPage() {
   const [settings, setSettings] = useState<AdminSettings>({
     autoDeleteInactiveRooms: true,
     autoDeleteAfterHours: 24,
+    registrationMode: 'approval',
+    betaFeaturesEnabled: false,
   })
   const [loading, setLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -254,6 +263,9 @@ export default function AdminPage() {
     if (activeTab === 'settings') {
       void loadSettings()
       void checkUpdate()
+    } else if (activeTab === 'users') {
+      void loadData()
+      void loadSettings()
     } else {
       void loadData()
     }
@@ -435,6 +447,8 @@ export default function AdminPage() {
         body: JSON.stringify({
           autoDeleteInactiveRooms: settings.autoDeleteInactiveRooms,
           autoDeleteAfterHours: settings.autoDeleteAfterHours,
+          registrationMode: settings.registrationMode,
+          betaFeaturesEnabled: settings.betaFeaturesEnabled,
           dataSourceConfig: settings.dataSourceConfig,
         }),
       })
@@ -448,6 +462,7 @@ export default function AdminPage() {
         if (data.settings) {
           setSettings(data.settings)
         }
+        invalidateSystemSettings()
       } else {
         message.error(data.message ?? '保存失败')
       }
@@ -523,7 +538,7 @@ export default function AdminPage() {
               backgroundColor:
                 activeTab === 'users'
                   ? 'var(--md-sys-color-primary-container)'
-                  : 'var(--md-sys-color-surface-container-high)',
+                  : 'var(--glass-bg)',
               color:
                 activeTab === 'users'
                   ? 'var(--md-sys-color-on-primary-container)'
@@ -541,7 +556,7 @@ export default function AdminPage() {
               backgroundColor:
                 activeTab === 'rooms'
                   ? 'var(--md-sys-color-primary-container)'
-                  : 'var(--md-sys-color-surface-container-high)',
+                  : 'var(--glass-bg)',
               color:
                 activeTab === 'rooms'
                   ? 'var(--md-sys-color-on-primary-container)'
@@ -559,7 +574,7 @@ export default function AdminPage() {
               backgroundColor:
                 activeTab === 'settings'
                   ? 'var(--md-sys-color-primary-container)'
-                  : 'var(--md-sys-color-surface-container-high)',
+                  : 'var(--glass-bg)',
               color:
                 activeTab === 'settings'
                   ? 'var(--md-sys-color-on-primary-container)'
@@ -685,6 +700,43 @@ export default function AdminPage() {
           </div>
         ) : activeTab === 'users' ? (
           <div className="grid gap-3">
+            <div className="glass-card p-4">
+              <Title level={5} className="mb-3">
+                用户注册设置
+              </Title>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+                <div className="max-w-xs flex-1">
+                  <Select
+                    label="注册方式"
+                    value={settings.registrationMode}
+                    options={[
+                      { label: '直接注册', value: 'open' },
+                      { label: '审批注册', value: 'approval' },
+                      { label: '禁止注册', value: 'closed' },
+                    ]}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        registrationMode: value as RegistrationMode,
+                      }))
+                    }
+                  />
+                  <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                    直接注册：新用户注册后立即可用；审批注册：新用户需 root
+                    审核通过后方可登录；禁止注册：关闭注册入口。
+                  </p>
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleSaveSettings}
+                  loading={savingSettings}
+                  disabled={savingSettings}
+                >
+                  保存
+                </Button>
+              </div>
+            </div>
             {users.length === 0 ? (
               <div className="py-12 text-center">
                 <Text type="secondary">暂无用户</Text>
@@ -716,12 +768,9 @@ export default function AdminPage() {
                 return (
                   <div
                     key={u.id}
-                    className="flex flex-col gap-3 rounded-[var(--md-sys-shape-corner)] border p-4 transition-colors sm:flex-row sm:items-center sm:justify-between"
-                    style={{
-                      borderColor: 'var(--md-sys-color-outline)',
-                      backgroundColor:
-                        'var(--md-sys-color-surface-container-high)',
-                    }}
+                    className={cn(
+                      'glass-card flex flex-col gap-3 p-4 transition-colors sm:flex-row sm:items-center sm:justify-between'
+                    )}
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -762,7 +811,7 @@ export default function AdminPage() {
                           style={{
                             borderColor: 'var(--md-sys-color-outline)',
                             backgroundColor:
-                              'var(--md-sys-color-surface-container-highest)',
+                              'var(--glass-bg)',
                             color: 'var(--md-sys-color-on-surface-variant)',
                           }}
                         >
@@ -819,8 +868,7 @@ export default function AdminPage() {
                   }
                   style={{
                     borderColor: 'var(--md-sys-color-outline)',
-                    backgroundColor:
-                      'var(--md-sys-color-surface-container-low)',
+                    backgroundColor: 'var(--glass-bg)',
                   }}
                 >
                   <input
@@ -845,19 +893,14 @@ export default function AdminPage() {
                 {rooms.map((room) => (
                   <div
                     key={room.id}
-                    className={
+                    className={cn(
                       roomViewMode === 'tile'
                         ? 'flex flex-col gap-3 rounded-[var(--md-sys-shape-corner)] border p-4 transition-colors cursor-pointer'
-                        : 'flex flex-col gap-3 rounded-[var(--md-sys-shape-corner)] border p-4 transition-colors sm:flex-row sm:items-center sm:justify-between cursor-pointer'
-                    }
-                    style={{
-                      borderColor: selectedRoomIds.has(room.roomId)
-                        ? 'var(--md-sys-color-primary)'
-                        : 'var(--md-sys-color-outline)',
-                      backgroundColor: selectedRoomIds.has(room.roomId)
-                        ? 'var(--md-sys-color-primary-container)'
-                        : 'var(--md-sys-color-surface-container-high)',
-                    }}
+                        : 'flex flex-col gap-3 rounded-[var(--md-sys-shape-corner)] border p-4 transition-colors sm:flex-row sm:items-center sm:justify-between cursor-pointer',
+                      selectedRoomIds.has(room.roomId)
+                        ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]'
+                        : 'glass border-[var(--md-sys-color-outline)]'
+                    )}
                     onClick={() => {
                       if (room.status === 'active') {
                         navigate(`/room/${room.roomId}?role=host`)
@@ -956,13 +999,7 @@ export default function AdminPage() {
             )}
           </div>
         ) : (
-          <div
-            className="rounded-[var(--md-sys-shape-corner)] border p-4"
-            style={{
-              borderColor: 'var(--md-sys-color-outline)',
-              backgroundColor: 'var(--md-sys-color-surface-container-high)',
-            }}
-          >
+          <div className="glass-card p-4">
             {settingsLoading ? (
               <div className="py-12">
                 <Spinner tip="加载中..." size={32} />
@@ -1002,68 +1039,85 @@ export default function AdminPage() {
                 </div>
 
                 <Title level={5} className="mb-4 mt-6">
-                  Kazumi 规则源
+                  Beta 功能
                 </Title>
-                <div className="mb-4">
-                  <label className="mb-1.5 block text-sm font-medium text-[var(--md-sys-color-on-surface-variant)]">
-                    Kazumi 规则地址（每行一个，留空使用默认）
-                  </label>
-                  <textarea
-                    rows={4}
-                    className="w-full rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] px-3 py-2 text-sm text-[var(--md-sys-color-on-surface)] placeholder:text-[var(--md-sys-color-on-surface-variant)] focus:border-[var(--md-sys-color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--md-sys-color-primary)]"
-                    placeholder="https://raw.githubusercontent.com/Predidit/Kazumi/main/assets/plugins/DM84.json"
-                    value={(settings.dataSourceConfig?.kazumiRules || []).join(
-                      '\n'
-                    )}
+                <div className="mb-6">
+                  <Switch
+                    label="启用 Beta 功能（Kazumi / AniSubs 番剧源）"
+                    checked={settings.betaFeaturesEnabled}
                     onChange={(e) =>
                       setSettings((prev) => ({
                         ...prev,
-                        dataSourceConfig: {
-                          ...prev.dataSourceConfig,
-                          kazumiRules: e.target.value
-                            .split('\n')
-                            .map((s) => s.trim())
-                            .filter(Boolean),
-                        },
+                        betaFeaturesEnabled: e.target.checked,
                       }))
                     }
                   />
-                  <p className="mt-1 text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                    修改后保存即可自动加载 Kazumi XPath 规则源；规则中
-                    useWebview 的源可能无法直接解析播放
+                  <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                    关闭时，房间内的 Kazumi 与 AniSubs 番剧添加入口及其相关设置将被隐藏。
                   </p>
                 </div>
 
-                <div className="mb-6">
-                  <AniSubsGithubBrowser
-                    repoUrl="https://github.com/Predidit/Kazumi"
-                    defaultPath="assets/plugins"
-                    existingUrls={settings.dataSourceConfig?.kazumiRules || []}
-                    onAddUrls={(urls) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        dataSourceConfig: {
-                          ...prev.dataSourceConfig,
-                          kazumiRules: [
-                            ...(prev.dataSourceConfig?.kazumiRules || []),
-                            ...urls,
-                          ],
-                        },
-                      }))
-                    }
-                  />
-                </div>
+                {settings.betaFeaturesEnabled && (
+                  <>
+                    <Title level={5} className="mb-4 mt-6">
+                      Kazumi 规则源
+                    </Title>
+                    <div className="mb-4">
+                      <label className="mb-1.5 block text-sm font-medium text-[var(--md-sys-color-on-surface-variant)]">
+                        Kazumi 规则地址（每行一个，留空使用默认）
+                      </label>
+                      <textarea
+                        rows={4}
+                        className="w-full rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] px-3 py-2 text-sm text-[var(--md-sys-color-on-surface)] placeholder:text-[var(--md-sys-color-on-surface-variant)] focus:border-[var(--md-sys-color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--md-sys-color-primary)]"
+                        placeholder="https://raw.githubusercontent.com/Predidit/Kazumi/main/assets/plugins/DM84.json"
+                        value={(settings.dataSourceConfig?.kazumiRules || []).join(
+                          '\n'
+                        )}
+                        onChange={(e) =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            dataSourceConfig: {
+                              ...prev.dataSourceConfig,
+                              kazumiRules: e.target.value
+                                .split('\n')
+                                .map((s) => s.trim())
+                                .filter(Boolean),
+                            },
+                          }))
+                        }
+                      />
+                      <p className="mt-1 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                        修改后保存即可自动加载 Kazumi XPath 规则源；规则中
+                        useWebview 的源可能无法直接解析播放
+                      </p>
+                    </div>
+
+                    <div className="mb-6">
+                      <AniSubsGithubBrowser
+                        repoUrl="https://github.com/Predidit/Kazumi"
+                        defaultPath="assets/plugins"
+                        existingUrls={settings.dataSourceConfig?.kazumiRules || []}
+                        onAddUrls={(urls) =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            dataSourceConfig: {
+                              ...prev.dataSourceConfig,
+                              kazumiRules: [
+                                ...(prev.dataSourceConfig?.kazumiRules || []),
+                                ...urls,
+                              ],
+                            },
+                          }))
+                        }
+                      />
+                    </div>
+                  </>
+                )}
 
                 <Title level={5} className="mb-4 mt-6">
                   版本更新
                 </Title>
-                <div
-                  className="mb-6 rounded-[var(--md-sys-shape-corner)] border p-4"
-                  style={{
-                    borderColor: 'var(--md-sys-color-outline)',
-                    backgroundColor: 'var(--md-sys-color-surface-container)',
-                  }}
-                >
+                <div className="glass-card mb-6 p-4">
                   {updateLoading ? (
                     <div className="py-4">
                       <Spinner tip="检查更新中..." size={24} />

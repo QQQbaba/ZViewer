@@ -37,7 +37,7 @@ export function Avatar({
         className
       )}
       style={{
-        backgroundColor: 'var(--md-sys-color-surface-container-high)',
+        backgroundColor: 'var(--glass-bg)',
         color: 'var(--md-sys-color-on-surface)',
         border: '1px solid var(--md-sys-color-outline)',
       }}

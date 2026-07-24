@@ -1,14 +1,18 @@
 /**
  * HLS 引擎：通过 hls.js 将 m3u8 流挂载到 <video> 元素。
  *
- * Safari 原生支持 HLS（直接设置 src），其他浏览器通过 hls.js 附加。
- * 返回的 cleanup 函数用于卸载 hls 实例并清理资源。
- *
- * 从旧 msePlayer.ts 抽取，逻辑无变化。
+ * - Safari（含 iOS）原生支持 HLS：直接设置 src，无需 hls.js；
+ * - 其他浏览器通过 hls.js（MSE 封装）附加；
+ * - metadata 就绪后 resolve；cleanup 销毁 hls 实例。
  */
 import Hls from 'hls.js'
 import type { PlayerEngine, PlayerSource, EngineAttachResult } from '../types'
 import { resetVideoElement, waitForMetadata } from '../utils'
+
+/** Safari 等原生 HLS 支持检测 */
+function canPlayNativeHls(video: HTMLVideoElement): boolean {
+  return video.canPlayType('application/vnd.apple.mpegurl') !== ''
+}
 
 export const hlsEngine: PlayerEngine = {
   type: 'hls',
@@ -19,8 +23,8 @@ export const hlsEngine: PlayerEngine = {
   ): Promise<EngineAttachResult> {
     resetVideoElement(video)
 
-    // Safari 原生支持 HLS
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Safari 原生 HLS
+    if (canPlayNativeHls(video)) {
       video.src = source.url
       video.load()
       await waitForMetadata(video)
@@ -29,7 +33,7 @@ export const hlsEngine: PlayerEngine = {
           try {
             video.pause()
           } catch {
-            // ignore
+            /* ignore */
           }
           video.removeAttribute('src')
           video.load()
@@ -50,14 +54,24 @@ export const hlsEngine: PlayerEngine = {
       hls.loadSource(source.url)
     })
 
-    await waitForMetadata(video)
+    try {
+      await waitForMetadata(video)
+    } catch (err) {
+      // metadata 等待失败时确保实例被销毁，避免泄漏
+      try {
+        hls.destroy()
+      } catch {
+        /* ignore */
+      }
+      throw err
+    }
 
     return {
       cleanup: () => {
         try {
           hls.destroy()
         } catch {
-          // ignore
+          /* ignore */
         }
       },
     }

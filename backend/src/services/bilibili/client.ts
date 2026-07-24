@@ -15,6 +15,16 @@ const DEFAULT_USER_AGENT =
 
 const MAX_RETRIES = 3;
 
+/**
+ * 单次 B站 API 请求超时（毫秒）。
+ *
+ * B站 服务器偶尔会出现 TCP 连接保持但不返回任何数据的挂起现象，
+ * 此时 fetch 既不 resolve 也不 reject，导致整个解析流程永久卡住
+ * （前端表现为"正在选择可用 CDN..."后无响应）。此处用 AbortController
+ * 强制单请求上限，触发后由上层 catch 走重试逻辑。
+ */
+const REQUEST_TIMEOUT_MS = 10000;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -65,10 +75,21 @@ export async function bilibiliFetch<T = unknown>(
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    // 单请求超时：B站 服务器偶发挂起（TCP 通但不返回数据），用 AbortController
+    // 强制中断，避免整个解析流程永久卡住。与外部传入的 signal 合并：
+    // 任一触发都中断本次 fetch。
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const externalSignal = requestInit.signal;
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
     try {
       const effectiveCookie = cookie || anonymousCookieJar || undefined;
       const res = await fetch(url, {
         ...requestInit,
+        signal: controller.signal,
         headers: {
           'User-Agent': DEFAULT_USER_AGENT,
           Referer: 'https://www.bilibili.com',
@@ -112,10 +133,21 @@ export async function bilibiliFetch<T = unknown>(
 
       return json;
     } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
+      // AbortError 区分：超时中断 vs 外部 signal 中断
+      if (err instanceof Error && err.name === 'AbortError') {
+        if (externalSignal?.aborted) {
+          // 外部主动取消，直接抛出不重试
+          throw err;
+        }
+        lastError = new Error(`B站 API 请求超时 (${REQUEST_TIMEOUT_MS}ms): ${url}`);
+      } else {
+        lastError = err instanceof Error ? err : new Error(String(err));
+      }
       if (attempt < MAX_RETRIES - 1) {
         await sleep(randomBackoffMs());
       }
+    } finally {
+      clearTimeout(timer);
     }
   }
 

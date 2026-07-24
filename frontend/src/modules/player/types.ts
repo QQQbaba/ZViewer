@@ -1,5 +1,5 @@
 /**
- * 播放器模块类型定义
+ * 播放器模块类型定义（v2 重写，接口契约保持不变）。
  *
  * 定义播放器引擎统一接口与源数据结构，使 MSE / HLS / FLV / Direct 四种引擎
  * 在同一抽象下被 usePlayerSource 统一调度。
@@ -44,6 +44,8 @@ export interface EngineAttachResult {
   cleanup: () => void
   /** MSE 引擎创建的 blob URL（需由调用方在切换时 revokeObjectURL） */
   blobUrl?: string
+  /** MSE 引擎实例（仅 MSE 引擎返回，供外部调用 seekTo） */
+  msePlayer?: import('./engines/mse').MsePlayer
 }
 
 /**

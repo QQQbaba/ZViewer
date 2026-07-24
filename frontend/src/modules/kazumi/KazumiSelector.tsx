@@ -363,7 +363,7 @@ export function KazumiSelector({
                     className="flex h-14 w-14 items-center justify-center rounded-full"
                     style={{
                       backgroundColor:
-                        'var(--md-sys-color-surface-container-high)',
+                        'var(--glass-bg)',
                     }}
                   >
                     <Loader2
@@ -376,7 +376,7 @@ export function KazumiSelector({
                     className="flex h-14 w-14 items-center justify-center rounded-full"
                     style={{
                       backgroundColor:
-                        'var(--md-sys-color-surface-container-high)',
+                        'var(--glass-bg)',
                     }}
                   >
                     <Tv
@@ -406,10 +406,10 @@ export function KazumiSelector({
               <div
                 key={result.id}
                 className={cn(
-                  'zen-card overflow-hidden rounded-[var(--md-sys-shape-corner)] border transition-all',
+                  'zen-card glass overflow-hidden rounded-[var(--md-sys-shape-corner)] border transition-all',
                   expanded
-                    ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-surface-container-high)]'
-                    : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container)]'
+                    ? 'border-[var(--md-sys-color-primary)]'
+                    : 'border-[var(--md-sys-color-outline-variant)]'
                 )}
               >
                 <button
@@ -441,7 +441,7 @@ export function KazumiSelector({
                       )}
                       style={{
                         backgroundColor:
-                          'var(--md-sys-color-surface-container-high)',
+                          'var(--glass-bg)',
                       }}
                     >
                       <Tv
@@ -536,7 +536,7 @@ export function KazumiSelector({
                               className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-semibold transition-colors group-hover:text-[var(--md-sys-color-on-primary)]"
                               style={{
                                 backgroundColor:
-                                  'var(--md-sys-color-surface-container-high)',
+                                  'var(--glass-bg)',
                                 color: 'var(--md-sys-color-primary)',
                               }}
                             >

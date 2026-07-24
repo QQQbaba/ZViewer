@@ -20,6 +20,12 @@ export class SystemSettings {
   @Column({ type: 'json', nullable: true })
   dataSourceConfig!: Record<string, unknown> | null;
 
+  @Column({ type: 'text', default: 'approval' })
+  registrationMode!: 'open' | 'approval' | 'closed';
+
+  @Column({ type: 'boolean', default: false })
+  betaFeaturesEnabled!: boolean;
+
   @CreateDateColumn()
   createdAt!: Date;
 

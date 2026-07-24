@@ -53,7 +53,7 @@ export class Room {
   @Column({ type: 'varchar', nullable: true })
   streamKey!: string | null;
 
-  @Column({ type: 'boolean', default: true })
+  @Column({ type: 'boolean', default: false })
   requireApproval!: boolean;
 
   @Column({ type: 'integer', nullable: true })

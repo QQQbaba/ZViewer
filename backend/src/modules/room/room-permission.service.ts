@@ -82,9 +82,10 @@ export class RoomPermissionService {
     const sessionRepo = AppDataSource.getRepository(Session);
     const roomRepo = AppDataSource.getRepository(Room);
 
-    // 先按 socketId 查找活跃 sharer
+    // 先按 socketId + roomId 查找当前房间的活跃 sharer
     const sharer = await sessionRepo.findOneBy({
       socketId: socket.id,
+      roomId,
       role: 'sharer',
       endedAt: IsNull(),
     });

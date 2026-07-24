@@ -24,6 +24,11 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      // 开发环境代理 NMS HTTP-FLV 拉流，匹配 /live/<streamKey>.flv
+      '/live': {
+        target: 'http://localhost:3335',
+        changeOrigin: true,
+      },
     },
   },
 })

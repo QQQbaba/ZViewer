@@ -72,8 +72,6 @@ const LOADING_STATS: VideoStats = {
  *   https://upos-sz-mirrorhwbilibili.bilivideo.com/...   → 华为云
  *   https://xxxxx.mcdn.bilivideo.cn:8082/...             → P2P CDN
  *   https://upos-sz-mirror*.bilivideo.com/...            → 主站 CDN
- *
- * 与前端 parseOptions.ts 中的 BILIBILI_CDN_OPTIONS 保持一致的匹配规则。
  */
 function detectBilibiliCdnProvider(url: string): string {
   if (!url) return '-'

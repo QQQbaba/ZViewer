@@ -7,6 +7,8 @@ import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import path from 'node:path';
+import fs from 'node:fs';
 import bcrypt from 'bcryptjs';
 import { IsNull, LessThan } from 'typeorm';
 import { AppDataSource } from './data-source';
@@ -23,6 +25,7 @@ import danmakuRoutes from './routes/danmaku';
 import animeSourcesRoutes from './routes/animeSources';
 import anisubsRoutes from './routes/anisubs';
 import kazumiRoutes from './routes/kazumi';
+import serverFilesRoutes from './routes/serverFiles';
 import openlistRoutes from './routes/openlist';
 import webdavRoutes from './routes/webdav';
 import ftpRoutes from './routes/ftp';
@@ -61,6 +64,7 @@ import {
 } from './modules/playback-memory';
 import { CommentHandler } from './modules/comment';
 import { nmsService, StreamPushHandler, streamPushRouter } from './modules/stream-push';
+import { ensureUploadsRoot } from './services/server-files/pathResolver';
 
 export async function getSystemSettings(): Promise<SystemSettings> {
   const settingsRepo = AppDataSource.getRepository(SystemSettings);
@@ -69,6 +73,8 @@ export async function getSystemSettings(): Promise<SystemSettings> {
     settings = settingsRepo.create({
       autoDeleteInactiveRooms: true,
       autoDeleteAfterHours: 24,
+      registrationMode: 'approval',
+      betaFeaturesEnabled: false,
     });
     await settingsRepo.save(settings);
   }
@@ -140,6 +146,11 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3333;
 // 默认不指定 host，让 Node 同时监听 IPv4 与 IPv6（双栈），避免 Windows 上 '::' 无法接收 IPv4 连接的问题。
 const HOST = process.env.HOST || undefined;
 
+// 进程启动时间戳与重启次数（由 supervisor 通过 RESTART_COUNT 环境变量传入）。
+// 前端通过 /health 对比 startedAt 判断后端是否已自动重启，并在网页内提示。
+const PROCESS_STARTED_AT = Date.now();
+const RESTART_COUNT = parseInt(process.env.RESTART_COUNT || '0', 10);
+
 function parseCorsOrigin(
   value: string | undefined,
 ): boolean | string | string[] {
@@ -180,6 +191,13 @@ async function bootstrap() {
   await AppDataSource.initialize();
   console.log('TypeORM Data Source has been initialized.');
   await seedRootAdmin();
+  ensureUploadsRoot();
+
+  // 确保头像存储目录存在
+  const AVATARS_DIR = path.resolve(process.cwd(), 'uploads', 'avatars');
+  if (!fs.existsSync(AVATARS_DIR)) {
+    fs.mkdirSync(AVATARS_DIR, { recursive: true });
+  }
 
   const app = express();
   app.use(
@@ -192,12 +210,18 @@ async function bootstrap() {
   );
   app.use(express.json());
   app.use(cookieParser());
+  // 头像静态文件服务（无需鉴权，头像通过 URL 公开访问）
+  app.use('/uploads/avatars', express.static(AVATARS_DIR, {
+    maxAge: '7d',
+    immutable: true,
+  }));
   app.use('/api/auth', authRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/stream/danmaku', danmakuRoutes);
   app.use('/api/stream/anime', animeSourcesRoutes);
   app.use('/api/stream/anisubs', anisubsRoutes);
   app.use('/api/stream/kazumi', kazumiRoutes);
+  app.use('/api/server-files', serverFilesRoutes);
   app.use('/api/stream', streamRoutes);
   app.use('/api/openlist', openlistRoutes);
   app.use('/api/webdav', webdavRoutes);
@@ -206,7 +230,12 @@ async function bootstrap() {
   app.use('/api/stream-push', streamPushRouter);
 
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      startedAt: PROCESS_STARTED_AT,
+      restartCount: RESTART_COUNT,
+    });
   });
 
   const httpServer = createServer(app);

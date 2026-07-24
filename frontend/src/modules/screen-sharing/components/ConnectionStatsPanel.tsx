@@ -93,7 +93,7 @@ export function ConnectionStatsPanel({ pc, mode }: ConnectionStatsPanelProps) {
         </Tag>
       </Space>
       <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-3 lg:grid-cols-6">
-        <div className="rounded-lg bg-[var(--md-sys-color-surface-container-highest)] p-4">
+        <div className="glass rounded-lg p-4">
           <Text type="secondary" className="text-sm">
             视频分辨率
           </Text>
@@ -103,7 +103,7 @@ export function ConnectionStatsPanel({ pc, mode }: ConnectionStatsPanelProps) {
               : '-'}
           </Paragraph>
         </div>
-        <div className="rounded-lg bg-[var(--md-sys-color-surface-container-highest)] p-4">
+        <div className="glass rounded-lg p-4">
           <Text type="secondary" className="text-sm">
             帧率
           </Text>
@@ -111,7 +111,7 @@ export function ConnectionStatsPanel({ pc, mode }: ConnectionStatsPanelProps) {
             {stats.frameRate === null ? '-' : `${stats.frameRate} fps`}
           </Paragraph>
         </div>
-        <div className="rounded-lg bg-[var(--md-sys-color-surface-container-highest)] p-4">
+        <div className="glass rounded-lg p-4">
           <Text type="secondary" className="text-sm">
             码率
           </Text>
@@ -119,7 +119,7 @@ export function ConnectionStatsPanel({ pc, mode }: ConnectionStatsPanelProps) {
             {formatBitrate(stats.bitrate)}
           </Paragraph>
         </div>
-        <div className="rounded-lg bg-[var(--md-sys-color-surface-container-highest)] p-4">
+        <div className="glass rounded-lg p-4">
           <Text type="secondary" className="text-sm">
             已收/已发数据包
           </Text>
@@ -131,7 +131,7 @@ export function ConnectionStatsPanel({ pc, mode }: ConnectionStatsPanelProps) {
                 : '-'}
           </Paragraph>
         </div>
-        <div className="rounded-lg bg-[var(--md-sys-color-surface-container-highest)] p-4">
+        <div className="glass rounded-lg p-4">
           <Text type="secondary" className="text-sm">
             丢包数
           </Text>
@@ -139,7 +139,7 @@ export function ConnectionStatsPanel({ pc, mode }: ConnectionStatsPanelProps) {
             {formatNumber(stats.packetsLost)}
           </Paragraph>
         </div>
-        <div className="rounded-lg bg-[var(--md-sys-color-surface-container-highest)] p-4">
+        <div className="glass rounded-lg p-4">
           <Text type="secondary" className="text-sm">
             丢包率
           </Text>

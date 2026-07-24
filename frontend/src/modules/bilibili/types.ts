@@ -67,7 +67,5 @@ export interface ResolveProgressLine {
 export type BilibiliCodec = 'auto' | 'avc' | 'hevc' | 'av1'
 
 export interface BilibiliParseOptions {
-  fnval?: number
-  preferCdn?: string
   codec?: BilibiliCodec
 }

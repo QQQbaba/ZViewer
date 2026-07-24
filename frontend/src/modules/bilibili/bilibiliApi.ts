@@ -187,42 +187,63 @@ async function parseNdjsonStream(
   throw new Error('解析 B站 视频未完成')
 }
 
+/**
+ * 解析总超时（毫秒）。
+ *
+ * 后端流程包含 VIP 校验、视频信息、playurl、CDN 健康检查（4s 兜底）以及
+ * DASH 不可达时的 MP4 降级重解析。正常情况下 10s 内完成；当 B站 API
+ * 或 CDN 不响应时，后端 bilibiliFetch 已有单请求超时，这里作为整体兜底，
+ * 防止 NDJSON 流式响应永不结束导致前端 await res.text() 永久挂起。
+ */
+const RESOLVE_TIMEOUT_MS = 30000
+
 export async function resolveBilibili(
   url: string,
   qn?: number,
   onProgress?: (step: string, message: string) => void,
-  options?: { fnval?: number; preferCdn?: string }
+  options?: { codec?: string }
 ): Promise<ResolvedSource> {
   let fetchUrl = `${API_URL}/api/stream/resolve-bilibili?url=${encodeURIComponent(url)}`
   if (qn != null && Number.isFinite(qn)) {
     fetchUrl += `&qn=${qn}`
   }
-  if (options?.fnval != null && Number.isFinite(options.fnval)) {
-    fetchUrl += `&fnval=${options.fnval}`
-  }
-  if (options?.preferCdn) {
-    fetchUrl += `&preferCdn=${encodeURIComponent(options.preferCdn)}`
-  }
-  const res = await apiFetch(fetchUrl)
-  const contentType = res.headers.get('content-type') || ''
-
-  if (contentType.includes('application/x-ndjson')) {
-    return parseNdjsonStream(res, onProgress)
+  if (options?.codec && options.codec !== 'auto') {
+    fetchUrl += `&codec=${encodeURIComponent(options.codec)}`
   }
 
-  // 兜底：兼容旧版纯 JSON 响应
-  const data = (await res.json()) as ResolveProgressLine
-  if (!res.ok || !data.success || !data.videoUrl) {
-    if (data.code === 'NO_PERMISSION') {
-      throw new Error(data.message || '无权限播放，可能需要大会员')
+  // 整体超时兜底：后端流式响应永不结束时主动 abort，避免前端永久挂起。
+  // 控制器在 parseNdjsonStream / res.json() 完成后由 finally 清理。
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS)
+  try {
+    const res = await apiFetch(fetchUrl, { signal: controller.signal })
+    const contentType = res.headers.get('content-type') || ''
+
+    if (contentType.includes('application/x-ndjson')) {
+      return await parseNdjsonStream(res, onProgress)
     }
-    throw new Error(data.message || '解析 B站 视频失败')
+
+    // 兜底：兼容旧版纯 JSON 响应
+    const data = (await res.json()) as ResolveProgressLine
+    if (!res.ok || !data.success || !data.videoUrl) {
+      if (data.code === 'NO_PERMISSION') {
+        throw new Error(data.message || '无权限播放，可能需要大会员')
+      }
+      throw new Error(data.message || '解析 B站 视频失败')
+    }
+    return mapResolvedBilibili(data)
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('解析 B站 视频超时，请稍后重试')
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
   }
-  return mapResolvedBilibili(data)
 }
 
 /**
- * 使用用户本地持久化的 B站 解析偏好（编码 / CDN）解析 B站 视频。
+ * 使用用户本地持久化的 B站 解析偏好（编码）解析 B站 视频。
  * 该函数将偏好读取与 `resolveBilibili` 调用合并，避免调用方重复注入参数。
  */
 export async function resolveBilibiliWithOptions(
@@ -232,7 +253,6 @@ export async function resolveBilibiliWithOptions(
 ): Promise<ResolvedSource> {
   const options = getBilibiliParseOptions()
   return resolveBilibili(url, qn, onProgress, {
-    fnval: options.fnval,
-    preferCdn: options.preferCdn,
+    codec: options.codec,
   })
 }
