@@ -91,7 +91,36 @@ async function fetchVideoInfo(bvid: string, cookie?: string) {
     console.log('[bilibili-resolver] video info served from cache:', bvid);
     return cached;
   }
-  const info = await getVideoInfo(bvid, cookie);
+  let info: import('./video').BilibiliVideoInfo | null = null;
+  try {
+    info = await getVideoInfo(bvid, cookie);
+  } catch (err) {
+    // 将 B站 API 业务错误转换为对用户更友好的 ResolveError
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('[-404]')) {
+      throw new ResolveError(
+        `视频不存在或已被删除（${bvid}），请检查 BV 号是否正确`,
+        'VIDEO_NOT_FOUND',
+      );
+    }
+    if (msg.includes('[-101]')) {
+      throw new ResolveError(
+        'B站账号未登录或登录已过期，请重新扫码登录',
+        'NOT_LOGGED_IN',
+      );
+    }
+    if (msg.includes('[-403]') || msg.includes('[-514]')) {
+      throw new ResolveError(
+        '无权限访问该视频，可能为会员专享或地区限制',
+        'NO_PERMISSION',
+      );
+    }
+    // 其他未知错误保留原始消息
+    throw new ResolveError(
+      `获取视频信息失败: ${msg}`,
+      'INFO_FAILED',
+    );
+  }
   if (!info) {
     throw new ResolveError('获取视频信息失败', 'INFO_FAILED');
   }
@@ -150,8 +179,10 @@ export async function resolveBilibiliVideo(
     })(),
   ]);
 
-  // 根据会员状态确定默认清晰度
-  const defaultQn = getDefaultQn(isVip); // 非会员 1080P，会员 4K
+  // 根据会员状态和登录态确定默认清晰度
+  // 未登录 B站 时默认 480P（B站对未登录用户限制为 480P 及以下）
+  const hasCookie = !!cookie;
+  const defaultQn = getDefaultQn(isVip, hasCookie);
   const requestedQn = qn ?? defaultQn;
 
   // 播放地址
@@ -165,25 +196,33 @@ export async function resolveBilibiliVideo(
       { qn: requestedQn, codec, isVip },
     );
   } catch (err) {
-    // 权限错误：降级到 1080P 重试
-    if (err instanceof NoPermissionError && requestedQn !== 80) {
-      emit('playurl', '当前清晰度无权限，降级到 1080P...');
-      playUrl = await getPlayUrl(
-        info.bvid,
-        info.cid,
-        cookie,
-        { qn: 80, codec, isVip },
-      );
+    // 权限错误：逐级降级重试
+    // 未登录时请求 480P 仍可能失败（部分视频限制），降级到 360P
+    // 已登录非会员请求 1080P 失败时，降级到 480P
+    // 已登录会员请求 4K 失败时，降级到 1080P
+    if (err instanceof NoPermissionError) {
+      const fallbackQn = requestedQn > 32 ? 32 : 16;
+      if (fallbackQn !== requestedQn) {
+        emit('playurl', `当前清晰度无权限，降级到 ${fallbackQn === 32 ? '480P' : '360P'}...`);
+        playUrl = await getPlayUrl(
+          info.bvid,
+          info.cid,
+          cookie,
+          { qn: fallbackQn, codec, isVip },
+        );
+      } else {
+        throw err;
+      }
     } else {
       throw err;
     }
   }
   if (!playUrl) {
-    throw new ResolveError('无法获取播放地址，可能需要大会员', 'NO_PERMISSION');
+    throw new ResolveError('无法获取播放地址，可能需要登录或大会员', 'NO_PERMISSION');
   }
 
   // 清晰度匹配：若请求的 qn 不在 acceptQuality 中，回退到首个可用清晰度
-  let acceptQuality = filterQualitiesByVip(playUrl.acceptQuality, isVip);
+  let acceptQuality = filterQualitiesByVip(playUrl.acceptQuality, isVip, hasCookie);
   let effectiveQn = playUrl.currentQn;
   if (effectiveQn && !acceptQuality.some((q) => q.id === effectiveQn)) {
     effectiveQn = acceptQuality[0]?.id ?? playUrl.currentQn;
@@ -199,7 +238,7 @@ export async function resolveBilibiliVideo(
       });
       if (refetched) {
         playUrl = refetched;
-        acceptQuality = filterQualitiesByVip(playUrl.acceptQuality, isVip);
+        acceptQuality = filterQualitiesByVip(playUrl.acceptQuality, isVip, hasCookie);
       }
     } catch (err) {
       // 权限错误时保持当前清晰度

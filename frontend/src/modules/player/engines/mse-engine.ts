@@ -40,6 +40,7 @@ export const mseEngine: PlayerEngine = {
       audioUrl,
       videoCodec: source.videoCodec,
       audioCodec: source.audioCodec,
+      duration: source.duration,
     })
 
     try {

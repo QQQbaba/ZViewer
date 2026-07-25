@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useRoomStore } from '@/store/roomStore'
 import { useAuthStore } from '@/store/authStore'
+import { setClientLoggerRoomId } from '@/lib/clientLogger'
 import { useSocket } from '@/hooks/useSocket'
 import { VoiceChatPanel } from '@/modules/voice-chat'
 import { RoomPanel } from '@/modules/room/components/RoomPanel'
@@ -53,6 +54,7 @@ function RoomPage() {
   const setRoomId = useRoomStore((state) => state.setRoomId)
   const setRoomName = useRoomStore((state) => state.setRoomName)
   const setActiveRoomId = useRoomStore((state) => state.setActiveRoomId)
+  const setRoomSettings = useRoomStore((state) => state.setRoomSettings)
   const resetRoomStore = useRoomStore((state) => state.reset)
 
   // 房主刷新/重连恢复时由后端返回的最近一次播放状态
@@ -106,8 +108,16 @@ function RoomPage() {
     if (roomId) {
       setRoomId(roomId)
       setActiveRoomId(roomId)
+      setClientLoggerRoomId(roomId)
     }
   }, [roomId, setRoomId, setActiveRoomId])
+
+  // 组件卸载或 roomId 变化时清除日志上报中的房间标记
+  useEffect(() => {
+    return () => {
+      setClientLoggerRoomId(null)
+    }
+  }, [])
 
   // 房主刷新或重连后，重新声明房主身份以恢复 sharer 会话
   useEffect(() => {
@@ -125,6 +135,7 @@ function RoomPage() {
             shareMethod?: 'webrtc' | 'stream-push'
             name?: string | null
             streamKey?: string | null
+            requireApproval?: boolean
             playback?: {
               currentTime: number
               isPlaying: boolean
@@ -175,6 +186,12 @@ function RoomPage() {
           if (data?.streamKey !== undefined) {
             setStreamKey(data.streamKey)
           }
+          // 同步 requireApproval 到 store：房主刷新/重连后 RoomInfoPanel 显示
+          // 必须与后端实际值一致，否则房主看到的开关状态与后端审批逻辑不符，
+          // 观众加入时后端按真实值判定，房主却以为开关已开/关，导致"开关无效"假象。
+          if (data?.requireApproval !== undefined) {
+            setRoomSettings({ requireApproval: data.requireApproval })
+          }
           // 房主刷新恢复：保存 playback 传给 WatchTogetherPanel 应用
           if (data?.playback) {
             setRecoveredPlayback(data.playback)
@@ -209,6 +226,7 @@ function RoomPage() {
     setShareMethod,
     setStreamKey,
     setRoomName,
+    setRoomSettings,
   ])
 
   const mode = storeMode

@@ -298,7 +298,7 @@ export function BackgroundSettingsPanel({
           {/* 参数滑块 */}
           <div className="mt-3 space-y-2 px-2">
             <Slider
-              label="模糊度"
+              label="背景模糊度"
               value={store.backgroundBlur}
               min={0}
               max={20}

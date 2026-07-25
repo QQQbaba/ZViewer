@@ -266,13 +266,21 @@ export function WatchTogetherPanel({
     loadedTracksRef.current = current
   }, [tracks])
 
-  // 视频加载后更新总时长
+  // 视频加载后，仅在 store 中尚未获得权威 duration 时，用 video.duration 兜底填充。
+  // 注意：禁止用 video.duration 覆盖 store 中已有的后端权威值。
+  // MSE seek / 缓冲片段期间，浏览器可能将 video.duration 报告为当前片段时长
+  //（如 01:15），覆盖后会导致控制栏总时长错误并随广播污染观众端。
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
+    const storeDuration = useRoomStore.getState().watchTogether.duration
+    const isStoreDurationValid =
+      Number.isFinite(storeDuration) && storeDuration > 0
+    if (isStoreDurationValid) return
+
     const handleLoadedMetadata = () => {
-      if (video.duration && isFinite(video.duration)) {
+      if (video.duration && isFinite(video.duration) && video.duration > 0) {
         setWatchTogether({ duration: video.duration })
       }
     }
@@ -801,9 +809,7 @@ export function WatchTogetherPanel({
     >
       <video
         ref={setVideoRef}
-        className={cn(
-          'h-full w-full object-contain'
-        )}
+        className={cn('h-full w-full object-contain')}
         playsInline
         preload="metadata"
       >
@@ -921,6 +927,7 @@ export function WatchTogetherPanel({
               onResetDanmakuStyle={resetStyle}
               timeOverride={isReloading ? reloadTargetTime : null}
               syncTime={watchTogether.currentTime}
+              duration={watchTogether.duration}
             />
           </div>
         </>

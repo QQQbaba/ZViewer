@@ -48,22 +48,42 @@ export function verifyRefreshToken(token: string): JwtPayload {
   return jwt.verify(token, JWT_REFRESH_SECRET) as JwtPayload;
 }
 
+/**
+ * 判断当前请求是否为 HTTPS（含反向代理终止 TLS 的场景）。
+ * 用于动态决定 cookie 的 secure 属性：
+ * - HTTPS 请求 → secure: true（浏览器才允许设置 Secure cookie）
+ * - HTTP 请求 → secure: false（否则浏览器会直接丢弃 Secure cookie，导致登录态丢失）
+ *
+ * 依赖 app.set('trust proxy', true) 才能正确读取 X-Forwarded-Proto 头。
+ */
+function isRequestSecure(req: Request): boolean {
+  // req.secure 在直连场景下反映真实 TLS；反向代理后需信任 X-Forwarded-Proto
+  if (req.secure) return true;
+  const xfp = req.headers['x-forwarded-proto'];
+  if (typeof xfp === 'string' && xfp.split(',')[0].trim().toLowerCase() === 'https') {
+    return true;
+  }
+  return false;
+}
+
 /** 将 access_token / refresh_token 写入 httpOnly cookie。 */
 export function setAuthCookies(
+  req: Request,
   res: Response,
   accessToken: string,
   refreshToken: string,
 ): void {
+  const secure = isRequestSecure(req);
   res.cookie('access_token', accessToken, {
     httpOnly: true,
-    secure: IS_PROD,
+    secure,
     sameSite: 'lax',
     maxAge: ACCESS_COOKIE_MAX_AGE,
     path: '/',
   });
   res.cookie('refresh_token', refreshToken, {
     httpOnly: true,
-    secure: IS_PROD,
+    secure,
     sameSite: 'lax',
     maxAge: REFRESH_COOKIE_MAX_AGE,
     path: '/',
@@ -71,10 +91,14 @@ export function setAuthCookies(
 }
 
 /** 仅更新 access_token cookie（refresh 不轮换）。 */
-export function setAccessTokenCookie(res: Response, accessToken: string): void {
+export function setAccessTokenCookie(
+  req: Request,
+  res: Response,
+  accessToken: string,
+): void {
   res.cookie('access_token', accessToken, {
     httpOnly: true,
-    secure: IS_PROD,
+    secure: isRequestSecure(req),
     sameSite: 'lax',
     maxAge: ACCESS_COOKIE_MAX_AGE,
     path: '/',

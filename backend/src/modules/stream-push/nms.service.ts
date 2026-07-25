@@ -15,6 +15,7 @@ import type { Server as SocketIOServer } from 'socket.io';
 import NodeMediaServer from 'node-media-server';
 import { AppDataSource } from '../../data-source';
 import { Room } from '../../entities/Room';
+import { MEDIA_DIR } from '../../services/paths';
 import type { PublishValidationResult } from './dto/stream-push.dto';
 
 /**
@@ -89,7 +90,8 @@ class NmsService {
       },
       http: {
         port: httpFlvPort,
-        mediaroot: './media',
+        // NMS 推流媒体切片统一存放到 config/media，便于升级时整体保留 config 目录
+        mediaroot: MEDIA_DIR,
         allow_origin: '*',
       },
       auth: {
@@ -174,7 +176,11 @@ class NmsService {
     return () => {
       if (this.nmsInstance) {
         try {
-          this.nmsInstance.stop();
+          // Node-Media-Server 实例可能未暴露 stop 方法（版本差异），
+          // 使用可选调用避免 TypeError。
+          if (typeof this.nmsInstance.stop === 'function') {
+            this.nmsInstance.stop();
+          }
           console.log('[NMS] Node-Media-Server stopped');
         } catch (err) {
           console.error('[NMS] stop error:', err);

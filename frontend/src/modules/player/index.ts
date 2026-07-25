@@ -16,9 +16,8 @@
  * │       ├── player.ts           MsePlayer 门面（状态机 + 双轨编排）
  * │       ├── track.ts            MediaTrack 单轨生命周期
  * │       ├── processor.ts        ReadableStream → SourceBuffer 管线
- * │       ├── downloader.ts       Range 下载（重试 + 缓存 + 代理）
+ * │       ├── downloader.ts       Range 下载（重试 + 代理）
  * │       ├── parser.ts           MP4 头部解析 + seek 偏移
- * │       └── stream-cache.ts     IndexedDB 字节缓存（覆盖查询 + LRU + TTL）
  * ├── services/
  * │   ├── buffer-manager.ts       SourceBuffer 串行队列（append / prune / quota 恢复）
  * │   ├── mp4-parser.ts           fMP4 box 解析（纯函数）

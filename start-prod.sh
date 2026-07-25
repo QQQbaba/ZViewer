@@ -12,10 +12,19 @@ BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 PIDS_FILE="$ROOT_DIR/.prod.pids.json"
 PORTS_FILE="$ROOT_DIR/.prod.ports.json"
-BACKEND_LOG="$ROOT_DIR/backend-prod.log"
-BACKEND_ERR_LOG="$ROOT_DIR/backend-prod.err.log"
-FRONTEND_LOG="$ROOT_DIR/frontend-prod.log"
-FRONTEND_ERR_LOG="$ROOT_DIR/frontend-prod.err.log"
+
+# 数据根目录：所有持久化数据（数据库、上传文件、头像、NMS 媒体）统一存放于此
+# 升级时仅需保留此目录即可保留全部用户数据；首次启动由后端自动创建
+CONFIG_DIR="$ROOT_DIR/config"
+
+# 运行时日志统一存放于根目录 log/ 文件夹
+LOG_DIR="$ROOT_DIR/log"
+mkdir -p "$LOG_DIR"
+BACKEND_LOG="$LOG_DIR/backend.log"
+BACKEND_ERR_LOG="$LOG_DIR/backend.err.log"
+FRONTEND_LOG="$LOG_DIR/frontend.log"
+FRONTEND_ERR_LOG="$LOG_DIR/frontend.err.log"
+FRONTEND_CONSOLE_LOG="$LOG_DIR/frontend-console.log"
 
 # 默认端口（可被 .prod.ports.json 或命令行参数覆盖）
 DEFAULT_PORT=3333
@@ -183,6 +192,58 @@ format_access_urls() {
       [[ -n "$ip" ]] && echo "    http://[$ip]:$port"
     done
   done
+}
+
+# 启动前备份上一轮日志到归档文件（带时间戳），避免直接删除丢失历史记录
+# 备份命名格式：backend.20260725-120000.log
+backup_old_logs() {
+  local archived=0
+  for log in "$BACKEND_LOG" "$BACKEND_ERR_LOG" "$FRONTEND_LOG" "$FRONTEND_ERR_LOG" "$FRONTEND_CONSOLE_LOG"; do
+    [[ -f "$log" ]] || continue
+    local stamp base ext archive_name
+    # 使用文件 mtime 作为时间戳，便于按时间排序
+    stamp=$(date -r "$log" '+%Y%m%d-%H%M%S' 2>/dev/null || date '+%Y%m%d-%H%M%S')
+    base="${log##*/}"          # 去除目录前缀
+    base="${base%.*}"          # 去除扩展名
+    ext="${log##*.}"           # 取扩展名
+    archive_name="${base}.${stamp}.${ext}"
+    if mv -f "$log" "$LOG_DIR/$archive_name" 2>/dev/null; then
+      archived=$((archived + 1))
+    else
+      # 备份失败则直接删除，避免文件被占用导致重定向失败
+      rm -f "$log" 2>/dev/null || true
+    fi
+  done
+  echo "$archived"
+}
+
+# 清理超过保留天数的归档日志，避免 log/ 目录无限增长
+# 参数：保留天数（默认 7）
+cleanup_old_archives() {
+  local keep_days="${1:-7}"
+  local cutoff
+  # 兼容 GNU date（Linux）与 BSD date（macOS）
+  cutoff=$(date -d "-${keep_days} days" '+%Y%m%d' 2>/dev/null || date -v-${keep_days}d '+%Y%m%d' 2>/dev/null || echo "")
+  if [[ -z "$cutoff" ]]; then
+    # 无法计算截止日期，跳过清理
+    echo 0
+    return
+  fi
+  local cleaned=0
+  # 归档文件命名格式：name.YYYYMMDD-HHMMSS.ext
+  while IFS= read -r -d '' file; do
+    local file_stamp base_date
+    file_stamp=$(basename "$file")
+    # 提取 YYYYMMDD 部分
+    if [[ "$file_stamp" =~ \.([0-9]{8})-[0-9]{6}\. ]]; then
+      base_date="${BASH_REMATCH[1]}"
+      # 字符串比较：早于 cutoff 的归档文件直接删除
+      if [[ "$base_date" < "$cutoff" ]]; then
+        rm -f "$file" 2>/dev/null && cleaned=$((cleaned + 1))
+      fi
+    fi
+  done < <(find "$LOG_DIR" -maxdepth 1 -type f -name '*.*[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]*.*' -print0 2>/dev/null)
+  echo "$cleaned"
 }
 
 # ============ 端口配置 ============
@@ -485,8 +546,16 @@ do_start() {
   echo "  产物存在: backend/dist/index.js"
 
   echo "[5/5] 启动服务 ..."
-  # 清空旧日志
-  rm -f "$BACKEND_LOG" "$BACKEND_ERR_LOG" "$FRONTEND_LOG" "$FRONTEND_ERR_LOG"
+  # 备份上一轮日志到归档（带时间戳），并清理超过 7 天的历史归档
+  echo "  归档上一轮日志 ..."
+  archived_count=$(backup_old_logs)
+  if [[ "$archived_count" -gt 0 ]]; then
+    echo "  已归档 $archived_count 个日志文件至 log/ 目录"
+  fi
+  cleaned_count=$(cleanup_old_archives 7)
+  if [[ "$cleaned_count" -gt 0 ]]; then
+    echo "  已清理 $cleaned_count 个超过 7 天的历史归档"
+  fi
 
   echo "  启动后端 (PORT=$PORT) ..."
   cd "$BACKEND_DIR"
@@ -569,8 +638,12 @@ EOF
   echo ""
 
   echo "  PID 文件：$PIDS_FILE"
-  echo "  日志：$BACKEND_LOG / $BACKEND_ERR_LOG"
-  echo "        $FRONTEND_LOG / $FRONTEND_ERR_LOG"
+  echo "  日志目录：$LOG_DIR"
+  echo "    实时日志：backend.log / backend.err.log / frontend.log / frontend.err.log / frontend-console.log"
+  echo "    历史归档：backend.YYYYMMDD-HHmmss.log 等（保留 7 天）"
+  echo ""
+  echo "  数据目录：$CONFIG_DIR"
+  echo "    升级时仅需保留此目录即可保留全部数据（数据库、用户上传文件、头像等）"
   echo ""
 }
 

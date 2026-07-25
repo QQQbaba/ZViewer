@@ -71,18 +71,34 @@ export async function getVipStatus(cookie: string | undefined): Promise<boolean>
 }
 
 /**
- * 根据会员状态过滤可用清晰度列表。
- * 非会员严格过滤 VIP_ONLY_QNS，过滤后为空时回退到 1080P。
+ * 根据会员状态和登录态过滤可用清晰度列表。
+ * - 未登录 B站：仅保留 480P 及以下（qn ≤ ANONYMOUS_MAX_QN），B站对未登录用户的限制
+ * - 已登录非会员：过滤 VIP_ONLY_QNS，过滤后为空时回退到 1080P
+ * - 已登录会员：返回全部
  */
 export function filterQualitiesByVip(
   list: { id: number; label: string; resolution?: string }[] | undefined,
   isVip: boolean,
+  hasCookie: boolean = true,
 ): { id: number; label: string; resolution?: string }[] {
   const original = list ?? [];
   if (isVip) {
     return original;
   }
-  // 非会员严格过滤 VIP 专属清晰度
+  // 未登录 B站：仅保留 480P 及以下
+  if (!hasCookie) {
+    const anonymousFiltered = original.filter(
+      (q) => q.id <= ANONYMOUS_MAX_QN,
+    );
+    if (anonymousFiltered.length === 0) {
+      return [
+        { id: 32, label: '480P', resolution: '854x480' },
+        { id: 16, label: '360P', resolution: '640x360' },
+      ];
+    }
+    return anonymousFiltered;
+  }
+  // 已登录非会员：严格过滤 VIP 专属清晰度
   const filtered = original.filter((q) => !VIP_ONLY_QNS.includes(q.id));
   // 若过滤后为空，回退到 1080P 单条目
   if (filtered.length === 0) {
@@ -113,10 +129,16 @@ export function computeFnval(isVip: boolean, qn?: number): number {
   return fnval;
 }
 
+/** 未登录 B站 时允许访问的最高清晰度 qn（480P）。B站对未登录用户限制为 480P 及以下。 */
+export const ANONYMOUS_MAX_QN = 32;
+
 /**
- * 根据 VIP 状态返回默认清晰度。
- * 非会员 1080P（80），会员 4K（120）。
+ * 根据 VIP 状态和登录态返回默认清晰度。
+ * - 未登录 B站：480P（32）—— B站对未登录用户限制为 480P 及以下
+ * - 已登录非会员：1080P（80）
+ * - 已登录会员：4K（120）
  */
-export function getDefaultQn(isVip: boolean): number {
+export function getDefaultQn(isVip: boolean, hasCookie: boolean = true): number {
+  if (!hasCookie) return ANONYMOUS_MAX_QN;
   return isVip ? VIP_DEFAULT_QN : DEFAULT_QN;
 }

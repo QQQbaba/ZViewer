@@ -15,12 +15,10 @@ import {
   clearAuthCookies,
   AuthenticatedRequest,
 } from '../middleware/auth';
+import { AVATARS_DIR } from '../services/paths';
 
 const router = Router();
 const userRepository = () => AppDataSource.getRepository(User);
-
-/** 头像存储目录（backend/uploads/avatars）。 */
-const AVATARS_DIR = path.resolve(process.cwd(), 'uploads', 'avatars');
 
 /** 头像上传 multer 配置：仅接受图片，存储到 AVATARS_DIR。 */
 const avatarStorage = multer.diskStorage({
@@ -101,7 +99,7 @@ router.post(
 
       if (isOpen) {
         const tokens = generateTokens(user.id, user.role, user.username);
-        setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+        setAuthCookies(req, res, tokens.accessToken, tokens.refreshToken);
       }
 
       res.status(201).json({
@@ -156,7 +154,7 @@ router.post(
       }
 
       const tokens = generateTokens(user.id, user.role, user.username);
-      setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+      setAuthCookies(req, res, tokens.accessToken, tokens.refreshToken);
       res.json({
         success: true,
         ...tokens,
@@ -196,7 +194,7 @@ router.post(
       const payload = verifyRefreshToken(refreshToken);
       if (payload.userId === 0 && payload.role === 'guest') {
         const { accessToken } = generateTokens(0, 'guest', 'guest');
-        setAccessTokenCookie(res, accessToken);
+        setAccessTokenCookie(req, res, accessToken);
         res.json({ success: true, accessToken });
         return;
       }
@@ -211,7 +209,7 @@ router.post(
       }
 
       const { accessToken } = generateTokens(user.id, user.role, user.username);
-      setAccessTokenCookie(res, accessToken);
+      setAccessTokenCookie(req, res, accessToken);
       res.json({ success: true, accessToken });
     } catch (err) {
       console.error('refresh error:', err);
@@ -505,12 +503,12 @@ router.delete(
 router.post(
   '/guest',
   async (
-    _req: import('express').Request,
+    req: import('express').Request,
     res: import('express').Response,
   ): Promise<void> => {
     try {
       const tokens = generateTokens(0, 'guest', 'guest');
-      setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+      setAuthCookies(req, res, tokens.accessToken, tokens.refreshToken);
       res.json({
         success: true,
         ...tokens,

@@ -5,9 +5,8 @@
  * - player.ts     MsePlayer 门面（状态机 + 双轨编排：attach / seekTo / cleanup）
  * - track.ts      MediaTrack（单条流的完整生命周期：head → init → 流式下载 → seek 重载）
  * - processor.ts  appendPipeline（ReadableStream → SourceBuffer 的流式写入管线）
- * - downloader.ts HTTP Range 下载（重试 + 缓存读写 + 代理包装）
+ * - downloader.ts HTTP Range 下载（重试 + 代理包装）
  * - parser.ts     MP4 头部解析（init segment / sidx / seek 偏移计算）
- * - stream-cache  IndexedDB 字节缓存（覆盖查询 + LRU + TTL）
  */
 import type { SidxInfo } from '../../services/mp4-parser'
 
@@ -25,6 +24,17 @@ export const STREAM_CHUNK_SIZE = 512 * 1024
 export const TARGET_BUFFER_AHEAD = 60
 /** 缓冲恢复低水位 30s（0.5min），低于此值后恢复下载 */
 export const RESUME_BUFFER_THRESHOLD = 30
+/**
+ * 前进 seek 容差（秒）。
+ *
+ * currentTime 距离 buffered.end 在该容差内时，认为是"小缺口前进 seek"，
+ * waitForBufferDrain / processStream 应返回让 stream 继续下载填补缺口，
+ * 而不是无限等待 MsePlayer.seekTo 接管。
+ *
+ * 与 sync-playback/services/seek-strategy.ts 的 FORWARD_BUFFER_TOLERANCE_SEC
+ * 保持一致：executeSeek 对 gap ≤ 该值的 seek 走普通 seek，此处也必须配合返回。
+ */
+export const FORWARD_SEEK_TOLERANCE_SEC = 10
 /** 头部下载大小 512KB，用于解析 init segment + sidx */
 export const HEAD_SIZE = 512 * 1024
 /** 扫描 moof 最大积累量 8MB，超限则放弃对齐直接 append */
@@ -79,6 +89,16 @@ export interface MsePlayerOptions {
   audioUrl: string
   videoCodec?: string
   audioCodec?: string
+  /**
+   * 媒体总时长（秒），来自后端 resolve 接口的权威值。
+   *
+   * B站 fMP4 流的 mvhd.duration 为 0，浏览器从 mvhd 推断的 video.duration 不可靠。
+   * 此值用于在 SourceBuffer 首次 append 后显式设置 MediaSource.duration，
+   * 确保控制栏时间显示、进度条比例、seek 行为正确。
+   *
+   * 若未提供，则依赖浏览器从已 append 的数据自动推断（可能不准确）。
+   */
+  duration?: number
 }
 
 /** seek 返回结果。 */

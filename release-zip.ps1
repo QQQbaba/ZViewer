@@ -38,7 +38,10 @@ $excludeDirs = @(
   '__pycache__',
   '.next',
   'coverage',
-  'test-media'
+  'test-media',
+  # 数据根目录：含数据库、用户上传文件、头像等敏感数据，禁止打包
+  # 升级时由用户保留旧版本的 config/ 目录覆盖到新版本
+  'config'
 )
 
 # 排除文件（按文件名匹配）
@@ -97,6 +100,7 @@ function Show-Help {
   Write-Host ''
   Write-Host '排除内容：' -ForegroundColor Yellow
   Write-Host '  依赖：node_modules'
+  Write-Host '  数据根目录：config/（含数据库、用户上传文件、头像等敏感数据）'
   Write-Host '  数据库：*.sqlite / *.sqlite-journal / *.sqlite-wal / *.sqlite-shm'
   Write-Host '  环境配置：.env / .env.local'
   Write-Host '  运行时状态：.prod.pids.json / .prod.ports.json'
@@ -110,10 +114,18 @@ function Show-Help {
   Write-Host '  构建产物：backend/dist / frontend/dist（接收者无需再构建）'
   Write-Host ''
   Write-Host '接收者使用方式：' -ForegroundColor Yellow
-  Write-Host '  1. 解压 zip'
-  Write-Host '  2. 复制 backend/.env.example 为 backend/.env 并配置'
-  Write-Host '  3. npm install --omit=dev   # 仅安装运行时依赖'
-  Write-Host '  4. npm start（或使用 start-prod.bat）'
+  Write-Host '  首次部署：'
+  Write-Host '    1. 解压 zip'
+  Write-Host '    2. 复制 backend/.env.example 为 backend/.env 并配置'
+  Write-Host '    3. npm install --omit=dev   # 仅安装运行时依赖'
+  Write-Host '    4. npm start（或使用 start-prod.bat）'
+  Write-Host ''
+  Write-Host '  升级（保留用户数据）：'
+  Write-Host '    1. 停止旧版本服务'
+  Write-Host '    2. 备份旧版本的 config/ 目录（包含数据库、上传文件、头像等）'
+  Write-Host '    3. 解压新版本 zip 到新目录（或覆盖旧目录）'
+  Write-Host '    4. 将备份的 config/ 目录复制到新版本根目录'
+  Write-Host '    5. npm install --omit=dev && npm start'
   Write-Host ''
 }
 
@@ -289,10 +301,8 @@ function Invoke-Release {
     Write-Host "  文件数：$fileCount" -ForegroundColor Green
     Write-Host ''
     Write-Host '接收者使用方式：' -ForegroundColor Yellow
-    Write-Host '  1. 解压 zip'
-    Write-Host '  2. 复制 backend/.env.example 为 backend/.env 并配置'
-    Write-Host '  3. npm install --omit=dev   # 仅安装运行时依赖'
-    Write-Host '  4. npm start（或使用 start-prod.bat）'
+    Write-Host '  首次部署：解压 → 配置 .env → npm install --omit=dev → npm start'
+    Write-Host '  升级：保留旧版本 config/ 目录 → 覆盖到新版本根目录 → npm install --omit=dev → npm start'
     Write-Host ''
   } finally {
     # 清理临时目录
@@ -314,6 +324,7 @@ if ($Help) {
 
 try {
   Invoke-Release
+  exit 0
 } catch {
   Write-Host ''
   Write-Host "打包失败：$_" -ForegroundColor Red

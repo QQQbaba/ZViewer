@@ -34,6 +34,18 @@ export interface PlayerSource {
    * 然后通过估算的字节偏移从目标位置附近开始下载媒体分片。
    */
   startTime?: number
+  /**
+   * 媒体总时长（秒，仅 MSE 引擎使用）。
+   *
+   * 来自后端 resolve 接口返回的视频元数据（如 B站 view API 的 duration 字段），
+   * 用于显式设置 MediaSource.duration。
+   *
+   * B站 fMP4 流的 mvhd.duration 通常为 0（整体 duration 在 moof 的 tfdt 中累积），
+   * 浏览器从 mvhd 推断的 video.duration 不可靠（0 或仅覆盖已缓冲区间），
+   * 导致控制栏时间显示错误、进度条比例失真、seek 行为异常。
+   * 此处用后端权威值覆盖，确保 video.duration 反映真实视频时长。
+   */
+  duration?: number
 }
 
 /**

@@ -85,9 +85,11 @@ export function* iterBoxes(data: Uint8Array, start: number = 0): Generator<BoxIn
 }
 
 /**
- * 找到 init segment 的字节大小（ftyp + moov 连续区域的结束位置）。
+ * 找到 init segment 的字节大小（ftyp [+ free/skip...] + moov 的结束位置）。
  *
  * fMP4 文件的 init segment 由 ftyp + moov 组成，在文件开头连续排列。
+ * 部分文件（如 B站 m4s）在 ftyp 与 moov 之间会插入 free/skip 填充 box，
+ * 需要跳过这些 padding box 才能找到 moov。
  * moov 之后是 sidx（可选）和 moof + mdat（媒体分片）。
  *
  * @param data 文件头部数据（至少包含完整的 ftyp + moov）
@@ -95,14 +97,21 @@ export function* iterBoxes(data: Uint8Array, start: number = 0): Generator<BoxIn
  */
 export function findInitSegmentSize(data: Uint8Array): number | null {
   let initEnd = 0
+  let foundFtyp = false
   for (const box of iterBoxes(data, 0)) {
     if (box.type === 'ftyp') {
       initEnd = box.end
+      foundFtyp = true
     } else if (box.type === 'moov') {
+      // moov 前必须有 ftyp（init segment 起始于 ftyp）
+      if (!foundFtyp) return null
       initEnd = box.end
       return initEnd
+    } else if (box.type === 'free' || box.type === 'skip') {
+      // 跳过 padding box，继续寻找 moov（B站 m4s 在 ftyp 后有 free box）
+      continue
     } else {
-      // ftyp 和 moov 应该是连续的前两个 box
+      // 遇到其他类型 box（sidx/moof/mdat 等）说明 moov 不会出现了
       break
     }
   }

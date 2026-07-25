@@ -20,6 +20,7 @@ import {
 import {
   STREAM_CHUNK_SIZE,
   TARGET_BUFFER_AHEAD,
+  FORWARD_SEEK_TOLERANCE_SEC,
   MOOF_SCAN_LIMIT,
 } from './types'
 import { isInvalidStateError } from './downloader'
@@ -134,8 +135,10 @@ export async function processStream(
   const cancelled = () => signal.aborted || isSuperseded?.() === true
 
   const cancelReader = () => {
+    // reader.cancel() 返回 Promise，reader 已被 abort 时该 Promise 会 reject。
+    // 必须用 .catch() 捕获，否则成为未处理 Promise 拒绝（seekTo/cleanup abort 时高频触发）。
     try {
-      void reader.cancel()
+      reader.cancel().catch(() => {})
     } catch {
       /* ignore */
     }
@@ -166,8 +169,42 @@ export async function processStream(
     // 填补缺口期间（freeProgressBytes 额度未耗尽）跳过水位检查：
     // seek 保留了目标点之后的缓冲时 ahead 虚高，不能据此暂停缺口下载
     if (initialDone && downloadedBytes >= freeProgressBytes) {
+      // 检查 currentTime 是否在任何 buffered range 内。
+      let ctInRange = false
+      for (let i = 0; i < sb.buffered.length; i++) {
+        if (
+          video.currentTime >= sb.buffered.start(i) &&
+          video.currentTime <= sb.buffered.end(i)
+        ) {
+          ctInRange = true
+          break
+        }
+      }
       const ahead = getBufferedAhead(sb, video.currentTime)
-      if (ahead > TARGET_BUFFER_AHEAD) {
+      if (!ctInRange) {
+        // currentTime 不在 buffered range 内。区分 gap 大小：
+        // - gap 较小（≤ FORWARD_SEEK_TOLERANCE_SEC）：继续下载填补缺口。
+        //   普通前进 seek 到 buffered.end + 5s 这种场景，executeSeek 返回 false 走普通 seek，
+        //   此处必须继续下载，否则浏览器等待数据超时 seek 失败。
+        // - gap 较大（前进 seek 跳很远）或回退 seek：暂停下载，
+        //   让上层 executeSeek → MsePlayer.seekTo 接管，避免从断点顺序下载穿过整个缺口
+        //   导致数据过度累积触发 QuotaExceededError。
+        if (sb.buffered.length > 0) {
+          const bufferedEnd = sb.buffered.end(sb.buffered.length - 1)
+          const gap = video.currentTime - bufferedEnd
+          if (gap > FORWARD_SEEK_TOLERANCE_SEC) {
+            // 前进 seek 距离过大，暂停下载让 MsePlayer.seekTo 接管
+            if (chunk.length > 0 && foundMoof) {
+              await flushAligned(chunk, flush)
+            }
+            cancelReader()
+            return { downloadedBytes, bufferFull: true }
+          }
+          // gap 较小或为负（回退 seek）：继续下载填补缺口
+        }
+        // 无 buffered：继续下载
+      } else if (ahead > TARGET_BUFFER_AHEAD) {
+        // currentTime 在 buffered range 内，但前瞻过高，暂停下载
         if (chunk.length > 0 && foundMoof) {
           await flushAligned(chunk, flush)
         }

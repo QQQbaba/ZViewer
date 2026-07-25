@@ -394,10 +394,12 @@ function SharePage({
       ) : (
         <div className="flex h-full min-h-0 flex-col items-center justify-center gap-5 overflow-y-auto p-6 pt-20">
           <div
-            className="w-full max-w-sm rounded-2xl border p-6 shadow-sm"
+            className="glass-card w-full max-w-sm rounded-2xl border p-6 shadow-sm"
             style={{
-              borderColor: 'var(--md-sys-color-outline-variant)',
-              backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
+              borderColor: 'color-mix(in srgb, var(--md-sys-color-outline) 30%, transparent)',
+              backgroundColor: 'var(--glass-bg)',
+              backdropFilter: 'blur(var(--glass-blur-strong))',
+              WebkitBackdropFilter: 'blur(var(--glass-blur-strong))',
             }}
           >
             <div className="mb-5 flex items-center justify-between">
@@ -488,7 +490,7 @@ function SharePage({
 
           <Paragraph
             type="secondary"
-            className="m-0 max-w-sm text-center text-xs"
+            className="!text-white m-0 max-w-sm text-center text-xs"
           >
             将链接发送给观看方，对方打开后即可自动加入房间观看。
           </Paragraph>

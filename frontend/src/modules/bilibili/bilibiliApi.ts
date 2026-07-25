@@ -227,7 +227,7 @@ export async function resolveBilibili(
     const data = (await res.json()) as ResolveProgressLine
     if (!res.ok || !data.success || !data.videoUrl) {
       if (data.code === 'NO_PERMISSION') {
-        throw new Error(data.message || '无权限播放，可能需要大会员')
+        throw new Error(data.message || '无权限播放，可能需要登录或大会员')
       }
       throw new Error(data.message || '解析 B站 视频失败')
     }

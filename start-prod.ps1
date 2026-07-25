@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 #Requires -Version 5.1
 
 <#
@@ -46,6 +46,10 @@ $frontendDir = Join-Path $rootDir "frontend"
 $pidsFile = Join-Path $rootDir ".prod.pids.json"
 $portsFile = Join-Path $rootDir ".prod.ports.json"
 
+# 数据根目录：所有持久化数据（数据库、上传文件、头像、NMS 媒体）统一存放于此
+# 升级时仅需保留此目录即可保留全部用户数据；首次启动由后端自动创建
+$configDir = Join-Path $rootDir "config"
+
 # 运行时日志统一存放于根目录 log/ 文件夹
 $logDir = Join-Path $rootDir "log"
 if (-not (Test-Path $logDir)) {
@@ -55,6 +59,7 @@ $backendLog = Join-Path $logDir "backend.log"
 $backendErrLog = Join-Path $logDir "backend.err.log"
 $frontendLog = Join-Path $logDir "frontend.log"
 $frontendErrLog = Join-Path $logDir "frontend.err.log"
+$frontendConsoleLog = Join-Path $logDir "frontend-console.log"
 $supervisorLogPath = Join-Path $logDir "supervisor.log"
 
 # ============ 辅助函数 ============
@@ -150,7 +155,7 @@ function Backup-OldLogs {
     # 启动前备份上一轮日志到归档子目录，避免直接删除丢失历史记录
     # 备份命名格式：backend.20260725-120000.log
     $archivedCount = 0
-    foreach ($log in @($backendLog, $backendErrLog, $frontendLog, $frontendErrLog)) {
+    foreach ($log in @($backendLog, $backendErrLog, $frontendLog, $frontendErrLog, $frontendConsoleLog)) {
         if (-not (Test-Path $log)) { continue }
         try {
             $stamp = (Get-Item $log).LastWriteTime.ToString('yyyyMMdd-HHmmss')
@@ -707,8 +712,11 @@ function Invoke-Start {
 
     Write-Host "  PID 文件：$pidsFile"
     Write-Host "  日志目录：$logDir"
-    Write-Host "    实时日志：backend.log / backend.err.log / frontend.log / frontend.err.log / supervisor.log"
+    Write-Host "    实时日志：backend.log / backend.err.log / frontend.log / frontend.err.log / frontend-console.log / supervisor.log"
     Write-Host "    历史归档：backend.YYYYMMDD-HHmmss.log 等（保留 7 天）"
+    Write-Host ""
+    Write-Host "  数据目录：$configDir" -ForegroundColor Cyan
+    Write-Host "    升级时仅需保留此目录即可保留全部数据（数据库、用户上传文件、头像等）" -ForegroundColor DarkGray
     Write-Host ""
 }
 

@@ -12,15 +12,16 @@ services:
     environment:
       # 监听 IPv6 双栈
       HOST: "::"
-      # 容器内 SQLite 路径，需与 volumes 挂载保持一致
-      DATABASE_URL: /app/data/dev.sqlite
+      # 数据目录统一挂载到 /app/config，所有持久化数据（SQLite、uploads、media）均存放于此
+      CONFIG_DIR: /app/config
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
     volumes:
-      # 持久化 SQLite 数据库文件
-      - backend-data:/app/data
+      # 持久化全部用户数据：数据库、上传文件、头像、NMS 媒体切片
+      # 升级镜像时只需保留此 volume 即可保留全部数据
+      - backend-data:/app/config
     networks:
       - app-network
 

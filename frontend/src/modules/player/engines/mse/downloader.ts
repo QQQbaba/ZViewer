@@ -1,20 +1,21 @@
 /**
  * HTTP Range 下载器（v2 重写）。
  *
- * 职责单一：发起 Range 请求，处理代理包装、IndexedDB 缓存读写、重试与 abort。
+ * 职责单一：发起 Range 请求，处理代理包装、重试与 abort。
  * 不涉及 SourceBuffer、moof 扫描、缓冲管理等逻辑。
  *
  * 三个层级：
- * - downloadHead       下载文件头部（0..HEAD_SIZE），带缓存，供 init/sidx 解析
- * - downloadRange      下载闭区间字节块，带缓存，供 seek 快速路径
- * - downloadStream(WithRetry)  开放式流下载（bytes=start-），不带缓存，供主下载循环
+ * - downloadHead       下载文件头部（0..HEAD_SIZE），供 init/sidx 解析
+ * - downloadRange      下载闭区间字节块，供 seek 快速路径
+ * - downloadStream(WithRetry)  开放式流下载（bytes=start-），供主下载循环
+ *
+ * 缓存说明：仅依赖 SourceBuffer 实时缓冲（MSE 原生），不再做 IndexedDB 持久化。
+ * 刷新页面后会重新下载 init/sidx，但播放过程中的实时缓冲仍由 MSE 管理。
  */
 import { apiFetch } from '@/lib/api'
 import { isBilibiliMediaUrl, buildProxyUrl } from '../../services/url-proxy'
 import { HEAD_SIZE, MAX_FETCH_RETRIES } from './types'
 import type { DownloadOptions } from './types'
-import { parseTotalSize } from './parser'
-import { cacheRange, getCachedRange } from './stream-cache'
 
 /**
  * 检测错误是否为 SourceBuffer 不可恢复状态错误。
@@ -79,23 +80,22 @@ async function fetchRange(
 }
 
 /**
- * 下载文件头部（0..HEAD_SIZE），返回 Response 供解析 Content-Range / Content-Length。
+ * 下载文件头部（0..HEAD_SIZE），返回 Response 与已读入内存的数据。
  *
- * 优先命中 IndexedDB 缓存，刷新页面后无需重复下载 init segment / sidx。
+ * 注意：返回的 Response.body 已被消费（网络路径），调用方必须使用 data 字段
+ * 而非再次调用 response.arrayBuffer()，否则抛 "Body has already been consumed"。
+ * response 仅用于读取 headers（Content-Range / Content-Length）。
  */
 export async function downloadHead(
   url: string,
   signal: AbortSignal
-): Promise<Response> {
-  const { response } = await downloadRange(url, 0, HEAD_SIZE - 1, signal)
-  return response
+): Promise<{ response: Response; data: Uint8Array }> {
+  return downloadRange(url, 0, HEAD_SIZE - 1, signal)
 }
 
 /**
  * 下载指定字节范围（闭区间），返回 Response 与已读入内存的数据。
  * 用于 head 下载与 seek 快速路径（先下小块找 moof 立即 flush）。
- *
- * 优先命中 IndexedDB 缓存；未命中则网络下载并写入缓存。
  */
 export async function downloadRange(
   url: string,
@@ -103,31 +103,8 @@ export async function downloadRange(
   endByte: number,
   signal: AbortSignal
 ): Promise<{ response: Response; data: Uint8Array }> {
-  // 1. 先查缓存（含覆盖匹配）
-  const cached = await getCachedRange(url, startByte, endByte)
-  if (cached) {
-    const rangeHeader =
-      cached.totalSize !== null
-        ? `bytes ${startByte}-${startByte + cached.data.byteLength - 1}/${cached.totalSize}`
-        : `bytes ${startByte}-${startByte + cached.data.byteLength - 1}/*`
-    const response = new Response(cached.data.buffer as ArrayBuffer, {
-      status: 206,
-      statusText: 'Partial Content',
-      headers: {
-        'Content-Length': String(cached.data.byteLength),
-        'Content-Range': rangeHeader,
-      },
-    })
-    return { response, data: cached.data }
-  }
-
-  // 2. 网络下载
   const response = await fetchRange(url, startByte, endByte, signal)
   const data = new Uint8Array(await response.arrayBuffer())
-
-  // 3. 写入缓存（忽略失败，不影响播放）
-  void cacheRange(url, startByte, data, parseTotalSize(response))
-
   return { response, data }
 }
 

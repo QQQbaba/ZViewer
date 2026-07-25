@@ -34,7 +34,7 @@ export function MediaSettingsCard(props: MediaSettingsCardProps): JSX.Element {
 
   return (
     <Card className="w-full border-0 bg-transparent p-0 text-left shadow-none">
-      <Space direction="vertical" className="w-full" size="md">
+      <Space direction="vertical" className="w-full py-2" size="lg">
         <Space align="center" size="sm" className="mb-1">
           <Settings2 className="h-4 w-4 text-[var(--md-sys-color-primary)]" />
           <Text className="font-medium">媒体设置</Text>
