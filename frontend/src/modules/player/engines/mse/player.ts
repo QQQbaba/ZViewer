@@ -65,6 +65,7 @@ export class MsePlayer {
   private readonly audioUrl: string
   private readonly videoCodec?: string
   private readonly audioCodec?: string
+  private readonly duration?: number
 
   private mediaSource: MediaSource | null = null
   private objectUrl: string | null = null
@@ -83,6 +84,7 @@ export class MsePlayer {
     this.audioUrl = options.audioUrl
     this.videoCodec = options.videoCodec
     this.audioCodec = options.audioCodec
+    this.duration = options.duration
 
     // 诊断：监听 video.error 事件，记录 error code / message 与当前播放器状态，
     // 便于定位 CHUNK_DEMUXER_ERROR_APPEND_FAILED 等致命错误的发生时机。
@@ -141,6 +143,14 @@ export class MsePlayer {
         throw new Error('attach 被取消')
       }
 
+      // 3.5 用权威 duration 覆盖 meta.duration（如果 mvhd 解析值不可靠）。
+      //   B站 fMP4 流的 mvhd.duration 为 0（fMP4 整体 duration 在 moof 累积），
+      //   导致 calculateSeekOffset / calculateFlushSize 的线性估算 fallback 失效：
+      //   meta.duration=0 时 ratio=targetTime/0=Infinity，offset≈totalSize*0.99，
+      //   seek 到末尾附近时请求 Range 超出文件大小触发 416。
+      //   此处用后端权威值覆盖，确保 seek 计算正确。
+      this.applyAuthoritativeDuration()
+
       // 4. 启动双轨流式下载（后台），并等待首次 append
       const firstAppend = this.runDualStream(signal, [
         { track: this.videoTrack, offset: videoOffset },
@@ -148,6 +158,20 @@ export class MsePlayer {
       ])
       // attach 路径超时仅告警（慢网络下不阻断），由调用方继续等待 metadata
       await this.waitFirstAppend(firstAppend, INITIAL_APPEND_TIMEOUT_MS, false)
+
+      // 等待期间可能被 cleanup（React Strict Mode 双挂载 / 清晰度切换 / 源切换），
+      // 此时 MediaSource 已释放、objectUrl 已 revoke，继续执行会导致状态错乱
+      // （disposed → attached）及后续 appendBuffer 抛 InvalidStateError。
+      if (signal.aborted || this.isDisposed()) {
+        throw new Error('attach 被取消')
+      }
+
+      // 5. 显式设置 MediaSource.duration（B站 fMP4 流 mvhd.duration=0，
+      //    浏览器从 mvhd 推断的 video.duration 不可靠）。
+      //    必须在首次 append 后设置：MediaSource 需处于 'open' 状态且 SourceBuffer
+      //    已有数据，否则 duration 设置可能被忽略或触发 updateend 异常。
+      //    设置后浏览器会触发 durationchange 事件，video.duration 同步更新。
+      this.setMediaSourceDuration()
 
       this.state = 'attached'
       return objectUrl
@@ -159,7 +183,9 @@ export class MsePlayer {
 
   /** seek 到目标时间。不重建 MediaSource。 */
   async seekTo(targetTime: number): Promise<SeekResult> {
-    console.warn(`[MsePlayer] seekTo target=${targetTime.toFixed(1)}s state=${this.state}`)
+    console.warn(
+      `[MsePlayer] seekTo target=${targetTime.toFixed(1)}s state=${this.state}`
+    )
     // 已有 seek 在进行：标记 busy 让调用方把目标挂起（由进行中的流程接续），
     // 而不是走失败兜底（兜底回设 currentTime 会把进度拉回旧目标）
     if (this.state === 'seeking') {
@@ -255,6 +281,10 @@ export class MsePlayer {
       //    seeking 事件，与 play() Promise 形成竞态，导致 play() interrupted
       //    或反复 seek 卡死。
       if (wasPlaying) this.video.play().catch(() => {})
+
+      // seek 后重新设置 duration：clearSourceBufferBefore 可能清空了所有数据，
+      // 导致 MediaSource.duration 被浏览器重置为 NaN，需重新设置以确保 UI 正确
+      this.setMediaSourceDuration()
 
       this.state = 'attached'
       return { success: true }
@@ -403,7 +433,10 @@ export class MsePlayer {
       // 双轨均结束后若发生非 abort 错误（如 video.error），主动触发
       // stalled 事件让上层 useWatchTogether 的 error handler 感知并 reload。
       if (errorBox.error && !signal.aborted && this.state !== 'disposed') {
-        console.warn('[MsePlayer] 双轨下载存在错误，可能需要重载:', errorBox.error.message)
+        console.warn(
+          '[MsePlayer] 双轨下载存在错误，可能需要重载:',
+          errorBox.error.message
+        )
       }
       this.tryEndOfStream(signal)
     })
@@ -549,6 +582,68 @@ export class MsePlayer {
         /* ignore */
       }
     }
+  }
+
+  /**
+   * 显式设置 MediaSource.duration。
+   *
+   * B站 fMP4 流的 mvhd.duration 为 0（fMP4 整体 duration 在 moof 的 tfdt 中累积），
+   * 浏览器从 mvhd 推断的 video.duration 不可靠（0 或仅覆盖已缓冲区间）。
+   * 使用后端 resolve 接口返回的权威 duration 设置 MediaSource.duration，
+   * 确保控制栏时间显示、进度条比例、seek 行为正确。
+   *
+   * 设置条件：
+   * - MediaSource 处于 'open' 状态（关闭后无法设置）
+   * - duration 为有限正数（避免 0 / NaN / Infinity 覆盖浏览器推断值）
+   * - 当前 duration 与目标差异超过 1 秒（避免无意义更新触发 durationchange 风暴）
+   */
+  private setMediaSourceDuration(): void {
+    if (!this.mediaSource) return
+    if (this.mediaSource.readyState !== 'open') return
+    const target = this.duration
+    if (!Number.isFinite(target) || target <= 0) return
+    const current = this.mediaSource.duration
+    if (Number.isFinite(current) && Math.abs(current - target) < 1) return
+    try {
+      this.mediaSource.duration = target
+    } catch (err) {
+      // 设置失败不阻断播放，浏览器会从已 append 的数据推断 duration
+      console.warn('[MsePlayer] 设置 MediaSource.duration 失败:', err)
+    }
+  }
+
+  /**
+   * 用权威 duration 覆盖 meta.duration（当 mvhd 解析值不可靠时）。
+   *
+   * B站 fMP4 流的 mvhd.duration 为 0，导致 calculateSeekOffset 的线性估算
+   * fallback 失效（ratio=Infinity → offset≈totalSize → 416 Range Not Satisfiable）。
+   * 在 loadHead 完成后、启动流式下载前调用，确保 seek 计算使用正确时长。
+   *
+   * 覆盖条件：
+   * - 权威 duration 存在且为有限正数
+   * - meta.duration 不可靠（null / 0 / 与权威值差异超过 5 秒）
+   */
+  private applyAuthoritativeDuration(): void {
+    const auth = this.duration
+    if (!Number.isFinite(auth) || auth <= 0) return
+    const override = (track: MediaTrack | null) => {
+      if (!track) return
+      const meta = track.meta
+      if (
+        meta.duration === null ||
+        meta.duration === 0 ||
+        Math.abs(meta.duration - auth) > 5
+      ) {
+        if (meta.duration !== auth) {
+          console.warn(
+            `[MsePlayer] 覆盖 meta.duration: ${meta.duration} → ${auth}（mvhd 不可靠，使用后端权威值）`
+          )
+        }
+        meta.duration = auth
+      }
+    }
+    override(this.videoTrack)
+    override(this.audioTrack)
   }
 }
 

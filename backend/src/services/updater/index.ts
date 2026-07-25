@@ -147,6 +147,8 @@ set "ROOT=${root.replace(/\\/g, '\\\\')}"
 set "TEMP_DIR=${tempDir.replace(/\\/g, '\\\\')}"
 set "EXTRACTED_DIR=${extractedDir.replace(/\\/g, '\\\\')}"
 set "PIDS_FILE=%ROOT%\\.prod.pids.json"
+set "CONFIG_DIR=%ROOT%\\config"
+set "CONFIG_BACKUP=%ROOT%\\.config-backup-%%RANDOM%%"
 
 echo [更新脚本] 等待后端返回响应...
 timeout /t 3 /nobreak >nul
@@ -168,6 +170,23 @@ if exist "%PIDS_FILE%" (
 :: 额外尝试关闭占用端口的 node 进程
 taskkill /F /IM node.exe /T >nul 2>&1
 
+:: 备份 config 目录（包含数据库、用户上传文件、头像等全部用户数据）
+:: 防止 xcopy 覆盖时丢失数据
+echo [更新脚本] 备份 config 目录...
+if exist "%CONFIG_DIR%" (
+  :: 使用 RANDOM 后缀避免与已有备份冲突
+  set "BACKUP_NAME=.config-backup-!RANDOM!"
+  set "CONFIG_BACKUP=%ROOT%\\!BACKUP_NAME!"
+  xcopy /E /Y /I "%CONFIG_DIR%" "!CONFIG_BACKUP!" >nul
+  if errorlevel 1 (
+    echo [错误] config 目录备份失败
+    pause
+    exit /b 1
+  )
+  echo [更新脚本] 已备份 config 到 !BACKUP_NAME!
+  rmdir /S /Q "%CONFIG_DIR%"
+)
+
 echo [更新脚本] 应用新文件...
 if not exist "%EXTRACTED_DIR%" (
   echo [错误] 未找到解压目录：%EXTRACTED_DIR%
@@ -178,8 +197,25 @@ if not exist "%EXTRACTED_DIR%" (
 xcopy /E /Y /I "%EXTRACTED_DIR%\\*" "%ROOT%\\"
 if errorlevel 1 (
   echo [错误] 文件复制失败
+  :: 恢复 config 备份
+  if exist "!CONFIG_BACKUP!" (
+    xcopy /E /Y /I "!CONFIG_BACKUP!" "%CONFIG_DIR%" >nul
+  )
   pause
   exit /b 1
+)
+
+:: 恢复 config 目录（保留用户数据）
+echo [更新脚本] 恢复 config 目录...
+if exist "!CONFIG_BACKUP!" (
+  if not exist "%CONFIG_DIR%" (
+    mkdir "%CONFIG_DIR%"
+  )
+  xcopy /E /Y /I "!CONFIG_BACKUP!\\*" "%CONFIG_DIR%" >nul
+  rmdir /S /Q "!CONFIG_BACKUP!"
+  echo [更新脚本] 已恢复 config 目录（用户数据已保留）
+) else (
+  echo [更新脚本] 未检测到 config 备份（可能是首次部署），跳过恢复
 )
 
 echo [更新脚本] 清理临时文件...

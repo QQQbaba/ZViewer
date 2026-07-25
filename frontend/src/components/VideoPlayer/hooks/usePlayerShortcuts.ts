@@ -22,6 +22,9 @@ export interface UsePlayerShortcutsOptions {
   readOnly: boolean
   /** 全屏目标容器 */
   containerRef?: RefObject<HTMLElement | null>
+  /** 后端解析的权威视频时长（秒）。传入后 ←/→ 快进快退以此为边界，
+   *  避免 MSE seek 期间 video.duration 临时变短导致跳转受限。 */
+  duration?: number
 }
 
 /** 事件目标是否为可输入元素（打字场景，不触发快捷键） */
@@ -37,6 +40,7 @@ export function usePlayerShortcuts({
   isHost,
   readOnly,
   containerRef,
+  duration: authoritativeDuration,
 }: UsePlayerShortcutsOptions): void {
   useEffect(() => {
     if (!video) return
@@ -76,11 +80,15 @@ export function usePlayerShortcuts({
           break
         case 'ArrowLeft':
         case 'ArrowRight': {
-          if (!canControlPlayback || !video.duration) return
+          const totalDuration =
+            Number.isFinite(authoritativeDuration) && authoritativeDuration! > 0
+              ? authoritativeDuration
+              : video.duration
+          if (!canControlPlayback || !totalDuration) return
           e.preventDefault()
           const step = (e.shiftKey ? 10 : 5) * (e.key === 'ArrowLeft' ? -1 : 1)
           video.currentTime = Math.min(
-            video.duration,
+            totalDuration,
             Math.max(0, video.currentTime + step)
           )
           break
@@ -98,5 +106,5 @@ export function usePlayerShortcuts({
 
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [video, isHost, readOnly, containerRef])
+  }, [video, isHost, readOnly, containerRef, authoritativeDuration])
 }

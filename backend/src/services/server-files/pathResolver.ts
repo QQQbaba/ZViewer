@@ -12,9 +12,10 @@
  */
 import path from 'node:path';
 import fs from 'node:fs';
+import { UPLOADS_DIR } from '../paths';
 
-/** 服务器文件默认存储根目录（backend/uploads）。 */
-export const UPLOADS_ROOT = path.resolve(__dirname, '../../../uploads');
+/** 服务器文件默认存储根目录（config/uploads）。 */
+export const UPLOADS_ROOT = UPLOADS_DIR;
 
 /** uploads 根的固定 key。 */
 export const UPLOADS_ROOT_KEY = 'uploads';

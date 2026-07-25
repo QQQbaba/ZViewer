@@ -77,7 +77,7 @@ export interface GetPlayUrlOptions {
 }
 
 export class NoPermissionError extends Error {
-  constructor(message = '无权限播放，可能需要大会员') {
+  constructor(message = '无权限播放，可能需要登录或大会员') {
     super(message);
     this.name = 'NoPermissionError';
   }
@@ -221,12 +221,40 @@ function normalizePlayUrlData(
   );
 
   if (data.dash?.video?.length) {
-    const video = sortDashTracks(
-      data.dash.video.map(normalizeDashMedia),
-      codec,
+    // 诊断日志：记录 B站返回的每个视频轨道的 id(qn)/bandwidth/codecs，
+    // 用于定位"切换清晰度后实际分辨率未变化"的问题。
+    // B站 DASH 流中 dash.video[].id 即清晰度 qn（80=1080P, 32=480P, 16=360P）。
+    console.log(
+      '[bilibili-playurl] 请求 qn=%d, B站返回 %d 条视频轨道:',
+      qn,
+      data.dash.video.length,
+      data.dash.video.map((t) => ({
+        id: t.id,
+        bandwidth: t.bandwidth,
+        codecs: t.codecs,
+      })),
     );
+
+    // 关键修复：B站 API 请求特定 qn 时，dash.video 数组会返回所有可用清晰度的流，
+    // 必须按请求的 qn 过滤，否则 sortDashTracks 按带宽降序后永远选最高清晰度。
+    // 例如请求 qn=32(480P)，但返回包含 id=80(1080P)/64(720P)/32(480P)/16(360P)，
+    // 不过滤会选到 id=80 的 1080P 流。
+    const allTracks = data.dash.video.map(normalizeDashMedia);
+    const matchedQnTracks = allTracks.filter((t) => t.id === qn);
+    const tracksToSort =
+      matchedQnTracks.length > 0 ? matchedQnTracks : allTracks;
+
+    const video = sortDashTracks(tracksToSort, codec);
     const audio = sortByBandwidthDesc(
       data.dash.audio?.map(normalizeDashMedia),
+    );
+    console.log(
+      '[bilibili-playurl] 选定 bestVideo: id=%d bandwidth=%d codecs=%s (期望 qn=%d, 过滤后 %d 条匹配轨道)',
+      video[0]?.id,
+      video[0]?.bandwidth,
+      video[0]?.codecs,
+      qn,
+      matchedQnTracks.length,
     );
     return {
       format: 'dash',
@@ -324,7 +352,11 @@ async function getPlayUrlLegacy(
 function isPermissionError(err: unknown): boolean {
   if (err instanceof NoPermissionError) return true;
   const message = String(err instanceof Error ? err.message : err);
-  const permissionKeywords = ['大会员', '付费', '无权限', '购买', '权限', '登录'];
+  // -101（账号未登录）不是权限错误，未登录用户可访问 480P 及以下清晰度。
+  // 若把"账号未登录"误判为权限错误，会导致 getPlayUrlWbi 失败后不降级到
+  // getPlayUrlLegacy（未签名接口支持匿名访问），未登录用户完全无法解析视频。
+  if (message.includes('-101') || message.includes('账号未登录')) return false;
+  const permissionKeywords = ['大会员', '付费', '无权限', '购买', '权限'];
   if (permissionKeywords.some((k) => message.includes(k))) return true;
   if (message.includes('-10403')) return true;
   return false;

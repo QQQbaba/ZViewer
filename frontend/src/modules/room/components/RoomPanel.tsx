@@ -18,7 +18,7 @@ interface RoomPanelProps {
 export function RoomPanel({ onModeSelected }: RoomPanelProps) {
   const navigate = useNavigate()
   const { socket, connected } = useSocket()
-  const { setMode, setRoomId, mode: storeMode } = useRoomStore()
+  const { setMode, setRoomId, setRoomSettings, mode: storeMode } = useRoomStore()
   // 默认模式从 store 读取，不再从 URL 读取 mode 参数。
   // 模式切换由后端房间状态管理，URL 只保留 /room/:roomId 形式。
   const initialMode: RoomMode = storeMode || 'watch-together'
@@ -50,6 +50,9 @@ export function RoomPanel({ onModeSelected }: RoomPanelProps) {
         if (response.success && roomId) {
           setRoomId(roomId)
           setMode(response.data?.mode || selectedMode)
+          // 同步 requireApproval 到 store：创建房间时房主选择的值必须与后端一致，
+          // 否则 RoomInfoPanel 显示的开关状态与后端实际审批逻辑不符。
+          setRoomSettings({ requireApproval })
           message.success('房间创建成功')
           // 在 sessionStorage 中标记当前用户为该房间的房主，
           // 刷新页面后 RoomPage 据此判断身份并走 register-host 流程。
@@ -132,8 +135,8 @@ export function RoomPanel({ onModeSelected }: RoomPanelProps) {
               <div
                 className="w-12 h-12 rounded-xl flex items-center justify-center mb-3"
                 style={{
-                  backgroundColor: 'var(--md-sys-color-secondary)',
-                  color: 'var(--md-sys-color-on-secondary)',
+                  backgroundColor: 'var(--md-sys-color-primary)',
+                  color: 'var(--md-sys-color-on-primary)',
                 }}
               >
                 <Users className="h-6 w-6" />

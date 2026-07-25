@@ -66,6 +66,7 @@ export class RegisterHostHandler implements SocketEventHandler {
               shareMethod: result.shareMethod,
               name: result.name,
               streamKey: result.streamKey,
+              requireApproval: result.requireApproval,
               playback: result.playback,
             },
           });

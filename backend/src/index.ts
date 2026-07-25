@@ -30,6 +30,7 @@ import openlistRoutes from './routes/openlist';
 import webdavRoutes from './routes/webdav';
 import ftpRoutes from './routes/ftp';
 import updaterRoutes from './routes/updater';
+import clientLogsRoutes from './routes/client-logs';
 import { createRoomsRouter } from './routes/rooms';
 import { verifyAccessToken } from './middleware/auth';
 // 屏幕共享子模块保持原有注册方式（内部自管理 io.on('connection')）
@@ -65,6 +66,11 @@ import {
 import { CommentHandler } from './modules/comment';
 import { nmsService, StreamPushHandler, streamPushRouter } from './modules/stream-push';
 import { ensureUploadsRoot } from './services/server-files/pathResolver';
+import {
+  AVATARS_DIR,
+  ensureDataDirs,
+  migrateLegacyDataIfNeeded,
+} from './services/paths';
 
 export async function getSystemSettings(): Promise<SystemSettings> {
   const settingsRepo = AppDataSource.getRepository(SystemSettings);
@@ -188,18 +194,29 @@ async function seedRootAdmin() {
 }
 
 async function bootstrap() {
+  // 数据目录迁移与初始化：必须在 DataSource.initialize 之前完成，
+  // 否则 SQLite 会在旧路径创建空库，导致迁移逻辑误判。
+  migrateLegacyDataIfNeeded();
+  ensureDataDirs();
+
   await AppDataSource.initialize();
   console.log('TypeORM Data Source has been initialized.');
   await seedRootAdmin();
   ensureUploadsRoot();
 
-  // 确保头像存储目录存在
-  const AVATARS_DIR = path.resolve(process.cwd(), 'uploads', 'avatars');
+  // 头像目录已在 ensureDataDirs() 中创建（config/uploads/avatars），
+  // 此处保留防御性检查以兼容旧版手动部署场景
   if (!fs.existsSync(AVATARS_DIR)) {
     fs.mkdirSync(AVATARS_DIR, { recursive: true });
   }
 
   const app = express();
+  // 信任反向代理头（X-Forwarded-Proto / X-Forwarded-For）：
+  // - req.secure / req.protocol / req.ip 才能反映真实客户端协议
+  // - cookie 的 secure 属性才能根据真实协议动态决定（HTTP 下不强制 Secure）
+  // 'loopback, linklocal, uniquelocal' 允许本机/局域网代理可信，公网代理默认不可信
+  // 生产环境若部署在 Nginx/Caddy 后，建议显式配置具体代理 IP
+  app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   app.use(
     cors({
       origin: CORS_ORIGIN,
@@ -208,8 +225,10 @@ async function bootstrap() {
       exposedHeaders: ['Content-Range', 'Accept-Ranges'],
     }),
   );
-  app.use(express.json());
+  app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
+  // 前端浏览器控制台日志上报（不强制鉴权，便于收集 guest/未登录用户日志）
+  app.use('/api/client-logs', clientLogsRoutes);
   // 头像静态文件服务（无需鉴权，头像通过 URL 公开访问）
   app.use('/uploads/avatars', express.static(AVATARS_DIR, {
     maxAge: '7d',

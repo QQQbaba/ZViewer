@@ -119,6 +119,9 @@ export interface VideoControlsProps {
   playPending?: boolean
   timeOverride?: number | null
   syncTime?: number | null
+  /** 后端解析的权威视频时长（秒）。传入后控制栏总时长优先使用此值，
+   *  避免 MSE seek / 缓冲片段期间 video.duration 被浏览器临时重置。 */
+  duration?: number
 }
 
 export interface VideoControlsHandle {
@@ -163,6 +166,7 @@ export const VideoControls = memo(
       playPending,
       timeOverride,
       syncTime,
+      duration: authoritativeDuration,
     } = props
 
     const {
@@ -177,7 +181,7 @@ export const VideoControls = memo(
       formattedCurrentTime,
       formattedDuration,
       progressPercent,
-    } = useVideoControls(video)
+    } = useVideoControls(video, authoritativeDuration)
 
     // timeOverride（重载期间显示目标时间而非 video.currentTime，避免进度条归零）
     const hasOverride = typeof timeOverride === 'number' && timeOverride >= 0
@@ -210,7 +214,7 @@ export const VideoControls = memo(
     }, [])
     usePanelDismiss({ open: panelOpen, rootRef, onDismiss: dismissPanels })
 
-    usePlayerShortcuts({ video, isHost, readOnly, containerRef })
+    usePlayerShortcuts({ video, isHost, readOnly, containerRef, duration })
 
     // ── 控制操作 ────────────────────────────────
 
@@ -231,7 +235,8 @@ export const VideoControls = memo(
       }
     }
 
-    const hasSettings = danmakuStyle || (isHost && subtitleEnabled !== undefined)
+    const hasSettings =
+      danmakuStyle || (isHost && subtitleEnabled !== undefined)
 
     const openSettings = () => {
       setSettingsOpen((prev) => !prev)
@@ -329,7 +334,11 @@ export const VideoControls = memo(
                     isHost={isHost}
                   />
                 )}
-                <VolumeControl video={video} volume={volume} isMuted={isMuted} />
+                <VolumeControl
+                  video={video}
+                  volume={volume}
+                  isMuted={isMuted}
+                />
               </div>
 
               {/* 分隔线（仅桌面端） */}

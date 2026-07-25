@@ -63,7 +63,10 @@ export function useVideoEventBindings({
         isPlaying: !video.paused,
         currentTime: video.currentTime,
         playbackRate: video.playbackRate,
-        duration: video.duration || current.duration,
+        // duration 保持 store 权威值（后端解析的真实时长），禁止用 video.duration 覆盖。
+        // MSE seek / 缓冲片段期间 video.duration 可能暂时等于片段时长，覆盖后会导致
+        // 控制栏总时长错误并随广播污染观众端。
+        duration: current.duration,
         currentQn: current.currentQn,
         acceptQuality: current.acceptQuality,
       }

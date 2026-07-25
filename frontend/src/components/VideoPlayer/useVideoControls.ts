@@ -10,10 +10,28 @@ function formatTime(seconds: number) {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
 }
 
-function getBufferedPercent(video: HTMLVideoElement) {
-  if (!video.duration || !video.buffered.length) return 0
+function getBufferedPercent(video: HTMLVideoElement, totalDuration: number) {
+  if (!totalDuration || !video.buffered.length) return 0
+  const ct = video.currentTime
+  // 优先取包含当前播放位置的缓冲区间的 end：
+  // MSE seek 后 buffered 可能存在多个不连续区间（如 [50,110] + [500,560]），
+  // 旧实现固定取最后一个 range 的 end（560），导致回退 seek 后缓冲条卡死不动。
+  // 取包含 currentTime 的 range 能正确反映"当前能连续播放到哪"。
+  for (let i = 0; i < video.buffered.length; i++) {
+    const start = video.buffered.start(i)
+    const end = video.buffered.end(i)
+    if (ct >= start && ct <= end) {
+      return Math.min(100, (end / totalDuration) * 100)
+    }
+  }
+  // 当前位置不在任何缓冲区间内（seek 后尚未下载到）：
+  // 取最后一个 range 的 end 作为参考，兼容旧逻辑
   const end = video.buffered.end(video.buffered.length - 1)
-  return Math.min(100, (end / video.duration) * 100)
+  return Math.min(100, (end / totalDuration) * 100)
+}
+
+function isValidDuration(value: number | undefined): value is number {
+  return Number.isFinite(value) && (value as number) > 0
 }
 
 interface VideoState {
@@ -52,15 +70,23 @@ function areVideoStatesEqual(a: VideoState, b: VideoState): boolean {
   )
 }
 
-function getVideoSnapshot(video: HTMLVideoElement | null): VideoState {
+function getVideoSnapshot(
+  video: HTMLVideoElement | null,
+  authoritativeDuration?: number
+): VideoState {
   if (!video) {
     return DEFAULT_VIDEO_STATE
   }
+  // 优先使用后端解析的权威时长，避免 MSE seek / 缓冲片段期间 video.duration
+  // 被浏览器临时重置为片段时长（如 01:15），导致控制栏总时长和进度比例错误。
+  const effectiveDuration = isValidDuration(authoritativeDuration)
+    ? authoritativeDuration
+    : video.duration || 0
   const next: VideoState = {
     isPlaying: !video.paused,
     currentTime: video.currentTime || 0,
-    duration: video.duration || 0,
-    bufferedPercent: getBufferedPercent(video),
+    duration: effectiveDuration,
+    bufferedPercent: getBufferedPercent(video, effectiveDuration),
     volume: video.volume ?? 1,
     isMuted: video.muted,
     playbackRate: video.playbackRate || 1,
@@ -125,12 +151,13 @@ export interface VideoControlsState extends VideoState {
 }
 
 export function useVideoControls(
-  video: HTMLVideoElement | null
+  video: HTMLVideoElement | null,
+  authoritativeDuration?: number
 ): VideoControlsState {
   const videoState = useSyncExternalStore(
     useCallback((callback) => subscribeToVideo(video, callback), [video]),
-    () => getVideoSnapshot(video),
-    () => getVideoSnapshot(video)
+    () => getVideoSnapshot(video, authoritativeDuration),
+    () => getVideoSnapshot(video, authoritativeDuration)
   )
 
   const isFullscreen = useSyncExternalStore(

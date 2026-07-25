@@ -27,7 +27,7 @@ export function Card({
     <div
       ref={disableAnimation ? undefined : spotlightRef}
       className={cn(
-        'glass-card relative overflow-hidden p-6',
+        'glass-card relative p-6',
         shadows[elevation],
         !disableAnimation && 'zen-card',
         className

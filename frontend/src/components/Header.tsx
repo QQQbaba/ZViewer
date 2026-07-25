@@ -455,7 +455,7 @@ export function Header() {
                       onChange={(v) => setGlassStrength(v / 100)}
                     />
                     <Slider
-                      label="模糊度"
+                      label="卡片模糊度"
                       value={glassBlur}
                       min={0}
                       max={40}

@@ -11,8 +11,12 @@ import type { WatchTogetherState } from '../types'
 /**
  * 从 video 元素与 store 状态构建完整的 WatchTogetherState。
  *
- * 优先从 video 元素读取实时播放字段（isPlaying/currentTime/playbackRate/duration），
- * 源字段（sourceUrl/audioUrl/format 等）从 store 读取以保持稳定。
+ * 优先从 video 元素读取实时播放字段（isPlaying/currentTime/playbackRate），
+ * 源字段（sourceUrl/audioUrl/format 等）与 duration 从 store 读取以保持稳定。
+ *
+ * 注意：duration 必须使用 store 中的权威值（后端 resolve 接口返回的真实时长）。
+ * 在 MSE seek / 缓冲片段期间，浏览器可能短暂将 video.duration 报告为当前片段
+ * 时长（例如 01:15），若用它覆盖 store 会导致控制栏总时长错误并广播给观众。
  *
  * 用于：
  * - 房主 forceSync（手动同步按钮）
@@ -40,9 +44,9 @@ export function buildStateFromVideo(
     playbackRate: hasLoadedSource
       ? video!.playbackRate
       : storeState.playbackRate,
-    duration: hasLoadedSource
-      ? video!.duration || storeState.duration
-      : storeState.duration,
+    // duration 保持 store 权威值，禁止用 video.duration 覆盖。
+    // video.duration 在 MSE 片段缓冲期间不可靠（可能显示为片段时长）。
+    duration: storeState.duration,
     currentQn: storeState.currentQn,
     acceptQuality: storeState.acceptQuality,
     headers: storeState.headers,

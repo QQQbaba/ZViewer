@@ -38,6 +38,7 @@ export class RoomSessionService {
     shareMethod: string;
     name: string | null;
     streamKey: string | null;
+    requireApproval: boolean;
     playback?: ReturnType<typeof roomStateService.getPlayback>;
   } | null> {
     const roomRepo = AppDataSource.getRepository(Room);
@@ -90,6 +91,7 @@ export class RoomSessionService {
       shareMethod: room.shareMethod,
       name: room.name,
       streamKey: room.streamKey,
+      requireApproval: room.requireApproval,
       playback: advancedPlayback ?? roomStateService.getPlayback(roomId),
     };
   }

@@ -36,5 +36,22 @@ export default defineConfig({
     // 兼容纯 IPv6 网络环境以及 IPv4/IPv6 双栈访问。
     host: '::',
     allowedHosts: true,
+    // preview 模式下也需要代理 /api、/socket.io、/live 到后端，
+    // 否则前端 API 请求会发送到 preview 端口（如 4173）导致 404。
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3333',
+        changeOrigin: true,
+      },
+      '/socket.io': {
+        target: 'http://localhost:3333',
+        changeOrigin: true,
+        ws: true,
+      },
+      '/live': {
+        target: 'http://localhost:3335',
+        changeOrigin: true,
+      },
+    },
   },
 })

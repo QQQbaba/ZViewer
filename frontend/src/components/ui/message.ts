@@ -31,6 +31,32 @@ const progressColors: Record<MessageType, string> = {
   error: 'bg-[var(--md-sys-color-error)]',
 }
 
+/* ---------- 多条消息错峰控制 ----------
+ * 短时间内连续调用的消息会自动错峰进入，避免多条消息同时从右侧滑入造成视觉混乱。
+ * STAGGER_WINDOW_MS 内的调用视为"同时"，每条延迟 STAGGER_DELAY_MS。
+ */
+const STAGGER_WINDOW_MS = 300
+const STAGGER_DELAY_MS = 60
+let pendingEnterCount = 0
+let lastEnterTime = 0
+let staggerResetTimer: ReturnType<typeof setTimeout> | null = null
+
+function getStaggerDelay(): number {
+  const now = Date.now()
+  if (now - lastEnterTime < STAGGER_WINDOW_MS) {
+    pendingEnterCount++
+  } else {
+    pendingEnterCount = 0
+  }
+  lastEnterTime = now
+  if (staggerResetTimer) clearTimeout(staggerResetTimer)
+  // 超过窗口时间后重置计数器，避免长序列调用累计过大延迟
+  staggerResetTimer = setTimeout(() => {
+    pendingEnterCount = 0
+  }, STAGGER_WINDOW_MS + 100)
+  return pendingEnterCount * STAGGER_DELAY_MS
+}
+
 function createContainer(): HTMLDivElement {
   let container = document.getElementById(
     'message-container'
@@ -45,6 +71,8 @@ function createContainer(): HTMLDivElement {
   return container
 }
 
+const EXIT_TRANSITION_MS = 320 // 略大于 0.28s transition，确保过渡完成后再移除节点
+
 function show(
   content: string,
   type: MessageType,
@@ -52,6 +80,7 @@ function show(
 ) {
   const container = createContainer()
   const duration = options.duration ?? 3000
+  const staggerDelay = getStaggerDelay()
 
   const el = document.createElement('div')
   el.className =
@@ -63,6 +92,10 @@ function show(
   el.style.backdropFilter = 'blur(var(--glass-blur))'
   el.style.setProperty('-webkit-backdrop-filter', 'blur(var(--glass-blur))')
   el.style.setProperty('--toast-duration', `${duration}ms`)
+  // 错峰延迟：让 enter 动画和 progress 动画同步推迟开始
+  if (staggerDelay > 0) {
+    el.style.animationDelay = `${staggerDelay}ms`
+  }
 
   const iconWrapper = document.createElement('span')
   iconWrapper.className = 'flex-shrink-0'
@@ -87,21 +120,62 @@ function show(
     'zen-toast-progress absolute bottom-0 left-0 h-[2px] opacity-60 ' +
     progressColors[type]
   progress.style.width = '100%'
+  // progress 动画与 enter 动画同步延迟，避免进度条在消息出现前就开始减少
+  if (staggerDelay > 0) {
+    progress.style.animationDelay = `${staggerDelay}ms`
+  }
   el.appendChild(progress)
 
   container.appendChild(el)
 
-  const timer = setTimeout(() => remove(el), duration)
+  // enter 动画结束后清除类，便于后续 FLIP/状态判断（避免 both 模式持续覆盖 transform）
+  el.addEventListener(
+    'animationend',
+    () => {
+      // 仅在仍处于 enter 阶段时清除（可能已被 remove 提前切换为 exit）
+      if (el.dataset.removing !== 'true') {
+        el.classList.remove('zen-toast-enter')
+        el.style.animationDelay = ''
+      }
+    },
+    { once: true }
+  )
+
+  // 持续时间需加上错峰延迟，避免延迟期间就被移除
+  const timer = setTimeout(() => remove(el), duration + staggerDelay)
 
   function remove(node: HTMLDivElement) {
     if (node.dataset.removing === 'true') return
     node.dataset.removing = 'true'
     clearTimeout(timer)
+
+    // 读取实际高度，用于 max-height 过渡的起始值
+    // 避免使用固定 200px 导致的塌陷延迟（实际高度约 42px，前 75% 过渡时间无视觉效果）
+    const actualHeight = node.offsetHeight
+
+    // 切换到 exit 状态：移除 enter 类，添加 exit 类（设置 transition + overflow:hidden）
     node.classList.remove('zen-toast-enter')
     node.classList.add('zen-toast-exit')
+    node.style.animationDelay = ''
+
+    // 先禁用 transition，设置初始 max-height 为当前实际高度（避免从旧值过渡导致的跳变）
+    node.style.transition = 'none'
+    node.style.maxHeight = `${actualHeight}px`
+    node.style.opacity = '1'
+    node.style.transform = 'translateX(0) scale(1)'
+
+    // 下一帧恢复 transition 并设置目标状态，触发平滑过渡
+    requestAnimationFrame(() => {
+      node.style.transition = ''
+      node.style.opacity = '0'
+      node.style.transform = 'translateX(-100vw) scale(0.96)'
+      node.style.maxHeight = '0'
+    })
+
+    // 过渡完成后移除节点（flex gap 会自动让上方消息下移填补空隙）
     setTimeout(() => {
       node.remove()
-    }, 450)
+    }, EXIT_TRANSITION_MS)
   }
 }
 

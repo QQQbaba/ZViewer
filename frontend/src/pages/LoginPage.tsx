@@ -131,7 +131,14 @@ export default function LoginPage() {
 
   return (
     <div className="flex-1 flex items-center justify-center p-6">
-      <Card className="w-full max-w-sm">
+      <Card
+        className="w-full max-w-sm"
+        style={{
+          // 登录卡片使用更强的背景模糊，突出主体层次
+          backdropFilter: 'blur(var(--glass-blur-strong))',
+          WebkitBackdropFilter: 'blur(var(--glass-blur-strong))',
+        }}
+      >
         <div className="text-center mb-6">
           <Fade delay={80} className="inline-block">
             <div

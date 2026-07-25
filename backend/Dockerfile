@@ -14,8 +14,9 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# 创建数据库持久化目录
-RUN mkdir -p /app/data
+# 创建数据持久化目录（与 docker-compose.yml 中的 volume 挂载点一致）
+# 所有用户数据（数据库、上传文件、头像、NMS 媒体）统一存放于此
+RUN mkdir -p /app/config
 
 EXPOSE 3333
 

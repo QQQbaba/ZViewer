@@ -66,6 +66,9 @@ function toPlayerSource(
     videoCodec: state.videoCodec,
     audioCodec: state.audioCodec,
     headers: state.headers,
+    // 传入后端权威时长：B站 fMP4 流的 mvhd.duration 为 0，
+    // MSE 引擎需用此值显式设置 mediaSource.duration
+    duration: state.duration,
   }
   if (startTime !== undefined && startTime > 0) {
     source.startTime = startTime
@@ -129,7 +132,7 @@ export function useVideoSource({
   watchTogether,
   isHostRef,
 }: UseVideoSourceOptions): UseVideoSourceReturn {
-  const { attachSource, cleanup, seekTo, forceReload } = usePlayerSource({
+  const { attachSource, cleanup, seekTo, forceReload, msePlayerRef } = usePlayerSource({
     videoRef,
   })
   const restoredRef = useRef(false)
@@ -253,12 +256,22 @@ export function useVideoSource({
     const isReloadingRef = { current: false }
 
     const handleSeeking = () => {
-      if (suppressEventsRef.current) return
+      if (suppressEventsRef.current) {
+        console.warn(
+          `[useVideoSource] handleSeeking 跳过: suppressEventsRef=true targetTime=${video.currentTime}`
+        )
+        return
+      }
 
       // 注意：不在此处检查 isReloadingRef——锁占用期间到达的 seek 目标
       // 由 executeSeek 记录为待处理目标，锁释放后接续处理（连续拖拽不丢目标）
       const targetTime = video.currentTime
       const state = useRoomStore.getState().watchTogether
+      const msePlayer = msePlayerRef.current
+
+      console.warn(
+        `[useVideoSource] handleSeeking target=${targetTime.toFixed(1)}s isMseStream=${state.format === 'dash' || !!state.audioUrl} msePlayer=${!!msePlayer} isAttached=${msePlayer?.isAttached} isReloading=${isReloadingRef.current} bufferedRanges=${video.buffered.length} sourceUrl=${!!state.sourceUrl}`
+      )
 
       void executeSeek({
         video,

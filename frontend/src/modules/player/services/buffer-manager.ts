@@ -174,14 +174,15 @@ export function waitForSourceBufferIdle(sb: SourceBuffer): Promise<void> {
 /**
  * 向 SourceBuffer 追加数据（串行化）。
  *
- * 遇 QuotaExceededError（Chrome SourceBuffer 约 150MB 上限）时：
- * 1. 先清理 currentTime 之前的数据（保留 FORCE_PRUNE_KEEP_BEHIND_SEC）
- * 2. 若仍不足（播放初期 currentTime 小，后面无旧数据可清），
- *    清理 currentTime + 30s 之后的前瞻数据（保留 30s 前瞻足够平稳播放）
- * 3. 重试 append
+ * 遇 QuotaExceededError（Chrome SourceBuffer 约 150MB 上限）时，
+ * 循环清理直到有足够空间重试 append 成功：
+ * 1. 先清理 currentTime 之前的数据（保留 keepBehind 秒）
+ * 2. 若仍不足，清理 currentTime + aheadKeep 之后的前瞻数据
+ * 3. 逐步降低保留窗口（10s→5s→2s→0s 后向，30s→15s→5s→2s 前向）
+ * 4. 每轮清理后重试 append，成功即返回
  *
- * 旧实现仅清理 currentTime 之前的数据，播放初期（currentTime < 10s）
- * 几乎无旧数据可清，恢复失败导致 append 重试再次溢出形成死循环。
+ * 旧实现仅清理一次后重试，清理后仍然满时错误 throw 出去导致
+ * `[MsePlayer] 后台下载失败: QuotaExceededError`，attach 路径的 stream 终止。
  *
  * @param currentTime 可选，溢出清理时用于确定保留窗口（默认保留全部）
  */
@@ -195,27 +196,41 @@ export function appendBuffer(
       await appendInQueue(sb, data)
     } catch (err) {
       if (!isQuotaExceededError(err)) throw err
-      // 溢出恢复：队列内直接清理（不再次入队，避免自我等待死锁）
-      if (sb.buffered.length > 0) {
-        const ct = currentTime ?? 0
+      // 溢出恢复：循环清理直到有足够空间
+      const ct = currentTime ?? 0
+      // 清理阈值逐步降低：保留窗口从宽到严
+      const keepBehindSteps = [FORCE_PRUNE_KEEP_BEHIND_SEC, 5, 2, 0]
+      const aheadKeepSteps = [30, 15, 5, 2]
+
+      for (let i = 0; i < keepBehindSteps.length; i++) {
+        if (sb.buffered.length === 0) break
         // 步骤 1：清理 currentTime 之前的旧数据
         const start = sb.buffered.start(0)
-        const safeStart = Math.max(start, ct - FORCE_PRUNE_KEEP_BEHIND_SEC)
+        const safeStart = Math.max(start, ct - keepBehindSteps[i])
         if (safeStart > start) {
           await removeInQueue(sb, start, safeStart)
         }
-        // 步骤 2：若步骤 1 清理空间不足（播放初期），
-        // 清理 currentTime + 30s 之后的前瞻数据
-        const aheadKeep = 30
-        const aheadCut = ct + aheadKeep
+        // 步骤 2：清理 currentTime + aheadKeep 之后的前瞻数据
         if (sb.buffered.length > 0) {
           const end = sb.buffered.end(sb.buffered.length - 1)
+          const aheadCut = ct + aheadKeepSteps[i]
           if (end > aheadCut) {
             await removeInQueue(sb, aheadCut, end)
           }
         }
+        // 尝试重试 append
+        try {
+          await appendInQueue(sb, data)
+          return // 成功
+        } catch (retryErr) {
+          if (!isQuotaExceededError(retryErr)) throw retryErr
+          // 继续下一轮清理（更激进的阈值）
+        }
       }
-      await appendInQueue(sb, data)
+      // 所有清理尝试都失败，抛出明确错误让上层处理
+      throw new Error(
+        `SourceBuffer 清理后仍然满（保留窗口已降至 0s），无法 append ${data.byteLength} 字节`
+      )
     }
   })
 }

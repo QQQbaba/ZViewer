@@ -232,7 +232,9 @@ export class PlaybackMemoryService {
         hostSocketId,
       };
 
-      await repo.save(entity);
+      // 使用 upsert 避免并发或部分实体对象导致的 UNIQUE constraint 冲突。
+      // roomId 是主键，冲突时更新全部字段。
+      await repo.upsert(entity, ['roomId']);
       cached.lastDbWriteAt = Date.now();
       cached.dirty = false;
     } catch (err) {

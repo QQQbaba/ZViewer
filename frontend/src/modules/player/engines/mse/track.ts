@@ -29,6 +29,7 @@ import { parseHead, calculateSeekOffset, calculateFlushSize } from './parser'
 import {
   createStreamMeta,
   RESUME_BUFFER_THRESHOLD,
+  FORWARD_SEEK_TOLERANCE_SEC,
   MIN_SEEK_FLUSH,
   SEEK_HEAD_SIZE,
   SEEK_HEAD_SIZE_PRECISE,
@@ -72,20 +73,30 @@ export class MediaTrack {
   /**
    * 下载并解析文件头部，append init segment。
    *
-   * @returns 媒体数据的起始字节偏移（startTime > 0 时为估算的 seek 偏移，否则为 0）
+   * @returns 媒体数据的起始字节偏移：
+   *   - startTime > 0 时为估算的 seek 偏移
+   *   - 否则返回 initSize（init segment 末尾），让 stream 从该位置继续下载
+   *
+   * 注意：旧实现返回 0，导致 stream(0) 从文件头重新下载，与 loadHead 已 append 的
+   * init segment 重复。runDualStream 中 needFindMoof: offset > 0 在 offset=0 时为 false，
+   * processStream 不扫描 moof 边界直接 append 整个 head（含 ftyp+moov），
+   * 触发 CHUNK_DEMUXER_ERROR_APPEND_FAILED (video.error code=3) 导致视频永久黑屏。
+   * 修复：返回 initSize，stream 从 init segment 末尾继续下载，needFindMoof 自动启用。
    */
   async loadHead(signal: AbortSignal, startTime?: number): Promise<number> {
     // init segment 已缓存（本实例内重复 attach/seek）：直接 append
     if (this.meta.initSegment) {
       await appendBuffer(this.sb, this.meta.initSegment)
-      return startTime && startTime > 0
-        ? calculateSeekOffset(this.meta, startTime)
-        : 0
+      if (startTime && startTime > 0) {
+        return calculateSeekOffset(this.meta, startTime)
+      }
+      // 返回 initSize：stream 从 init segment 末尾继续下载，
+      // 避免重复下载 init segment 触发 CHUNK_DEMUXER_ERROR
+      return this.meta.initSize ?? 0
     }
 
     try {
-      const resp = await downloadHead(this.url, signal)
-      const data = new Uint8Array(await resp.arrayBuffer())
+      const { response: resp, data } = await downloadHead(this.url, signal)
       parseHead(data, resp, this.meta)
       console.warn(
         `[MediaTrack] loadHead 完成: initSize=${this.meta.initSize} duration=${this.meta.duration} totalSize=${this.meta.totalSize} sidx=${!!this.meta.sidx} initSeg=${this.meta.initSegment?.byteLength ?? 0}B headSize=${data.byteLength}B`
@@ -93,9 +104,12 @@ export class MediaTrack {
       if (this.meta.initSegment) {
         await appendBuffer(this.sb, this.meta.initSegment)
       }
-      return startTime && startTime > 0
-        ? calculateSeekOffset(this.meta, startTime)
-        : 0
+      if (startTime && startTime > 0) {
+        return calculateSeekOffset(this.meta, startTime)
+      }
+      // 返回 initSize：stream 从 init segment 末尾继续下载，
+      // 避免重复下载 init segment 触发 CHUNK_DEMUXER_ERROR
+      return this.meta.initSize ?? data.byteLength
     } catch (err) {
       if (signal.aborted) return 0
       console.warn('[MediaTrack] 头部解析失败，退回到从头下载:', err)
@@ -135,12 +149,22 @@ export class MediaTrack {
       if (!first && opts.stopAtByte !== undefined && offset >= opts.stopAtByte)
         return
 
+      console.warn(
+        `[MediaTrack] stream 下载 offset=${offset} first=${first} needFindMoof=${first ? opts.needFindMoof : false}`
+      )
       const { response } = await downloadStreamWithRetry(this.url, {
         startByte: offset,
         signal,
         check: { signal, superseded: this.isSuperseded },
       })
       if (!response.body) throw new Error('响应体为空')
+
+      // 诊断：记录响应头，验证 Range 请求是否被服务端正确处理
+      const contentRange = response.headers.get('content-range')
+      const contentLength = response.headers.get('content-length')
+      console.warn(
+        `[MediaTrack] stream 响应 status=${response.status} content-range=${contentRange ?? 'none'} content-length=${contentLength ?? 'none'}`
+      )
 
       const reader = response.body.getReader()
       const result = await processStream(
@@ -217,8 +241,7 @@ export class MediaTrack {
         `[MediaTrack] seekOffset=0 但 targetTime=${targetTime.toFixed(1)}s，meta 不完整，重新解析头部`
       )
       try {
-        const resp = await downloadHead(this.url, signal)
-        const data = new Uint8Array(await resp.arrayBuffer())
+        const { response: resp, data } = await downloadHead(this.url, signal)
         parseHead(data, resp, this.meta)
         console.warn(
           `[MediaTrack] 重新解析头部完成: initSize=${this.meta.initSize} duration=${this.meta.duration} totalSize=${this.meta.totalSize} sidx=${!!this.meta.sidx}`
@@ -441,7 +464,44 @@ export class MediaTrack {
   /** 等待缓冲前瞻消耗到低水位以下（或 abort） */
   private async waitForBufferDrain(signal: AbortSignal): Promise<void> {
     while (!signal.aborted && !this.isSuperseded()) {
-      const ahead = getBufferedAhead(this.sb, this.video.currentTime)
+      const ct = this.video.currentTime
+      // 检查 currentTime 是否在任何 buffered range 内。
+      let inRange = false
+      for (let i = 0; i < this.sb.buffered.length; i++) {
+        if (ct >= this.sb.buffered.start(i) && ct <= this.sb.buffered.end(i)) {
+          inRange = true
+          break
+        }
+      }
+      if (!inRange) {
+        // currentTime 不在 buffered range 内（如普通 seek 到缓冲边缘外）。
+        // 区分 gap 大小：
+        // - gap 较小（≤ FORWARD_SEEK_TOLERANCE_SEC）：返回让 stream 继续下载填补缺口。
+        //   普通前进 seek 到 buffered.end + 5s 这种场景，executeSeek 返回 false 走普通 seek，
+        //   此处必须返回让 attach 路径的 stream 继续下载，否则浏览器等待数据超时 seek 失败。
+        // - gap 较大（前进 seek 跳很远，或回退 seek 到已清理区域）：等待，
+        //   让上层 executeSeek → MsePlayer.seekTo 接管，避免从断点顺序下载穿过整个缺口
+        //   导致数据过度累积触发 QuotaExceededError。
+        if (this.sb.buffered.length > 0) {
+          const bufferedEnd = this.sb.buffered.end(this.sb.buffered.length - 1)
+          const gap = ct - bufferedEnd
+          // gap > 0：前进 seek（currentTime 在 buffered 之后）
+          // gap < 0：回退 seek（currentTime 在 buffered 之前）
+          if (gap > FORWARD_SEEK_TOLERANCE_SEC) {
+            // 前进 seek 距离过大，等待 MsePlayer.seekTo 接管
+            await new Promise((r) => setTimeout(r, 500))
+            continue
+          }
+          // gap 较小或为负（回退 seek）：返回让 stream 继续下载填补缺口
+          // 注意：回退 seek 到已清理区域时，stream 从断点继续下载无法填补，
+          // 但 executeSeek 会走 MSE seek 路径（gap < 0 不满足 ≤ FORWARD_BUFFER_TOLERANCE_SEC），
+          // 不会走到这里。此处主要处理前进 seek 小缺口场景。
+          return
+        }
+        // 无 buffered，返回让 stream 继续下载
+        return
+      }
+      const ahead = getBufferedAhead(this.sb, ct)
       if (ahead < RESUME_BUFFER_THRESHOLD) return
       await new Promise((r) => setTimeout(r, 500))
     }

@@ -75,7 +75,7 @@ export function StreamPushPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Radio className="h-5 w-5 text-[var(--md-sys-color-primary)]" />
-          <Text className="text-lg font-semibold">OBS 推流模式</Text>
+          <Text className="!text-white text-lg font-semibold">OBS 推流模式</Text>
         </div>
         <Tag color={streamStatus === 'live' ? 'success' : 'default'}>
           {streamStatus === 'live'
