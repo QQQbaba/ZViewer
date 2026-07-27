@@ -24,7 +24,7 @@
 import dashjs from 'dashjs'
 import type { MediaPlayerClass } from 'dashjs'
 import type { PlayerController, SeekResult } from '../../types'
-import { isBilibiliMediaUrl, buildProxyUrl } from '../../services/url-proxy'
+import { resolveProxyUrl } from '../../services/url-proxy'
 import { findAllSidxInBuffer, findMoovRange } from './mp4-box-parser'
 
 /** DashPlayer 构造参数 */
@@ -311,7 +311,8 @@ export class DashPlayer implements PlayerController {
    * 3. 输出诊断信息，用于判断 sidx 是否完整
    */
   private async preloadInitSegment(url: string): Promise<DashPlayerInitInfo> {
-    const proxyUrl = isBilibiliMediaUrl(url) ? buildProxyUrl(url) : url
+    // 统一代理策略：DASH m4s 流始终走代理（有防盗链 + 无 CORS）
+    const proxyUrl = resolveProxyUrl(url, undefined, 'dash')
     const info: DashPlayerInitInfo = {}
 
     try {
@@ -657,13 +658,9 @@ export class DashPlayer implements PlayerController {
     const segments = this.initInfo.segments
     const initEnd = this.initInfo.initEnd
 
-    // B站 CDN URL 走后端代理（防盗链 + CORS）
-    const videoUrl = isBilibiliMediaUrl(this.videoUrl)
-      ? buildProxyUrl(this.videoUrl)
-      : this.videoUrl
-    const audioUrl = isBilibiliMediaUrl(this.audioUrl)
-      ? buildProxyUrl(this.audioUrl)
-      : this.audioUrl
+    // 统一代理策略：DASH m4s 流始终走代理（有防盗链 + 无 CORS）
+    const videoUrl = resolveProxyUrl(this.videoUrl, undefined, 'dash')
+    const audioUrl = resolveProxyUrl(this.audioUrl, undefined, 'dash')
 
     let videoSegmentInfo = ''
 

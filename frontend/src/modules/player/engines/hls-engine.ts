@@ -8,6 +8,7 @@
 import Hls from 'hls.js'
 import type { PlayerEngine, PlayerSource, EngineAttachResult } from '../types'
 import { resetVideoElement, waitForMetadata } from '../utils'
+import { resolveProxyUrl } from '../services/url-proxy'
 
 /** Safari 等原生 HLS 支持检测 */
 function canPlayNativeHls(video: HTMLVideoElement): boolean {
@@ -23,9 +24,12 @@ export const hlsEngine: PlayerEngine = {
   ): Promise<EngineAttachResult> {
     resetVideoElement(video)
 
+    // 统一代理策略：由 url-proxy.ts 根据 forceMediaProxy 开关、URL 特征与源格式决定
+    const targetUrl = resolveProxyUrl(source.url, source.headers, source.format)
+
     // Safari 原生 HLS
     if (canPlayNativeHls(video)) {
-      video.src = source.url
+      video.src = targetUrl
       video.load()
       await waitForMetadata(video)
       return {
@@ -51,7 +55,7 @@ export const hlsEngine: PlayerEngine = {
     })
     hls.attachMedia(video)
     hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-      hls.loadSource(source.url)
+      hls.loadSource(targetUrl)
     })
 
     try {

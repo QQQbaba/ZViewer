@@ -219,6 +219,10 @@ function getCurrentPageDuration(info: BilibiliVideoInfo, cid?: number): number {
 /**
  * 在 DASH 所有 CDN 均不可达时降级为 MP4 直链。
  *
+ * 使用 B站 HTML5 播放器接口（platform=html5）获取无防盗链 MP4 直链，
+ * 浏览器可直接播放无需代理（SYNCTV 默认方案，服务器零流量）。
+ * 参考：synctv/vendors/vendors/bilibili/movie.go GetVideoURL
+ *
  * 返回 MP4 实际使用的 currentQn（B站 可能降级到比请求更低的清晰度），
  * 便于上层收窄 acceptQuality 并准确展示当前清晰度。
  */
@@ -233,6 +237,8 @@ async function fallbackToMp4(
     qn,
     fnval: 1,
     isVip,
+    // platform=html5：返回无防盗链 MP4 直链，浏览器可直接播放（SYNCTV 默认方案）
+    platform: 'html5',
   });
   if (mp4PlayUrl?.format === 'mp4' && mp4PlayUrl.durl?.[0]?.url) {
     const mp4Url = await findReachableMediaUrl({
