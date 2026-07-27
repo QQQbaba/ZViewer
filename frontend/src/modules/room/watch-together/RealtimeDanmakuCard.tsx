@@ -1,11 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FC } from 'react'
-import { Maximize2, Search } from 'lucide-react'
+import { Maximize2, Search, Ban, Trash2, ListX, RotateCcw } from 'lucide-react'
 import { Text } from '@/components/ui/Typography'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { message } from '@/components/ui/message'
 import { useDanmakuStore } from '@/store/danmakuStore'
+import type { DanmakuItem } from '@/modules/danmaku/types'
 import { useRoomStore } from '@/store/roomStore'
 import { cn } from '@/lib/utils'
 
@@ -22,6 +24,8 @@ const OVERSCAN = 8
 
 interface RealtimeDanmakuItem {
   id: string
+  trackId: string
+  itemId: string
   content: string
   time: number
   actualTime: number
@@ -52,13 +56,23 @@ function formatTime(seconds: number): string {
 const DanmakuListItem: FC<{
   item: RealtimeDanmakuItem
   isHighlighted: boolean
+  isBlocked: boolean
+  onBlock: (content: string) => void
+  onDelete: (trackId: string, itemId: string) => void
   expanded?: boolean
-}> = memo(function DanmakuListItem({ item, isHighlighted, expanded = false }) {
+}> = memo(function DanmakuListItem({
+  item,
+  isHighlighted,
+  isBlocked,
+  onBlock,
+  onDelete,
+  expanded = false,
+}) {
   const type = getDanmakuTypeLabel(item.mode, item.color)
   return (
     <div
       className={cn(
-        'flex min-w-0 gap-1.5 rounded-sm border px-1.5 py-0.5',
+        'group flex min-w-0 gap-1.5 rounded-sm border px-1.5 py-0.5',
         expanded ? 'items-start' : 'items-center'
       )}
       style={{
@@ -117,6 +131,27 @@ const DanmakuListItem: FC<{
       >
         {type.label}
       </span>
+      <button
+        type="button"
+        className={cn(
+          'shrink-0 rounded p-0.5 transition-colors hover:bg-white/10',
+          isBlocked
+            ? 'text-[var(--md-sys-color-primary)]'
+            : 'text-[var(--md-sys-color-on-surface-variant)]'
+        )}
+        title={isBlocked ? '取消屏蔽' : '屏蔽该内容'}
+        onClick={() => onBlock(item.content)}
+      >
+        <Ban size={11} />
+      </button>
+      <button
+        type="button"
+        className="shrink-0 rounded p-0.5 text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-white/10 hover:text-red-400"
+        title="删除该弹幕（本地生效）"
+        onClick={() => onDelete(item.trackId, item.itemId)}
+      >
+        <Trash2 size={11} />
+      </button>
     </div>
   )
 })
@@ -182,6 +217,20 @@ function useVirtualList(
 
 export function RealtimeDanmakuCard() {
   const tracks = useDanmakuStore((state) => state.tracks)
+  const blockKeywords = useDanmakuStore((state) => state.blockKeywords)
+  const addBlockKeyword = useDanmakuStore((state) => state.addBlockKeyword)
+  const removeBlockKeyword = useDanmakuStore(
+    (state) => state.removeBlockKeyword
+  )
+  const removeTrackItem = useDanmakuStore((state) => state.removeTrackItem)
+  const restoreTrackItem = useDanmakuStore((state) => state.restoreTrackItem)
+  const addDeletedLog = useDanmakuStore((state) => state.addDeletedLog)
+  const removeDeletedLog = useDanmakuStore((state) => state.removeDeletedLog)
+  const clearDeletedLog = useDanmakuStore((state) => state.clearDeletedLog)
+  const deletedLog = useDanmakuStore((state) => state.deletedLog)
+  const triggerDanmakuRefresh = useDanmakuStore(
+    (state) => state.triggerDanmakuRefresh
+  )
   // currentTime 降为整数秒，避免房主广播频率（0.5-1s）中浮点变化每秒触发重渲染。
   const rawCurrentTime = useRoomStore(
     (state) => state.watchTogether.currentTime
@@ -192,6 +241,8 @@ export function RealtimeDanmakuCard() {
   const modalListRef = useRef<HTMLDivElement>(null)
   const [isUserScrolling, setIsUserScrolling] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
+  const [manageModalOpen, setManageModalOpen] = useState(false)
+  const [manageTab, setManageTab] = useState<'blocked' | 'deleted'>('blocked')
   const [searchQuery, setSearchQuery] = useState('')
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const programmaticScrollRef = useRef(false)
@@ -204,6 +255,8 @@ export function RealtimeDanmakuCard() {
       track.items.forEach((item) => {
         list.push({
           id: `${track.trackId}-${item.id}`,
+          trackId: track.trackId,
+          itemId: item.id,
           content: item.content,
           time: item.time,
           actualTime: item.time + track.offset,
@@ -322,11 +375,49 @@ export function RealtimeDanmakuCard() {
     [filteredDanmaku, modalVisibleStart, modalVisibleEnd]
   )
 
+  const handleBlock = useCallback(
+    (content: string) => {
+      if (blockKeywords.includes(content)) {
+        removeBlockKeyword(content)
+        message.info('已取消屏蔽该内容')
+      } else {
+        addBlockKeyword(content)
+        message.success('已屏蔽该内容关键词')
+      }
+      triggerDanmakuRefresh()
+    },
+    [blockKeywords, addBlockKeyword, removeBlockKeyword, triggerDanmakuRefresh]
+  )
+
+  const handleDelete = useCallback(
+    (trackId: string, itemId: string) => {
+      const track = tracks.find((t) => t.trackId === trackId)
+      const item = track?.items.find((i) => i.id === itemId)
+      if (track && item) {
+        addDeletedLog({ trackId, trackLabel: track.label, item })
+      }
+      removeTrackItem(trackId, itemId)
+      message.success('已删除该弹幕（本地生效）')
+      triggerDanmakuRefresh()
+    },
+    [tracks, addDeletedLog, removeTrackItem, triggerDanmakuRefresh]
+  )
+
+  const handleRestore = useCallback(
+    (trackId: string, item: DanmakuItem) => {
+      restoreTrackItem(trackId, item)
+      removeDeletedLog(trackId, item.id)
+      message.success('已恢复该弹幕')
+      triggerDanmakuRefresh()
+    },
+    [restoreTrackItem, removeDeletedLog, triggerDanmakuRefresh]
+  )
+
   const renderEmpty = (minHeight?: string) => (
     <div
       className={cn(
         'flex items-center justify-center',
-        minHeight ? '' : 'h-full min-h-[120px]'
+        minHeight ? '' : 'min-h-full'
       )}
       style={minHeight ? { minHeight } : undefined}
     >
@@ -337,7 +428,7 @@ export function RealtimeDanmakuCard() {
   )
 
   return (
-    <div className="glass flex min-h-0 min-w-0 flex-col gap-2 rounded-[var(--md-sys-shape-corner)] p-2">
+    <div className="glass flex h-full min-h-0 min-w-0 flex-col gap-2 rounded-[var(--md-sys-shape-corner)] p-2">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <Text className="text-xs font-medium">实时弹幕</Text>
         <div className="flex items-center gap-2">
@@ -355,6 +446,22 @@ export function RealtimeDanmakuCard() {
               variant="ghost"
               size="sm"
               className="h-6 px-1.5 text-[10px]"
+              icon={<ListX className="h-3 w-3" />}
+              onClick={() => {
+                setManageTab(
+                  blockKeywords.length > 0 ? 'blocked' : 'deleted'
+                )
+                setManageModalOpen(true)
+              }}
+            >
+              管理
+            </Button>
+          )}
+          {allDanmaku.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[10px]"
               icon={<Maximize2 className="h-3 w-3" />}
               onClick={() => setModalOpen(true)}
             >
@@ -367,7 +474,7 @@ export function RealtimeDanmakuCard() {
       <div
         ref={listRef}
         onScroll={handleScroll}
-        className="max-h-[320px] min-h-[120px] overflow-y-auto overflow-x-hidden rounded-[var(--md-sys-shape-corner)] border p-1.5"
+        className="h-full min-h-0 overflow-y-auto overflow-x-hidden rounded-[var(--md-sys-shape-corner)] border p-1.5"
         style={{
           backgroundColor: 'var(--glass-bg)',
           borderColor: 'var(--md-sys-color-outline-variant)',
@@ -391,11 +498,43 @@ export function RealtimeDanmakuCard() {
                 isHighlighted={
                   Math.abs(item.actualTime - currentTime) <= WINDOW_SIZE
                 }
+                isBlocked={blockKeywords.includes(item.content)}
+                onBlock={handleBlock}
+                onDelete={handleDelete}
               />
             ))}
           </div>
         )}
       </div>
+
+      {blockKeywords.length > 0 && (
+        <div className="flex min-h-0 max-h-[80px] shrink-0 flex-col border-t border-white/10 px-1 pt-2">
+          <div className="mb-1 text-[10px] text-white/40">
+            已屏蔽关键词 ({blockKeywords.length})
+          </div>
+          <div className="flex flex-wrap gap-1 overflow-y-auto">
+            {blockKeywords.slice(0, 10).map((kw) => (
+              <button
+                key={kw}
+                type="button"
+                className="max-w-full truncate rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/70 transition-colors hover:bg-white/10"
+                title={`点击取消屏蔽：${kw}`}
+                onClick={() => {
+                  removeBlockKeyword(kw)
+                  triggerDanmakuRefresh()
+                }}
+              >
+                {kw}
+              </button>
+            ))}
+            {blockKeywords.length > 10 && (
+              <span className="text-[10px] text-white/40">
+                +{blockKeywords.length - 10}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       <Modal
         open={modalOpen}
@@ -448,6 +587,9 @@ export function RealtimeDanmakuCard() {
                     isHighlighted={
                       Math.abs(item.actualTime - currentTime) <= WINDOW_SIZE
                     }
+                    isBlocked={blockKeywords.includes(item.content)}
+                    onBlock={handleBlock}
+                    onDelete={handleDelete}
                     expanded
                   />
                 ))}
@@ -459,6 +601,129 @@ export function RealtimeDanmakuCard() {
             <Text type="secondary" className="text-[10px]">
               找到 {filteredDanmaku.length} 条匹配弹幕
             </Text>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        open={manageModalOpen}
+        onClose={() => setManageModalOpen(false)}
+        title="弹幕管理"
+        className="max-w-lg"
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-1 rounded-lg border p-1" style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}>
+            <button
+              type="button"
+              className={cn(
+                'flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+                manageTab === 'blocked'
+                  ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                  : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-white/5'
+              )}
+              onClick={() => setManageTab('blocked')}
+            >
+              已屏蔽 ({blockKeywords.length})
+            </button>
+            <button
+              type="button"
+              className={cn(
+                'flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+                manageTab === 'deleted'
+                  ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                  : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-white/5'
+              )}
+              onClick={() => setManageTab('deleted')}
+            >
+              已删除 ({deletedLog.length})
+            </button>
+          </div>
+
+          {manageTab === 'blocked' && (
+            <div className="flex max-h-[50vh] min-h-[120px] flex-col gap-1.5 overflow-y-auto rounded-[var(--md-sys-shape-corner)] border p-2" style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}>
+              {blockKeywords.length === 0 ? (
+                <div className="flex h-24 items-center justify-center">
+                  <Text type="secondary" className="text-xs">
+                    暂无屏蔽关键词
+                  </Text>
+                </div>
+              ) : (
+                blockKeywords.map((kw) => (
+                  <div
+                    key={kw}
+                    className="flex items-center gap-2 rounded-md border px-2 py-1.5"
+                    style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}
+                  >
+                    <Ban size={12} className="shrink-0 text-[var(--md-sys-color-primary)]" />
+                    <Text className="min-w-0 flex-1 truncate text-xs" title={kw}>
+                      {kw}
+                    </Text>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded p-1 text-[10px] text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-white/10 hover:text-red-400"
+                      title="取消屏蔽"
+                      onClick={() => {
+                        removeBlockKeyword(kw)
+                        triggerDanmakuRefresh()
+                      }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {manageTab === 'deleted' && (
+            <div className="flex max-h-[50vh] min-h-[120px] flex-col gap-1.5 overflow-y-auto rounded-[var(--md-sys-shape-corner)] border p-2" style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}>
+              {deletedLog.length === 0 ? (
+                <div className="flex h-24 items-center justify-center">
+                  <Text type="secondary" className="text-xs">
+                    暂无已删除弹幕
+                  </Text>
+                </div>
+              ) : (
+                <>
+                  {deletedLog.map((entry) => (
+                    <div
+                      key={`${entry.trackId}-${entry.item.id}`}
+                      className="flex items-center gap-2 rounded-md border px-2 py-1.5"
+                      style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}
+                    >
+                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <Text className="truncate text-xs" title={entry.item.content}>
+                          {entry.item.content}
+                        </Text>
+                        <Text type="secondary" className="text-[10px]">
+                          {formatTime(entry.item.time)} · {entry.trackLabel}
+                        </Text>
+                      </div>
+                      <button
+                        type="button"
+                        className="flex shrink-0 items-center gap-1 rounded p-1 text-[10px] text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-white/10 hover:text-green-400"
+                        title="恢复该弹幕"
+                        onClick={() => handleRestore(entry.trackId, entry.item)}
+                      >
+                        <RotateCcw size={12} />
+                        恢复
+                      </button>
+                    </div>
+                  ))}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-1 h-7 w-full text-[10px] text-red-400 hover:bg-red-400/10"
+                    onClick={() => {
+                      clearDeletedLog()
+                      message.success('已清空删除记录')
+                    }}
+                  >
+                    清空删除记录
+                  </Button>
+                </>
+              )}
+            </div>
           )}
         </div>
       </Modal>

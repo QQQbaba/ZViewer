@@ -1,4 +1,4 @@
-﻿# release-zip.ps1 —— ZControl 一键打包发布脚本
+﻿# release-zip.ps1 —— ZViewer 一键打包发布脚本
 #
 # 功能：
 #   1. 自动构建前后端代码（npm run build 通过 workspaces 同时构建）
@@ -8,7 +8,7 @@
 #
 # 用法：
 #   .\release-zip.ps1              # 打包到项目根目录，文件名带时间戳
-#   .\release-zip.ps1 -OutputPath C:\releases\zcontrol.zip
+#   .\release-zip.ps1 -OutputPath C:\releases\zviewer.zip
 #   .\release-zip.ps1 -SkipBuild   # 跳过构建步骤（使用已有 dist 产物）
 #   .\release-zip.ps1 -Help        # 显示帮助
 #
@@ -170,7 +170,7 @@ function Invoke-Release {
   $root = $PSScriptRoot
   if (-not $root) { $root = Get-Location }
 
-  Write-Title 'ZControl 一键打包发布'
+  Write-Title 'ZViewer 一键打包发布'
 
   # 1. 确定输出路径
   if ($OutputPath) {

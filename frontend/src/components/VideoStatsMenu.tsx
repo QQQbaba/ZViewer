@@ -18,6 +18,13 @@ export interface VideoStatsMenuProps {
   currentQuality?: number | null
   /** 可用清晰度列表（B站） */
   availableQualities?: { id: number; label: string; resolution?: string }[]
+  /**
+   * B站 媒体容器格式：
+   * - 'dash'：分离 m4s 流，支持多清晰度切换，统计信息显示清晰度行
+   * - 'mp4'：单流直链，清晰度由 B站 决定无法切换，统计信息隐藏清晰度行
+   * 非 B站 源不需要传入。
+   */
+  format?: 'dash' | 'mp4'
 }
 
 interface Position {
@@ -199,6 +206,7 @@ export function VideoStatsMenu({
   sourceUrl,
   currentQuality,
   availableQualities,
+  format,
 }: VideoStatsMenuProps) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState<Position>({ x: 0, y: 0 })
@@ -438,7 +446,7 @@ export function VideoStatsMenu({
       `编码: ${stats.codec}`,
       `分辨率: ${stats.resolution}`,
     ]
-    if (sourceType === 'bilibili') {
+    if (sourceType === 'bilibili' && format !== 'mp4') {
       lines.push(`清晰度: ${stats.quality}`)
     }
     lines.push(`帧率: ${stats.frameRate}`, `码率: ${stats.bitrate}`)
@@ -455,7 +463,7 @@ export function VideoStatsMenu({
       console.error('[VideoStatsMenu] copy error:', err)
       message.error('复制失败，请检查浏览器剪贴板权限')
     }
-  }, [stats, isWebRtc, sourceType])
+  }, [stats, isWebRtc, sourceType, format])
 
   const handleOpenDevPanel = useCallback(() => {
     if (!videoElement) return
@@ -563,7 +571,7 @@ export function VideoStatsMenu({
       <div className="flex flex-col gap-1.5 text-xs">
         <StatsRow label="编码" value={displayStats.codec} />
         <StatsRow label="分辨率" value={displayStats.resolution} />
-        {sourceType === 'bilibili' && (
+        {sourceType === 'bilibili' && format !== 'mp4' && (
           <StatsRow label="清晰度" value={displayStats.quality} />
         )}
         {sourceType === 'bilibili' && (

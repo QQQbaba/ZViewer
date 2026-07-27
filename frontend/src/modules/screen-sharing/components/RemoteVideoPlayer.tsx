@@ -1,7 +1,16 @@
+/**
+ * RemoteVideoPlayer —— WebRTC 远程流播放组件（ArtPlayer 版）。
+ *
+ * 基于 LiveArtPlayer（ArtPlayer isLive 模式）：
+ * - art.video 通过 setVideoRef 暴露给父组件绑定 srcObject（契约不变）
+ * - 控制栏（播放/音量/全屏）由 ArtPlayer 提供
+ * - 右键视频统计（VideoStatsMenu）保留
+ */
 import { useCallback, useState } from 'react'
 import type { RefObject } from 'react'
 import { VideoStatsMenu } from '@/components/VideoStatsMenu'
 import { Spinner } from '@/components/ui/Spinner'
+import { LiveArtPlayer } from '@/modules/art-player'
 
 interface RemoteVideoPlayerProps {
   /** video 元素 ref（由调用方通过 useRef 创建并传入） */
@@ -24,7 +33,7 @@ export function RemoteVideoPlayer({
 }: RemoteVideoPlayerProps): JSX.Element {
   // 用 state 跟踪 video 元素，避免在 render 中读取 ref.current
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null)
-  const handleRef = useCallback(
+  const handleVideoReady = useCallback(
     (node: HTMLVideoElement | null) => {
       setVideoEl(node)
       setVideoRef(node)
@@ -34,20 +43,14 @@ export function RemoteVideoPlayer({
 
   return (
     <div className="relative h-full w-full">
-      <video
-        ref={handleRef}
-        autoPlay
-        playsInline
-        muted={isMuted}
-        className="h-full w-full object-contain"
-      />
+      <LiveArtPlayer muted={isMuted} onVideoReady={handleVideoReady} />
       <VideoStatsMenu
         videoElement={videoEl}
         pc={peerConnection}
         sourceType="webrtc"
       />
       {!hasRemoteStream && (
-        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/80">
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-black/80">
           <Spinner tip="正在接收画面..." size={32} />
         </div>
       )}

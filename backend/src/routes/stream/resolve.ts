@@ -17,6 +17,7 @@ import {
   extractBvid,
   normalizeResolveError,
   type ResolveProgress,
+  type ResolvePageInfo,
 } from '../../services/bilibili/resolver';
 import { getUserCookie } from './helpers';
 
@@ -40,6 +41,10 @@ interface ResolveProgressMessage {
   vipStatus?: number;
   currentQn?: number;
   acceptQuality?: { id: number; label: string; resolution?: string }[];
+  /** 多 P 视频的分集列表（单 P 视频为 undefined） */
+  pages?: ResolvePageInfo[];
+  /** 当前播放的分集序号（从 1 开始） */
+  currentPage?: number;
 }
 
 /**
@@ -102,6 +107,15 @@ router.get('/resolve-bilibili', async (req: AuthenticatedRequest, res) => {
       ? req.query.codec.trim()
       : undefined;
 
+  const preferMp4 = req.query.preferMp4 === 'true' || req.query.preferMp4 === '1';
+
+  // page 参数：指定播放分集（P），从 1 开始
+  // 多 P 视频每个分集有独立的 cid，必须用对应 cid 请求 playurl 才能获取正确的播放地址
+  const page =
+    typeof req.query.page === 'string' && req.query.page.trim()
+      ? Number(req.query.page.trim())
+      : undefined;
+
   const writer = new NdjsonWriter(res);
   const cookie = (await getUserCookie(userId)) || undefined;
   console.log('[bilibili] resolve-bilibili, cookie present:', !!cookie);
@@ -113,6 +127,8 @@ router.get('/resolve-bilibili', async (req: AuthenticatedRequest, res) => {
       cookie,
       qn,
       codec,
+      preferMp4,
+      page,
       onProgress: (msg: ResolveProgress) => {
         writer.send({ status: msg.status, step: msg.step, message: msg.message });
       },
@@ -133,6 +149,8 @@ router.get('/resolve-bilibili', async (req: AuthenticatedRequest, res) => {
       vipStatus: result.vipStatus,
       currentQn: result.currentQn,
       acceptQuality: result.acceptQuality,
+      pages: result.pages,
+      currentPage: result.currentPage,
     });
     writer.end();
   } catch (err) {

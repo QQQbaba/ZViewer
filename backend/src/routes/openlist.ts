@@ -340,7 +340,8 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
 
     try {
       const info = await statWebDAVFile(params);
-      const proxyUrl = `${req.protocol}://${req.get('host')}/api/openlist/proxy?mountId=${mountId}&path=${encodeURIComponent(targetPath)}`;
+      // 使用相对路径，由前端根据当前页面 origin 自动解析，避免反向代理后协议错误（http vs https）
+      const proxyUrl = `/api/openlist/proxy?mountId=${mountId}&path=${encodeURIComponent(targetPath)}`;
       const format = detectMediaFormat(info.name || targetPath);
       res.json({
         success: true,

@@ -311,9 +311,14 @@ read_port_input() {
 
 deps_installed() {
   # npm workspaces：根目录 node_modules 存在 + 关键依赖存在
+  # 检查后端运行时关键依赖（reflect-metadata / better-sqlite3 / typeorm 等），
+  # 避免部分安装失败时误判为"已就绪"导致启动后 MODULE_NOT_FOUND。
   [[ -d "$ROOT_DIR/node_modules" ]] || return 1
   [[ -d "$ROOT_DIR/node_modules/express" ]] || return 1
   [[ -d "$ROOT_DIR/node_modules/vite" ]] || return 1
+  [[ -d "$ROOT_DIR/node_modules/reflect-metadata" ]] || return 1
+  [[ -d "$ROOT_DIR/node_modules/typeorm" ]] || return 1
+  [[ -d "$ROOT_DIR/node_modules/better-sqlite3" ]] || return 1
   return 0
 }
 
@@ -324,8 +329,42 @@ install_deps() {
   echo "  [$ROOT_DIR] 安装依赖（npm workspaces）..."
   (cd "$ROOT_DIR" && npm ci --no-audit --no-fund --prefer-offline) || {
     echo "  npm ci 失败，回退到 npm install ..." >&2
-    (cd "$ROOT_DIR" && npm install --no-audit --no-fund) || { echo "依赖安装失败" >&2; exit 1; }
+    (cd "$ROOT_DIR" && npm install --no-audit --no-fund) || {
+      echo "" >&2
+      echo "  ============================================" >&2
+      echo "  依赖安装失败！" >&2
+      echo "  最常见原因：better-sqlite3 原生模块编译失败" >&2
+      echo "  解决方法：" >&2
+      echo "    Debian/Ubuntu:  apt install -y python3 make g++" >&2
+      echo "    CentOS/RHEL:    yum install -y python3 make gcc-c++" >&2
+      echo "    Alpine:         apk add python3 make g++" >&2
+      echo "  安装编译工具后重新运行: $0 start --force-deps" >&2
+      echo "  ============================================" >&2
+      exit 1
+    }
   }
+
+  # 安装后验证关键依赖是否存在（防止 npm 部分成功但关键模块缺失）
+  if ! deps_installed; then
+    local missing=()
+    [[ ! -d "$ROOT_DIR/node_modules/reflect-metadata" ]] && missing+=("reflect-metadata")
+    [[ ! -d "$ROOT_DIR/node_modules/typeorm" ]] && missing+=("typeorm")
+    [[ ! -d "$ROOT_DIR/node_modules/better-sqlite3" ]] && missing+=("better-sqlite3")
+    [[ ! -d "$ROOT_DIR/node_modules/express" ]] && missing+=("express")
+    echo "" >&2
+    echo "  ============================================" >&2
+    echo "  依赖安装后验证失败，缺失模块: ${missing[*]}" >&2
+    echo "  这通常是因为 better-sqlite3 编译失败导致 npm 回滚了部分安装。" >&2
+    echo "  解决方法：" >&2
+    echo "    1. 安装编译工具：" >&2
+    echo "       Debian/Ubuntu:  apt install -y python3 make g++" >&2
+    echo "       CentOS/RHEL:    yum install -y python3 make gcc-c++" >&2
+    echo "       Alpine:         apk add python3 make g++" >&2
+    echo "    2. 重新安装: $0 start --force-deps" >&2
+    echo "  ============================================" >&2
+    exit 1
+  fi
+  echo "  依赖安装完成，关键模块验证通过。"
 }
 
 # 智能构建跳过：检测构建产物是否新于所有源代码文件
@@ -476,23 +515,87 @@ port_in_use() {
 
 # ============ 命令实现 ============
 
+# 检查服务是否在运行（PID 文件 + 端口监听双重判定）
+# 返回 0 = 运行中，1 = 未运行
+# 设置全局变量：SERVICE_BACKEND_PID / SERVICE_FRONTEND_PID / SERVICE_BACKEND_BY_PORT / SERVICE_FRONTEND_BY_PORT
+check_service_running() {
+  local backend_pid frontend_pid
+  backend_pid=$(read_pid backend)
+  frontend_pid=$(read_pid frontend)
+  SERVICE_BACKEND_PID=""
+  SERVICE_FRONTEND_PID=""
+  SERVICE_BACKEND_BY_PORT=0
+  SERVICE_FRONTEND_BY_PORT=0
+  SERVICE_HAS_PID_FILE=0
+  SERVICE_STALE_PID_FILE=0
+
+  if [[ -f "$PIDS_FILE" ]]; then
+    SERVICE_HAS_PID_FILE=1
+    if pid_running "$backend_pid"; then
+      SERVICE_BACKEND_PID="$backend_pid"
+    fi
+    if pid_running "$frontend_pid"; then
+      SERVICE_FRONTEND_PID="$frontend_pid"
+    fi
+    # PID 文件存在但进程都死了 → 标记为过期
+    if [[ -z "$SERVICE_BACKEND_PID" && -z "$SERVICE_FRONTEND_PID" ]]; then
+      SERVICE_STALE_PID_FILE=1
+    fi
+  fi
+
+  # 端口监听兜底检测：即使 PID 文件不存在或过期，端口被监听就视为运行中
+  if [[ -z "$SERVICE_BACKEND_PID" ]] && port_in_use "$PORT"; then
+    local port_pid
+    if port_pid=$(get_pid_by_port "$PORT" 500); then
+      SERVICE_BACKEND_PID="$port_pid"
+      SERVICE_BACKEND_BY_PORT=1
+    fi
+  fi
+  if [[ -z "$SERVICE_FRONTEND_PID" ]] && port_in_use "$FRONTEND_PORT"; then
+    local port_pid
+    if port_pid=$(get_pid_by_port "$FRONTEND_PORT" 500); then
+      SERVICE_FRONTEND_PID="$port_pid"
+      SERVICE_FRONTEND_BY_PORT=1
+    fi
+  fi
+
+  if [[ -n "$SERVICE_BACKEND_PID" || -n "$SERVICE_FRONTEND_PID" ]]; then
+    return 0
+  fi
+  return 1
+}
+
 do_start() {
   write_title "ZViewer 生产服务启动"
 
   echo "  后端端口：$PORT"
   echo "  前端端口：$FRONTEND_PORT"
 
-  # 检查是否已在运行
-  local backend_pid frontend_pid
-  backend_pid=$(read_pid backend)
-  frontend_pid=$(read_pid frontend)
-  if pid_running "$backend_pid" || pid_running "$frontend_pid"; then
+  # 检查是否已在运行（PID 文件 + 端口监听双重判定）
+  if check_service_running; then
     echo "服务已在运行中，如需重启请使用 restart 子命令" >&2
-    pid_running "$backend_pid"  && echo "  后端 PID: $backend_pid"
-    pid_running "$frontend_pid" && echo "  前端 PID: $frontend_pid"
+    if [[ -n "$SERVICE_BACKEND_PID" ]]; then
+      local source="PID 文件"
+      [[ "$SERVICE_BACKEND_BY_PORT" -eq 1 ]] && source="端口检测"
+      echo "  后端 PID: $SERVICE_BACKEND_PID (来源: $source)"
+    fi
+    if [[ -n "$SERVICE_FRONTEND_PID" ]]; then
+      local source="PID 文件"
+      [[ "$SERVICE_FRONTEND_BY_PORT" -eq 1 ]] && source="端口检测"
+      echo "  前端 PID: $SERVICE_FRONTEND_PID (来源: $source)"
+    fi
+    # PID 文件不存在但端口被占用，提示用户
+    if [[ "$SERVICE_HAS_PID_FILE" -eq 0 && ( "$SERVICE_BACKEND_BY_PORT" -eq 1 || "$SERVICE_FRONTEND_BY_PORT" -eq 1 ) ]]; then
+      echo ""
+      echo "  提示：检测到端口被占用但未找到 PID 文件，" >&2
+      echo "        可能是服务通过其他方式启动（如 dev 模式或手动 node）。" >&2
+      echo "        如需强制启动，请先停止占用端口的进程，或使用 -p / -f 指定其他端口。" >&2
+    fi
     return 0
   fi
-  rm -f "$PIDS_FILE"
+
+  # 清理过期的 PID 文件
+  [[ "$SERVICE_STALE_PID_FILE" -eq 1 ]] && rm -f "$PIDS_FILE"
 
   echo "[1/5] 检查环境 ..."
   check_command node

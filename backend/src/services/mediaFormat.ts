@@ -1,16 +1,16 @@
 /**
  * 根据文件扩展名推断媒体格式。
  *
- * 浏览器 <video> 元素原生支持的容器有限：
- * - mp4/webm：原生支持
- * - mkv/avi/wmv/flv 等：不支持，直接赋值给 video.src 会抛 NotSupportedError
+ * 浏览器 <video> 元素原生支持的容器：
+ * - mp4/webm/mov/mkv：原生支持（Chrome 91+ 支持 MKV，需 H.264/AAC 编码）
+ * - mkv/avi/wmv/flv 等：部分不支持，直接赋值给 video.src 会抛 NotSupportedError
  *
  * 对于不支持的容器，前端应给出明确提示而非黑屏。
  */
 export type MediaFormat = 'mp4' | 'webm' | 'mkv' | 'avi' | 'flv' | 'wmv' | 'mov' | 'ts' | 'unknown';
 
 /** 浏览器原生支持的容器格式 */
-export const BROWSER_SUPPORTED_FORMATS: MediaFormat[] = ['mp4', 'webm', 'mov'];
+export const BROWSER_SUPPORTED_FORMATS: MediaFormat[] = ['mp4', 'webm', 'mov', 'mkv'];
 
 /**
  * 从文件路径或文件名推断媒体格式。

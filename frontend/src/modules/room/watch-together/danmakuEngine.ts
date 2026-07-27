@@ -17,6 +17,8 @@ export interface SendDanmakuOptions {
   mode?: number
   size?: number
   stime?: number
+  /** 发送者名称，提供后弹幕会显示 "发送者: 内容" 并附加颜色线框 */
+  sender?: string
 }
 
 export interface DanmakuStyleOptions {
@@ -204,13 +206,23 @@ export class DanmakuEngineAdapter {
       return
 
     const time = Math.max(0, (this.media?.currentTime ?? 0) - 0.05)
+    const sender = options?.sender?.trim()
+    const displayText = sender ? `${sender}: ${text}` : text
+    const style = this.getCommentStyle(options?.color, options?.size)
+
+    // 提供发送者时附加颜色线框，区分评论区发出的弹幕
+    if (sender) {
+      style.border = '1px solid rgba(255, 255, 255, 0.7)'
+      style.borderRadius = '6px'
+      style.padding = '2px 8px'
+      style.boxSizing = 'border-box'
+    }
+
     const emitParams = {
-      text,
+      text: displayText,
       mode: mapBiliModeToDanmakuJs(mode),
       time,
-      style: {
-        ...this.getCommentStyle(options?.color, options?.size),
-      } as Partial<CSSStyleDeclaration>,
+      style,
     }
     this.danmaku.emit(emitParams)
   }
@@ -313,6 +325,7 @@ export class DanmakuEngineAdapter {
   }
 
   setDensity(ratio: number): void {
+    // 密度范围 0-1：<1 时按概率丢弃弹幕，>=1 时全部显示
     this.densityRatio = Math.max(0, Math.min(1, ratio))
   }
 
@@ -329,6 +342,7 @@ export class DanmakuEngineAdapter {
 
   setStyle(options: DanmakuStyleOptions): void {
     let shouldRefresh = false
+
     if (typeof options.fontSize === 'number' && options.fontSize > 0) {
       if (this.baseFontSize !== options.fontSize) {
         this.baseFontSize = options.fontSize
@@ -342,23 +356,49 @@ export class DanmakuEngineAdapter {
       }
     }
     if (Array.isArray(options.blockKeywords)) {
-      this.blockKeywords = options.blockKeywords.filter(
+      const newKeywords = options.blockKeywords.filter(
         (k) => typeof k === 'string' && k.length > 0
       )
+      if (
+        newKeywords.length !== this.blockKeywords.length ||
+        newKeywords.some((k, i) => k !== this.blockKeywords[i])
+      ) {
+        this.blockKeywords = newKeywords
+        shouldRefresh = true
+      }
     }
     if (Array.isArray(options.blockModes)) {
       this.blockModes = [...options.blockModes]
     }
     if (options.filters) {
-      this.filters = { ...this.filters, ...options.filters }
+      const prev = this.filters
+      const next = { ...prev, ...options.filters }
+      if (
+        next.scroll !== prev.scroll ||
+        next.fixed !== prev.fixed ||
+        next.color !== prev.color ||
+        next.advanced !== prev.advanced
+      ) {
+        this.filters = next
+        shouldRefresh = true
+      }
     }
     if (options.advanced) {
-      this.advanced = { ...this.advanced, ...options.advanced }
+      const prev = this.advanced
+      const next = { ...prev, ...options.advanced }
+      if (
+        next.fontFamily !== prev.fontFamily ||
+        next.strokeWidth !== prev.strokeWidth ||
+        next.shadowBlur !== prev.shadowBlur
+      ) {
+        this.advanced = next
+        shouldRefresh = true
+      }
     }
 
     if (shouldRefresh && this.danmaku) {
-      // 字号/屏幕缩放变更后清空已渲染弹幕，
-      // 让当前时间窗口的弹幕立即以新样式重新出现。
+      // 样式/过滤/屏蔽词变更后清空已渲染弹幕，
+      // 让当前时间窗口的弹幕立即以新样式/新规则重新出现。
       this.danmaku.clear()
       this.emitted.clear()
     }

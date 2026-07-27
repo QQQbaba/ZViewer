@@ -11,6 +11,7 @@ import { RequestNotification } from '@/components/ui/RequestNotification'
 import type { RequestNotificationItem } from '@/components/ui/RequestNotification'
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle'
 import { message } from '@/components/ui/message'
+import { LiveArtPlayer } from '@/modules/art-player'
 import { useSocket } from '@/hooks/useSocket'
 import { useRoomStore } from '@/store/roomStore'
 import { AnnotationLayer } from '@/components/AnnotationLayer'
@@ -83,6 +84,17 @@ function SharePage({
   } | null>(null)
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
+  // LiveArtPlayer 通过 onVideoReady 暴露 video 元素（state 跟踪以便 effect 依赖）
+  const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(
+    null
+  )
+  const handleLocalVideoReady = useCallback(
+    (node: HTMLVideoElement | null) => {
+      localVideoRef.current = node
+      setLocalVideoEl(node)
+    },
+    []
+  )
   // onStreamEnded 需引用下方 hook 返回的 stop/cleanupPeerConnections，用 ref 转发避免循环依赖
   const handleStreamEndedRef = useRef<() => void>(() => {})
 
@@ -141,6 +153,16 @@ function SharePage({
   useEffect(() => {
     handleStreamEndedRef.current = handleStreamEnded
   }, [handleStreamEnded])
+
+  // LiveArtPlayer 挂载完成后绑定本地预览流
+  //（useLocalMediaStream 的绑定 effect 可能早于 art.video 创建，此处兜底）
+  useEffect(() => {
+    if (localVideoEl && stream && localVideoEl.srcObject !== stream) {
+      // eslint-disable-next-line react-hooks/immutability -- 修改 DOM 元素属性，非 React 状态
+      localVideoEl.srcObject = stream
+      void localVideoEl.play().catch(() => {})
+    }
+  }, [localVideoEl, stream])
 
   const handleRoomClosed = useCallback(
     (data: RoomClosedPayload) => {
@@ -368,14 +390,16 @@ function SharePage({
         </div>
       ) : isSharing ? (
         <>
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
-            className="h-full w-full object-contain"
+          <div
+            className="h-full w-full"
             style={{ opacity: isPaused ? 0.6 : 1 }}
-          />
+          >
+            <LiveArtPlayer
+              muted
+              showControls={false}
+              onVideoReady={handleLocalVideoReady}
+            />
+          </div>
           <AnnotationLayer socket={socket} roomId={currentRoomId} readOnly />
           <SharingPausedOverlay visible={isPaused} />
           <ShareControlsBar

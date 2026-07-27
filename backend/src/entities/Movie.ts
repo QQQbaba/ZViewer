@@ -90,6 +90,21 @@ export class Movie {
   @Column({ type: 'text', nullable: true })
   acceptQuality!: string | null;
 
+  /**
+   * 多 P 视频的分集列表（JSON 字符串）。
+   * 单 P 视频为 null；多 P 视频为 [{ page, cid, part, duration }, ...]。
+   * 前端用于在影片列表中显示分P选择器，切换分P时使用对应 cid 重新解析。
+   */
+  @Column({ type: 'text', nullable: true })
+  pages!: string | null;
+
+  /**
+   * 当前播放的分集序号（从 1 开始）。
+   * 默认 1（第一 P），用户切换分P后更新。
+   */
+  @Column({ type: 'integer', nullable: true })
+  currentPage!: number | null;
+
   @Column({ type: 'varchar', nullable: true })
   serverUrl!: string | null;
 

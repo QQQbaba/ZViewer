@@ -70,7 +70,7 @@ export function useServerHeartbeat({
       }
 
       // 检测 URL 过期
-      if (isVideoSourceExpired(state.sourceUrl, video.error)) {
+      if (isVideoSourceExpired(state.sourceUrl, video.error, video)) {
         urlExpiredRef.current = true
         if (!video.paused) video.pause()
         message.warning('视频源已过期，等待房主重连')
@@ -147,6 +147,11 @@ export function useServerHeartbeat({
     }
   }, [socket, isHostRef])
 
+  // 切换视频源后重置过期标记，避免房主添加新视频或观众进入房间时被旧状态误拦截
+  useEffect(() => {
+    urlExpiredRef.current = false
+  }, [watchTogether.sourceUrl])
+
   // 监听 video error 事件（URL 过期兜底检测）
   useEffect(() => {
     const video = videoRef.current
@@ -155,7 +160,7 @@ export function useServerHeartbeat({
     const handleError = () => {
       if (urlExpiredRef.current) return
       const currentState = watchTogetherRef.current
-      if (isVideoSourceExpired(currentState.sourceUrl, video.error)) {
+      if (isVideoSourceExpired(currentState.sourceUrl, video.error, video)) {
         urlExpiredRef.current = true
         if (!video.paused) video.pause()
         message.warning('视频源已过期，等待房主重连')

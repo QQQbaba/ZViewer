@@ -61,7 +61,11 @@ export function buildStateFromVideo(
  * 用于房主广播前跳过等价状态，避免正常播放时（currentTime 自然增长）
  * 每 500ms 都触发广播。
  *
- * - currentTime 允许小幅差异（< 0.5s）视为相同
+ * v3 调优：
+ * - currentTime 允许差异 < 2s 视为相同（与 STATE_BROADCAST_TIME_THRESHOLD 对齐）
+ *   旧值 0.5s 会导致房主正常播放时每 500ms 都触发广播，观众端频繁卡顿。
+ *
+ * - currentTime 允许小幅差异（< 2s）视为相同
  * - acceptQuality 是数组，按引用 + 长度 + qn 字段比较
  *
  * @param a 上次广播的状态（null 表示首次，总是不等价）
@@ -96,9 +100,9 @@ export function isStateEqual(
     return false
   }
 
-  // currentTime 单独处理：允许小幅差异（< 0.5s）视为相同，
-  // 避免房主正常播放时每 500ms 都触发广播（自然进度差 ~0.5s）。
-  if (Math.abs(a.currentTime - b.currentTime) > 0.5) return false
+  // currentTime 单独处理：允许差异 < 2s 视为相同（v3：从 0.5s 提升至 2s），
+  // 避免房主正常播放时频繁触发广播。进度校正由定时心跳驱动。
+  if (Math.abs(a.currentTime - b.currentTime) > 2) return false
 
   // B站 清晰度字段
   if (a.currentQn !== b.currentQn) return false

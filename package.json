@@ -15,10 +15,23 @@
     "lint": "npm run lint -w frontend"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "concurrently": "^8.2.2"
   },
   "dependencies": {
     "@types/multer": "^2.2.0",
     "multer": "^2.2.0"
-  }
+  },
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zero-wyc/ZViewer.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Zero-wyc/ZViewer/issues"
+  },
+  "homepage": "https://github.com/Zero-wyc/ZViewer#readme"
 }

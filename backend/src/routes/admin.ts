@@ -404,6 +404,7 @@ router.get(
           autoDeleteAfterHours: settings.autoDeleteAfterHours,
           dataSourceConfig: settings.dataSourceConfig,
           registrationMode: settings.registrationMode,
+          roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
         },
       });
@@ -422,7 +423,7 @@ router.put(
     res: import('express').Response,
   ): Promise<void> => {
     try {
-      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, betaFeaturesEnabled } = req.body;
+      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled } = req.body;
 
       if (typeof autoDeleteInactiveRooms !== 'boolean') {
         res.status(400).json({
@@ -459,6 +460,14 @@ router.put(
         });
         return;
       }
+      const allowedCreationModes = ['admin-only', 'all-users'];
+      if (roomCreationMode !== undefined && !allowedCreationModes.includes(roomCreationMode)) {
+        res.status(400).json({
+          success: false,
+          message: 'roomCreationMode 必须是 admin-only / all-users 之一',
+        });
+        return;
+      }
       if (betaFeaturesEnabled !== undefined && typeof betaFeaturesEnabled !== 'boolean') {
         res.status(400).json({
           success: false,
@@ -480,6 +489,9 @@ router.put(
       if (registrationMode !== undefined) {
         settings.registrationMode = registrationMode as 'open' | 'approval' | 'closed';
       }
+      if (roomCreationMode !== undefined) {
+        settings.roomCreationMode = roomCreationMode as 'admin-only' | 'all-users';
+      }
       if (betaFeaturesEnabled !== undefined) {
         settings.betaFeaturesEnabled = betaFeaturesEnabled;
       }
@@ -492,6 +504,7 @@ router.put(
           autoDeleteAfterHours: settings.autoDeleteAfterHours,
           dataSourceConfig: settings.dataSourceConfig,
           registrationMode: settings.registrationMode,
+          roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
         },
       });

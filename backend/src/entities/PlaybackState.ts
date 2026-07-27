@@ -123,7 +123,7 @@ export class PlaybackState {
   @UpdateDateColumn()
   updatedAt!: Date;
 
-  @OneToOne(() => Room)
+  @OneToOne(() => Room, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'roomId', referencedColumnName: 'roomId' })
   room!: Room;
 }

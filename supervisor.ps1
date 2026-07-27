@@ -74,9 +74,24 @@ while ($true) {
 
     Write-SupervisorLog "启动子进程 (restart=$restartCount) ..."
 
+    # 净化 $Command：上游 shell（如 TRAE IDE）可能注入 profile 脚本，把 'node'
+    # 改写为 ". 'safe_rm_aliases.ps1'; node"，导致 cmd.exe / Start-Process 无法解析。
+    # 策略：若 $Command 包含分号或引号，提取最后一段作为实际可执行文件名。
+    $cleanCommand = $Command
+    if ($cleanCommand -match "[;`"']") {
+        $parts = $cleanCommand -split "[;`"']" | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() }
+        if ($parts.Count -gt 0) {
+            $cleanCommand = $parts[-1]
+        }
+        Write-SupervisorLog "净化 Command: '$Command' -> '$cleanCommand'"
+    }
+
+    # 使用 cmd.exe /c 启动子进程，避免 PowerShell 别名污染。
+    # cmd.exe /c 接收原始字符串，按系统 PATH 解析可执行文件。
+    $cmdLine = "$cleanCommand $CommandArgs"
     $proc = $null
     try {
-        $proc = Start-Process -FilePath $Command -ArgumentList $CommandArgs `
+        $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $cmdLine `
             -WorkingDirectory $WorkingDirectory `
             -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput $LogStdout -RedirectStandardError $LogStderr

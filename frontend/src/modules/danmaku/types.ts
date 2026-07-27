@@ -1,5 +1,9 @@
-/** 弹幕源类型（移除了 bilibili_bangumi） */
-export type DanmakuSource = 'bilibili' | 'bahamut' | 'dandanplay'
+/** 弹幕源类型 */
+export type DanmakuSource =
+  | 'bilibili-video'
+  | 'bilibili-bangumi'
+  | 'bahamut'
+  | 'dandanplay'
 
 /** 弹幕条目（统一格式，所有源共用） */
 export interface DanmakuItem {
@@ -60,7 +64,8 @@ export const DANMAKU_SOURCE_OPTIONS: Array<{
   label: string
   value: DanmakuSource
 }> = [
-  { label: '哔哩哔哩', value: 'bilibili' },
+  { label: '哔哩哔哩视频', value: 'bilibili-video' },
+  { label: '哔哩哔哩番剧', value: 'bilibili-bangumi' },
   { label: '巴哈姆特', value: 'bahamut' },
-  { label: '弹弹play', value: 'dandanplay' },
+  { label: '弹弹Play', value: 'dandanplay' },
 ]

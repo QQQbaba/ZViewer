@@ -68,7 +68,7 @@ export function DanmakuSearchModal({
   const addTrack = useDanmakuStore((state) => state.addTrack)
 
   const [source, setSource] = useState<DanmakuSource>(
-    defaultSource ?? 'bilibili'
+    defaultSource ?? 'bilibili-video'
   )
 
   useEffect(() => {
@@ -126,7 +126,7 @@ export function DanmakuSearchModal({
     if (open && initialKeyword && lastAutoSearchRef.current !== initialKeyword) {
       lastAutoSearchRef.current = initialKeyword
       setKeyword(initialKeyword)
-      const searchSource = defaultSource ?? 'bilibili'
+      const searchSource = defaultSource ?? 'bilibili-video'
       void performSearch(searchSource, initialKeyword)
     }
     if (!open) {
@@ -248,7 +248,7 @@ export function DanmakuSearchModal({
             />
           </Space>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+          <div className="zen-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
             {!hasResult && !loading && (
               <div
                 className="glass flex flex-1 flex-col items-center justify-center gap-2 rounded-[var(--md-sys-shape-corner)] p-6 text-center"
@@ -384,7 +384,7 @@ export function DanmakuSearchModal({
               />
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+            <div className="zen-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
               {episodes.length === 0 && !loading && (
                 <div className="flex flex-1 items-center justify-center">
                   <Text type="secondary" className="text-xs">

@@ -9,6 +9,8 @@ import {
   Search,
   Crown,
   FolderOpen,
+  Settings2,
+  ChevronDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -17,6 +19,7 @@ import { Space } from '@/components/ui/Space'
 import { Text, Paragraph } from '@/components/ui/Typography'
 import { Modal } from '@/components/ui/Modal'
 import { Tag } from '@/components/ui/Tag'
+import { Select } from '@/components/ui/Select'
 
 import { message } from '@/components/ui/message'
 import { useRoomStore } from '@/store/roomStore'
@@ -55,6 +58,11 @@ import {
   filterQualitiesByVip,
 } from '@/modules/bilibili/bilibiliApi'
 import {
+  useBilibiliParsePreferences,
+  setBilibiliParseOptions,
+  type BilibiliCodec,
+} from '@/modules/bilibili/parseOptions'
+import {
   resolveOpenList,
   buildOpenListProxyUrl,
 } from '@/modules/openlist/openlistApi'
@@ -76,6 +84,7 @@ import {
 } from '@/modules/mounts'
 import { useAuthStore } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
+import { cn } from '@/lib/utils'
 
 type SourceType = 'bilibili' | 'mp4' | 'webdav' | 'ftp' | 'openlist' | 'anime' | 'kazumi' | 'server-files'
 
@@ -109,6 +118,135 @@ interface MoviePushPanelProps {
   isHost: boolean
 }
 
+/**
+ * B站解析设置子组件：编码格式 + 播放模式。
+ *
+ * 折叠展开式，默认收起。修改后立即写入 localStorage 持久化，
+ * 并通过 triggerReloadBilibili 触发当前 B站 影片的重新解析（应用新偏好）。
+ * 所有 B站 影片共享同一份解析偏好（localStorage 单 key 存储）。
+ *
+ * 解析偏好通过 useBilibiliParsePreferences hook 跨组件同步：
+ * MovieListPanel 读取 preferMp4 用于禁用分辨率 Select。
+ *
+ * 仅当当前播放的影片为 bilibili 源时才触发重载，避免无关影片受影响。
+ */
+function BilibiliParseSettings() {
+  const [expanded, setExpanded] = useState(false)
+  const { codec, preferMp4 } = useBilibiliParsePreferences()
+  const triggerReloadBilibili = useRoomStore(
+    (state) => state.triggerReloadBilibili
+  )
+  const currentMovieId = useRoomStore((state) => state.currentMovieId)
+  const movies = useRoomStore((state) => state.movies)
+
+  // 当前播放的影片是否为 B站 源：是则修改偏好后触发重载
+  const currentMovieIsBilibili =
+    currentMovieId != null &&
+    movies.some((m) => m.id === currentMovieId && m.sourceType === 'bilibili')
+
+  const handleCodecChange = useCallback(
+    (value: string) => {
+      const next = value as BilibiliCodec
+      setBilibiliParseOptions({ codec: next })
+      if (currentMovieIsBilibili) {
+        triggerReloadBilibili()
+      }
+    },
+    [currentMovieIsBilibili, triggerReloadBilibili]
+  )
+
+  const handlePreferMp4Change = useCallback(
+    (next: boolean) => {
+      setBilibiliParseOptions({ preferMp4: next })
+      if (currentMovieIsBilibili) {
+        triggerReloadBilibili()
+      }
+    },
+    [currentMovieIsBilibili, triggerReloadBilibili]
+  )
+
+  return (
+    <div className="w-full">
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="flex w-full items-center justify-between rounded-[var(--md-sys-shape-corner)] px-1.5 py-1 text-[10px] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
+        style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+        aria-expanded={expanded}
+      >
+        <span className="flex items-center gap-1">
+          <Settings2 className="h-3 w-3" />
+          B站解析设置
+        </span>
+        <ChevronDown
+          className={cn(
+            'h-3 w-3 transition-transform',
+            expanded && 'rotate-180'
+          )}
+        />
+      </button>
+      {expanded && (
+        <div className="glass flex flex-col gap-1.5 rounded-[var(--md-sys-shape-corner)] p-1.5">
+          <Select
+            label="编码格式"
+            size="sm"
+            options={[
+              { label: '自动', value: 'auto' },
+              { label: 'H.264', value: 'avc' },
+              { label: 'HEVC', value: 'hevc' },
+              { label: 'AV1', value: 'av1' },
+            ]}
+            value={codec}
+            onChange={handleCodecChange}
+          />
+          <div>
+            <div
+              className="mb-0.5 text-[10px] font-medium uppercase tracking-wide"
+              style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+            >
+              播放模式
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                onClick={() => handlePreferMp4Change(false)}
+                className={cn(
+                  'rounded-md py-0.5 text-[10px] font-medium transition-all',
+                  !preferMp4
+                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
+                    : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                )}
+              >
+                DASH 高清
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePreferMp4Change(true)}
+                className={cn(
+                  'rounded-md py-0.5 text-[10px] font-medium transition-all',
+                  preferMp4
+                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
+                    : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                )}
+              >
+                MP4 流畅
+              </button>
+            </div>
+            <div
+              className="mt-0.5 text-[9px] leading-tight"
+              style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+            >
+              {preferMp4
+                ? 'MP4 直链，seek 流畅，清晰度通常 480P/720P'
+                : 'DASH 分离流，支持 1080P/4K，seek 需缓冲'}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
   const { socket } = useSocket()
   const userRole = useAuthStore((state) => state.user?.role)
@@ -120,6 +258,9 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
     (state) => state.setPendingPreviewPlay
   )
   const roomId = useRoomStore((state) => state.roomId)
+  // 读取播放模式偏好：MP4 模式下禁用分辨率 Dropdown
+  // （B站 MP4 直链通常仅支持 480P/720P，DASH 才支持 1080P/4K，无需也不能切换）
+  const { preferMp4 } = useBilibiliParsePreferences()
   const [sourceType, setSourceType] = useState<SourceType>('bilibili')
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
@@ -497,18 +638,96 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
     }
   }
 
-  const handleSelectFileFromMount = useCallback(
-    (path: string) => {
-      const normalizedPath = normalizeMountPath(path)
-      if (sourceType === 'webdav') {
-        setWebdav((prev) => ({ ...prev, path: normalizedPath }))
-      } else if (sourceType === 'ftp') {
-        setFtp((prev) => ({ ...prev, path: normalizedPath }))
-      } else if (sourceType === 'openlist') {
-        setOpenlist((prev) => ({ ...prev, path: normalizedPath }))
+  const handleSelectFilesFromMount = useCallback(
+    async (paths: string[]) => {
+      if (!isHost) {
+        message.info('只有房主可以添加影片')
+        return
+      }
+      if (!roomId) {
+        message.error('未连接房间')
+        return
+      }
+
+      const mountId = Number(selectedMountId)
+      if (!mountId) {
+        message.warning('请选择已保存的挂载')
+        return
+      }
+
+      setLoading(true)
+      setResolveProgress(`正在批量解析 ${paths.length} 个文件...`)
+      try {
+        let added = 0
+        for (const path of paths) {
+          const normalizedPath = normalizeMountPath(path)
+          if (sourceType === 'webdav') {
+            const resolved = await resolveWebDAV(mountId, normalizedPath)
+            const title = resolved.title || extractTitleFromUrl(normalizedPath)
+            const movieUrl = buildWebDAVProxyUrl(mountId, normalizedPath)
+            await addMovie(roomId, {
+              url: movieUrl,
+              title,
+              source: 'webdav',
+              format: resolved.format,
+              duration: resolved.duration,
+              serverUrl: webdav.serverUrl.trim() || undefined,
+              path: normalizedPath,
+              directLink: webdavDirectLink,
+            })
+            added++
+          } else if (sourceType === 'ftp') {
+            const resolved = await resolveFTPNew(mountId, normalizedPath)
+            const title = resolved.title || extractTitleFromUrl(normalizedPath)
+            await addMovie(roomId, {
+              url: resolved.videoUrl,
+              title,
+              source: 'ftp',
+              format: resolved.format,
+              serverUrl: ftp.serverUrl.trim(),
+              path: normalizedPath,
+              username: ftp.username || undefined,
+              password: ftp.password || undefined,
+            })
+            added++
+          } else if (sourceType === 'openlist') {
+            const resolved = await resolveOpenList(mountId, normalizedPath)
+            const title = resolved.title || extractTitleFromUrl(normalizedPath)
+            const movieUrl = buildOpenListProxyUrl(mountId, normalizedPath)
+            await addMovie(roomId, {
+              url: movieUrl,
+              title,
+              source: 'openlist',
+              format: resolved.format,
+              duration: resolved.duration,
+              serverUrl: openlist.serverUrl.trim() || undefined,
+              path: normalizedPath,
+              directLink: false,
+            })
+            added++
+          }
+        }
+        message.success(`已添加 ${added} 部影片`)
+      } catch (err) {
+        console.error('[MoviePushPanel] batch add error:', err)
+        message.error(err instanceof Error ? err.message : '批量添加失败')
+      } finally {
+        setLoading(false)
+        setResolveProgress('')
       }
     },
-    [sourceType]
+    [
+      isHost,
+      roomId,
+      selectedMountId,
+      sourceType,
+      webdav.serverUrl,
+      webdavDirectLink,
+      ftp.serverUrl,
+      ftp.username,
+      ftp.password,
+      openlist.serverUrl,
+    ]
   )
 
   const resetForm = () => {
@@ -609,6 +828,8 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           cid: resolvedMovie.cid,
           currentQn: resolvedMovie.currentQn,
           acceptQuality: resolvedMovie.acceptQuality,
+          pages: resolvedMovie.pages,
+          currentPage: resolvedMovie.currentPage ?? 1,
         })
         resetForm()
         message.success('影片已添加')
@@ -765,7 +986,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
       return (
         <Button
           variant="primary"
-          size="sm"
+          size="md"
           block
           loading={loading}
           icon={<Search className="h-4 w-4" />}
@@ -781,7 +1002,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
       return (
         <Button
           variant="primary"
-          size="sm"
+          size="md"
           block
           loading={loading}
           icon={<Search className="h-4 w-4" />}
@@ -798,7 +1019,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         return (
           <Button
             variant="primary"
-            size="sm"
+            size="md"
             block
             loading={loading}
             icon={<Plus className="h-4 w-4" />}
@@ -812,7 +1033,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
       return (
         <Button
           variant="primary"
-          size="sm"
+          size="md"
           block
           loading={loading}
           icon={<Link2 className="h-4 w-4" />}
@@ -828,7 +1049,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
     return (
       <Button
         variant="primary"
-        size="sm"
+        size="md"
         block
         loading={loading}
         icon={<Plus className="h-4 w-4" />}
@@ -1132,7 +1353,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         </div>
 
         {/* 卡片内容 */}
-        <div className="flex min-h-0 flex-1 flex-col gap-2.5 px-4 py-3">
+        <div className="zen-scroll flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-3">
           <Dropdown
             value={sourceType}
             options={ALL_SOURCE_OPTIONS.filter(
@@ -1164,20 +1385,30 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           {sourceType === 'bilibili' &&
             resolvedMovie?.acceptQuality &&
             resolvedMovie.acceptQuality.length > 0 && (
-              <Dropdown
-                value={String(
-                  resolvedMovie.currentQn ?? resolvedMovie.acceptQuality[0]?.id
+              <>
+                <Dropdown
+                  value={String(
+                    resolvedMovie.currentQn ?? resolvedMovie.acceptQuality[0]?.id
+                  )}
+                  options={filterQualitiesByVip(
+                    resolvedMovie.acceptQuality,
+                    bilibiliUser?.vipStatus === 1
+                  ).map((q) => ({
+                    label: q.resolution ? `${q.label} · ${q.resolution}` : q.label,
+                    value: String(q.id),
+                  }))}
+                  onChange={(value) => void handleQualityChange(value)}
+                  disabled={qualityLoading || !isHost || preferMp4}
+                />
+                {preferMp4 && (
+                  <div
+                    className="text-[9px] leading-tight"
+                    style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+                  >
+                    MP4 流畅模式下清晰度由 B站 决定，无法手动切换
+                  </div>
                 )}
-                options={filterQualitiesByVip(
-                  resolvedMovie.acceptQuality,
-                  bilibiliUser?.vipStatus === 1
-                ).map((q) => ({
-                  label: q.resolution ? `${q.label} · ${q.resolution}` : q.label,
-                  value: String(q.id),
-                }))}
-                onChange={(value) => void handleQualityChange(value)}
-                disabled={qualityLoading || !isHost}
-              />
+              </>
             )}
 
           {sourceType === 'bilibili' && (
@@ -1285,6 +1516,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
                     : '已登录，可解析高画质视频'
                   : '未登录时只能解析低画质或试看片段'}
               </Paragraph>
+              <BilibiliParseSettings />
             </div>
           )}
         </div>
@@ -1375,7 +1607,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           mountId={browsingMount.id}
           open={!!browsingMount}
           onClose={() => setBrowsingMount(null)}
-          onSelectFile={handleSelectFileFromMount}
+          onSelectFiles={handleSelectFilesFromMount}
           selectable
         />
       ) : browsingMount?.type === 'openlist' ? (
@@ -1383,7 +1615,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           mountId={browsingMount.id}
           open={!!browsingMount}
           onClose={() => setBrowsingMount(null)}
-          onSelectFile={handleSelectFileFromMount}
+          onSelectFiles={handleSelectFilesFromMount}
           selectable
         />
       ) : (
@@ -1391,7 +1623,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           mount={browsingMount}
           open={!!browsingMount}
           onClose={() => setBrowsingMount(null)}
-          onSelectFile={handleSelectFileFromMount}
+          onSelectFiles={handleSelectFilesFromMount}
           selectable
         />
       )}

@@ -7,7 +7,49 @@
 import type { MediaFormat } from '@/lib/mediaFormat'
 
 /** 引擎类型标识 */
-export type EngineType = 'mse' | 'hls' | 'flv' | 'direct'
+export type EngineType = 'mse' | 'hls' | 'flv' | 'direct' | 'dash'
+
+/**
+ * seek 操作返回结果（公共类型，供 MSE / DASH 等引擎实现共享）。
+ *
+ * - success: seek 是否成功执行
+ * - needReload: 是否需要上层 forceReload（video.error / InvalidStateError 等不可恢复错误）
+ *   false 表示正常 abort（并发操作）/ superseded / 非 MSE 流，不需要 reload
+ * - busy: true 表示另一个执行流正在对同一实例 seek（本次未执行）
+ * - message: 失败原因（用于日志）
+ */
+export interface SeekResult {
+  success: boolean
+  message?: string
+  needReload?: boolean
+  busy?: boolean
+}
+
+/**
+ * 引擎控制器接口：MSE / DASH 引擎实例的统一抽象。
+ *
+ * 使 usePlayerSource 可以用同一个 ref 类型持有 MsePlayer 或 DashPlayer 实例，
+ * seek-service 通过此接口调用 seekTo，无需感知底层引擎实现。
+ */
+export interface PlayerController {
+  /**
+   * 创建并挂载媒体源到构造时传入的 video 元素。
+   * @param startTime 可选，从该时间附近开始加载（用于房主刷新恢复 / 重载按钮保留进度）
+   * @returns blob URL（用于调用方在切换时 revokeObjectURL）
+   */
+  attach(startTime?: number): Promise<string>
+  /**
+   * seek 到目标时间。不重建媒体源。
+   * @returns SeekResult
+   */
+  seekTo(targetTime: number): Promise<SeekResult>
+  /** 清理所有资源（MediaSource / dash.js 实例 / blob URL） */
+  cleanup(): void
+  /** 是否已 attach（包括 seeking 状态） */
+  readonly isAttached: boolean
+  /** 是否正在 seek */
+  readonly isSeeking: boolean
+}
 
 /**
  * 播放器源数据：从 WatchTogetherState 中抽取的、引擎 attach 所需的最小字段集。
@@ -52,12 +94,16 @@ export interface PlayerSource {
  * 引擎 attach 结果：包含资源清理函数与可选的 blob URL。
  */
 export interface EngineAttachResult {
-  /** 清理函数：卸载引擎资源（hls.js / flv.js 实例、MSE controller 等） */
+  /** 清理函数：卸载引擎资源（hls.js / flv.js 实例、MSE controller、dash.js 实例等） */
   cleanup: () => void
-  /** MSE 引擎创建的 blob URL（需由调用方在切换时 revokeObjectURL） */
+  /** 引擎创建的 blob URL（需由调用方在切换时 revokeObjectURL） */
   blobUrl?: string
-  /** MSE 引擎实例（仅 MSE 引擎返回，供外部调用 seekTo） */
-  msePlayer?: import('./engines/mse').MsePlayer
+  /**
+   * 引擎控制器实例（仅 MSE / DASH 引擎返回，供外部调用 seekTo）。
+   * 替代旧字段 msePlayer，使用 PlayerController 接口抽象，
+   * 使 usePlayerSource 可同时持有 MsePlayer 或 DashPlayer 实例。
+   */
+  player?: PlayerController
 }
 
 /**

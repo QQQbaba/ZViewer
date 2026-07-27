@@ -101,17 +101,13 @@ export interface MsePlayerOptions {
   duration?: number
 }
 
-/** seek 返回结果。 */
-export interface SeekResult {
-  success: boolean
-  message?: string
-  needReload?: boolean
-  /**
-   * true 表示已有另一个 seek 正在同一实例上进行（状态冲突，未执行）。
-   * 调用方可把目标记录为待处理，由进行中的 seek 流程完成后接续。
-   */
-  busy?: boolean
-}
+/**
+ * seek 返回结果。
+ *
+ * 类型定义已上移到 player/types.ts 作为公共 PlayerController 接口的一部分，
+ * 此处 re-export 保持现有 import 路径（'./types'）向后兼容。
+ */
+export type { SeekResult } from '../../types'
 
 /** 下载器选项。 */
 export interface DownloadOptions {

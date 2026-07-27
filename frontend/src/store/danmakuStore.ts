@@ -59,9 +59,41 @@ export const DEFAULT_DANMAKU_STYLE: DanmakuStyleState = {
   },
 }
 
+/** 实时弹幕记录（房间内用户互发），用于弹幕列表面板展示 */
+export interface RealtimeDanmakuEntry {
+  id: string
+  content: string
+  sender?: string
+  /** 发送时的播放进度（秒） */
+  time: number
+  /** 是否本人发送 */
+  self?: boolean
+}
+
+/** 实时弹幕记录上限（超出后丢弃最旧的） */
+const REALTIME_LOG_LIMIT = 500
+/** 已删除弹幕记录上限 */
+const DELETED_LOG_LIMIT = 200
+
+/** 已删除弹幕记录（用于管理面板展示与恢复） */
+export interface DeletedDanmakuEntry {
+  trackId: string
+  trackLabel: string
+  item: DanmakuItem
+}
+
 interface DanmakuState {
   tracks: DanmakuTrack[]
   style: DanmakuStyleState
+  /** 实时弹幕记录（会话级，不持久化） */
+  realtimeLog: RealtimeDanmakuEntry[]
+  /** 弹幕屏蔽关键词（会话级，不持久化） */
+  blockKeywords: string[]
+  /** 已删除弹幕记录（会话级，不持久化） */
+  deletedLog: DeletedDanmakuEntry[]
+  /** 弹幕层刷新信号（侧栏屏蔽/删除后通知播放器弹幕层清屏重载） */
+  refreshSignal: number
+  triggerDanmakuRefresh: () => void
   addTrack: (
     trackId: string,
     label: string,
@@ -77,6 +109,17 @@ interface DanmakuState {
   setFilters: (updates: Partial<DanmakuTypeFilters>) => void
   setAdvancedStyle: (updates: Partial<DanmakuAdvancedStyle>) => void
   resetStyle: () => void
+  addRealtime: (entry: RealtimeDanmakuEntry) => void
+  clearRealtime: () => void
+  removeRealtime: (id: string) => void
+  addBlockKeyword: (keyword: string) => void
+  removeBlockKeyword: (keyword: string) => void
+  /** 从时间轴轨道中删除指定弹幕项（本地生效，用于弹幕列表管理） */
+  removeTrackItem: (trackId: string, itemId: string) => void
+  restoreTrackItem: (trackId: string, item: DanmakuItem) => void
+  addDeletedLog: (entry: DeletedDanmakuEntry) => void
+  removeDeletedLog: (trackId: string, itemId: string) => void
+  clearDeletedLog: () => void
 }
 
 export const useDanmakuStore = create<DanmakuState>()(
@@ -84,6 +127,13 @@ export const useDanmakuStore = create<DanmakuState>()(
     (set, get) => ({
       tracks: [],
       style: DEFAULT_DANMAKU_STYLE,
+      realtimeLog: [],
+      blockKeywords: [],
+      deletedLog: [],
+      refreshSignal: 0,
+      triggerDanmakuRefresh: () => {
+        set((state) => ({ refreshSignal: state.refreshSignal + 1 }))
+      },
 
       addTrack: (trackId, label, source, items, offset = 0) => {
         set((state) => {
@@ -127,7 +177,7 @@ export const useDanmakuStore = create<DanmakuState>()(
       },
 
       setDefaultTrack: (items) => {
-        get().addTrack('default', '当前视频', 'bilibili', items, 0)
+        get().addTrack('default', '当前视频', 'bilibili-video', items, 0)
       },
 
       setStyle: (updates) => {
@@ -154,6 +204,90 @@ export const useDanmakuStore = create<DanmakuState>()(
 
       resetStyle: () => {
         set({ style: DEFAULT_DANMAKU_STYLE })
+      },
+
+      addRealtime: (entry) => {
+        set((state) => {
+          const next = [...state.realtimeLog, entry]
+          if (next.length > REALTIME_LOG_LIMIT) {
+            next.splice(0, next.length - REALTIME_LOG_LIMIT)
+          }
+          return { realtimeLog: next }
+        })
+      },
+
+      clearRealtime: () => {
+        set({ realtimeLog: [] })
+      },
+
+      removeRealtime: (id) => {
+        set((state) => ({
+          realtimeLog: state.realtimeLog.filter((entry) => entry.id !== id),
+        }))
+      },
+
+      addBlockKeyword: (keyword) => {
+        const trimmed = keyword.trim()
+        if (!trimmed) return
+        set((state) =>
+          state.blockKeywords.includes(trimmed)
+            ? state
+            : { blockKeywords: [...state.blockKeywords, trimmed] }
+        )
+      },
+
+      removeBlockKeyword: (keyword) => {
+        set((state) => ({
+          blockKeywords: state.blockKeywords.filter((k) => k !== keyword),
+        }))
+      },
+
+      removeTrackItem: (trackId, itemId) => {
+        set((state) => ({
+          tracks: state.tracks.map((t) =>
+            t.trackId === trackId
+              ? { ...t, items: t.items.filter((item) => item.id !== itemId) }
+              : t
+          ),
+        }))
+      },
+
+      restoreTrackItem: (trackId, item) => {
+        set((state) => ({
+          tracks: state.tracks.map((t) => {
+            if (t.trackId !== trackId) return t
+            if (t.items.some((i) => i.id === item.id)) return t
+            const next = [...t.items, item]
+            next.sort((a, b) => a.time - b.time)
+            return { ...t, items: next }
+          }),
+        }))
+      },
+
+      addDeletedLog: (entry) => {
+        set((state) => {
+          const exists = state.deletedLog.some(
+            (d) => d.trackId === entry.trackId && d.item.id === entry.item.id
+          )
+          if (exists) return state
+          const next = [...state.deletedLog, entry]
+          if (next.length > DELETED_LOG_LIMIT) {
+            next.splice(0, next.length - DELETED_LOG_LIMIT)
+          }
+          return { deletedLog: next }
+        })
+      },
+
+      removeDeletedLog: (trackId, itemId) => {
+        set((state) => ({
+          deletedLog: state.deletedLog.filter(
+            (d) => !(d.trackId === trackId && d.item.id === itemId)
+          ),
+        }))
+      },
+
+      clearDeletedLog: () => {
+        set({ deletedLog: [] })
       },
     }),
     {

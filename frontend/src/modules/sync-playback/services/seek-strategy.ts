@@ -15,10 +15,12 @@ import { SEEK_FOLLOW_THRESHOLD } from '../constants'
  * 按播放倍速自适应的 seek 跟随阈值。
  *
  * 旧实现使用固定 0.5s 阈值，在 2x/4x 倍速下会高频 seek 导致抖动。
- * 新实现：`max(SEEK_FOLLOW_THRESHOLD, playbackRate * 0.5)`
- *   - 1x 倍速：0.5s
- *   - 2x 倍速：1.0s
- *   - 4x 倍速：2.0s
+ * v2 实现：`max(SEEK_FOLLOW_THRESHOLD, playbackRate * 0.5)`
+ * v3 调优：SEEK_FOLLOW_THRESHOLD 提升至 3s，避免小幅漂移触发 seek 卡顿。
+ *   - 1x 倍速：3s（基准阈值）
+ *   - 2x 倍速：3s（2*0.5=1 < 3，取基准）
+ *   - 4x 倍速：3s（4*0.5=2 < 3，取基准）
+ *   - 6x+ 倍速：playbackRate * 0.5（超过基准时按倍速放大）
  */
 export function getAdaptiveSeekThreshold(playbackRate: number): number {
   return Math.max(SEEK_FOLLOW_THRESHOLD, playbackRate * 0.5)

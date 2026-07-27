@@ -1,17 +1,19 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+/**
+ * FlvPlayer —— HTTP-FLV 拉流播放器（ArtPlayer 版）。
+ *
+ * 基于 ArtPlayer（isLive 模式）+ flv.js：
+ * - 控制栏（播放/音量/全屏）由 ArtPlayer 提供，附自定义「刷新」控件
+ * - 保留重构前全部行为：指数退避重连（最多 5 次）、卡顿自动追帧、
+ *   统计信息每秒上报、自动播放静音重试
+ * - props 契约与重构前完全一致（WatchPage / StreamPushPage 无需改动）
+ */
+import { useEffect, useRef, useState } from 'react'
 import flvjs from 'flv.js'
-import {
-  Maximize,
-  Minimize,
-  Volume2,
-  VolumeX,
-  Play,
-  Pause,
-  RefreshCw,
-} from 'lucide-react'
+import Artplayer from 'artplayer'
 import { Spinner } from '@/components/ui/Spinner'
-import { IconButton } from '@/components/VideoControls'
+import { configureArtStatics } from '@/modules/art-player'
 import { cn } from '@/lib/utils'
+import '@/modules/art-player/art-overrides.css'
 
 /** flv.js 统计信息
  *
@@ -55,11 +57,9 @@ interface FlvPlayerProps {
 const MAX_RETRY = 5
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000]
 
-/**
- * 基于 flv.js 的 HTTP-FLV 拉流播放器。
- * - 拉流失败时自动重连（指数退避，最多 5 次）
- * - src 变化或组件卸载时销毁实例释放资源
- */
+/** 刷新图标（ArtPlayer 控件用内联 SVG） */
+const REFRESH_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>`
+
 export function FlvPlayer({
   src,
   autoPlay = true,
@@ -69,34 +69,28 @@ export function FlvPlayer({
   onStatusChange,
   onStatistics,
 }: FlvPlayerProps): JSX.Element {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const playerRef = useRef<flvjs.Player | null>(null)
-  const retryCountRef = useRef(0)
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [isMuted, setIsMuted] = useState(muted)
   const [reloadVersion, setReloadVersion] = useState(0)
-  const containerRef = useRef<HTMLDivElement | null>(null)
 
   // 用 ref 存储回调，避免内联函数引用变化导致 useEffect 重新执行（播放器闪烁）
   const onErrorRef = useRef(onError)
   const onStatusChangeRef = useRef(onStatusChange)
   const onStatisticsRef = useRef(onStatistics)
+  const mutedRef = useRef(muted)
 
   useEffect(() => {
     onErrorRef.current = onError
     onStatusChangeRef.current = onStatusChange
     onStatisticsRef.current = onStatistics
-  }, [onError, onStatusChange, onStatistics])
+    mutedRef.current = muted
+  }, [onError, onStatusChange, onStatistics, muted])
 
-  // 帧率计算：flv.js STATISTICS_INFO 不直接提供 fps，通过 decodedFrames 差值计算
-  const lastStatsTimeRef = useRef(0)
-  const lastDecodedFramesRef = useRef(0)
-
-  // 创建并启动 flv player
+  // 创建 ArtPlayer + flv.js（src 变化 / 手动刷新时重建）
   useEffect(() => {
-    if (!videoRef.current || !src) return
+    const container = containerRef.current
+    if (!container || !src) return
     if (!flvjs.isSupported()) {
       const err = new Error('当前浏览器不支持 MSE / flv.js')
       // eslint-disable-next-line react-hooks/set-state-in-effect -- 错误处理
@@ -106,13 +100,67 @@ export function FlvPlayer({
       return
     }
 
+    configureArtStatics()
+
+    let retryCount = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    // 帧率计算：flv.js STATISTICS_INFO 不直接提供 fps，通过 decodedFrames 差值计算
+    let lastStatsTime = 0
+    let lastDecodedFrames = 0
+
     setLoading(true)
     setErrorMsg(null)
     onStatusChangeRef.current?.('connecting')
-    // 重置帧率计算基准
-    lastStatsTimeRef.current = 0
-    lastDecodedFramesRef.current = 0
 
+    // ── ArtPlayer 实例（isLive 隐藏进度条与时间显示）────────────
+    const art = new Artplayer({
+      container,
+      url: '',
+      lang: 'zh-cn',
+      isLive: true,
+      muted: mutedRef.current,
+      autoplay: false,
+      hotkey: false,
+      pip: false,
+      screenshot: false,
+      setting: false,
+      loop: false,
+      flip: false,
+      playbackRate: false,
+      aspectRatio: false,
+      fullscreen: true,
+      fullscreenWeb: false,
+      subtitleOffset: false,
+      miniProgressBar: false,
+      airplay: false,
+      mutex: true,
+      backdrop: true,
+      playsInline: true,
+      moreVideoAttr: {
+        playsInline: true,
+      },
+    })
+    // 空 url 初始化会让 ArtPlayer 一直显示 loading，延迟隐藏
+    const hideLoadingTimer = setTimeout(() => {
+      art.loading.show = false
+    }, 100)
+
+    const video = art.video
+    video.muted = mutedRef.current
+
+    // 「刷新」控件：重建播放器
+    art.controls.add({
+      name: 'refresh',
+      position: 'right',
+      index: 60,
+      html: REFRESH_ICON,
+      tooltip: '刷新',
+      click() {
+        setReloadVersion((v) => v + 1)
+      },
+    })
+
+    // ── flv.js 实例 ──────────────────────────────────────
     const player = flvjs.createPlayer(
       {
         type: 'flv',
@@ -134,18 +182,16 @@ export function FlvPlayer({
         liveBufferLatencyTargetLatency: 0.5,
       } as Record<string, unknown>
     )
-    player.attachMediaElement(videoRef.current)
+    player.attachMediaElement(video)
     player.on(flvjs.Events.ERROR, (errorType: string, errorDetail: string) => {
       console.error('[FlvPlayer] error:', errorType, errorDetail)
-      if (retryCountRef.current < MAX_RETRY) {
-        const delay = RETRY_DELAYS_MS[retryCountRef.current]
-        retryCountRef.current += 1
-        console.log(
-          `[FlvPlayer] retry ${retryCountRef.current}/${MAX_RETRY} in ${delay}ms`
-        )
+      if (retryCount < MAX_RETRY) {
+        const delay = RETRY_DELAYS_MS[retryCount]
+        retryCount += 1
+        console.log(`[FlvPlayer] retry ${retryCount}/${MAX_RETRY} in ${delay}ms`)
         onStatusChangeRef.current?.('connecting')
-        if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
-        retryTimerRef.current = setTimeout(() => {
+        if (retryTimer) clearTimeout(retryTimer)
+        retryTimer = setTimeout(() => {
           player.unload()
           player.load()
           try {
@@ -165,30 +211,28 @@ export function FlvPlayer({
       }
     })
     player.on(flvjs.Events.MEDIA_INFO, () => {
-      retryCountRef.current = 0
+      retryCount = 0
       setLoading(false)
       setErrorMsg(null)
     })
 
     // 统计信息上报（flv.js 内部约每秒触发一次）
-    // flv.js STATISTICS_INFO 实际字段：speed(KB/s), decodedFrames, droppedFrames
     player.on(flvjs.Events.STATISTICS_INFO, (info: Record<string, unknown>) => {
       const now = performance.now()
       const decodedFrames = (info.decodedFrames as number) ?? 0
       const droppedFrames = (info.droppedFrames as number) ?? 0
       const speed = (info.speed as number) ?? 0
 
-      // 通过两次统计的帧数差和时间差计算实际帧率
       let fps = 0
-      if (lastStatsTimeRef.current > 0) {
-        const dt = (now - lastStatsTimeRef.current) / 1000
-        const frameDelta = decodedFrames - lastDecodedFramesRef.current
+      if (lastStatsTime > 0) {
+        const dt = (now - lastStatsTime) / 1000
+        const frameDelta = decodedFrames - lastDecodedFrames
         if (dt > 0 && frameDelta >= 0) {
           fps = Math.round(frameDelta / dt)
         }
       }
-      lastStatsTimeRef.current = now
-      lastDecodedFramesRef.current = decodedFrames
+      lastStatsTime = now
+      lastDecodedFrames = decodedFrames
 
       onStatisticsRef.current?.({
         speed: Math.round(speed),
@@ -200,9 +244,8 @@ export function FlvPlayer({
     })
 
     // 兜底：当 video 元素实际拿到画面时关闭 loading（部分流 MEDIA_INFO 触发较晚或不触发）
-    const video = videoRef.current
     const handleLoadedMetadata = () => {
-      retryCountRef.current = 0
+      retryCount = 0
       setLoading(false)
       setErrorMsg(null)
     }
@@ -211,17 +254,12 @@ export function FlvPlayer({
     // 卡死自动恢复：当视频暂停但 buffered 有数据时，向前跳过一小段恢复播放
     const handleWaiting = () => {
       if (video.readyState < 3) {
-        // readyState < 3 (HAVE_FUTURE_DATA) 说明缓冲不足，尝试追帧
         const buffered = video.buffered
         if (buffered.length > 0) {
           const bufferedEnd = buffered.end(buffered.length - 1)
-          // 如果缓冲区末尾比当前时间超前较多，跳到接近缓冲区末尾
           if (bufferedEnd - video.currentTime > 0.5) {
             video.currentTime = bufferedEnd - 0.3
-            console.log(
-              '[FlvPlayer] recovered from stall, seek to',
-              video.currentTime
-            )
+            console.log('[FlvPlayer] recovered from stall, seek to', video.currentTime)
           }
         }
       }
@@ -258,7 +296,6 @@ export function FlvPlayer({
           if (ret && typeof ret.catch === 'function') {
             await ret.catch(async (err: Error) => {
               console.warn('[FlvPlayer] autoplay failed:', err)
-              // 自动播放被浏览器策略阻止时，尝试静音播放
               if (!video.muted) {
                 video.muted = true
                 try {
@@ -277,18 +314,17 @@ export function FlvPlayer({
       void tryPlay()
     }
 
-    playerRef.current = player
     onStatusChangeRef.current?.('playing')
 
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
       video.removeEventListener('waiting', handleWaiting)
       clearInterval(stallCheckTimer)
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current)
-        retryTimerRef.current = null
+      clearTimeout(hideLoadingTimer)
+      if (retryTimer) {
+        clearTimeout(retryTimer)
+        retryTimer = null
       }
-      retryCountRef.current = 0
       try {
         player.unload()
         player.detachMediaElement()
@@ -296,155 +332,17 @@ export function FlvPlayer({
       } catch (err) {
         console.error('[FlvPlayer] destroy error:', err)
       }
-      playerRef.current = null
+      try {
+        art.destroy(false)
+      } catch (err) {
+        console.warn('[FlvPlayer] art destroy error:', err)
+      }
     }
   }, [src, autoPlay, reloadVersion])
 
-  // 同步 muted 状态
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.muted = muted
-      setIsMuted(muted)
-    }
-  }, [muted])
-
-  // 全屏切换
-  const handleFullscreen = useCallback(() => {
-    const el = containerRef.current
-    if (!el) return
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {})
-    } else {
-      el.requestFullscreen().catch(() => {})
-    }
-  }, [])
-
-  // 静音切换
-  const handleToggleMute = useCallback(() => {
-    if (videoRef.current) {
-      videoRef.current.muted = !videoRef.current.muted
-      setIsMuted(videoRef.current.muted)
-    }
-  }, [])
-
-  // 播放/暂停
-  const [isPlaying, setIsPlaying] = useState(false)
-
-  // 手动刷新：重新加载播放器
-  const handleRefresh = useCallback(() => {
-    setReloadVersion((v) => v + 1)
-  }, [])
-
-  const handleTogglePlay = useCallback(() => {
-    const video = videoRef.current
-    if (!video) return
-    if (video.paused) {
-      video.play().catch(() => {})
-    } else {
-      video.pause()
-    }
-  }, [])
-
-  // 全屏状态
-  const [isFullscreen, setIsFullscreen] = useState(false)
-
-  // 控制栏自动隐藏
-  const [controlsVisible, setControlsVisible] = useState(false)
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const showControls = useCallback(() => {
-    setControlsVisible(true)
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
-    hideTimerRef.current = setTimeout(() => {
-      // 播放中且非暂停时才自动隐藏
-      if (videoRef.current && !videoRef.current.paused) {
-        setControlsVisible(false)
-      }
-    }, 2500)
-  }, [])
-
-  const handleMouseLeave = useCallback(() => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
-    if (videoRef.current && !videoRef.current.paused) {
-      setControlsVisible(false)
-    }
-  }, [])
-
-  // 同步全屏状态
-  useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement)
-    document.addEventListener('fullscreenchange', handler)
-    return () => document.removeEventListener('fullscreenchange', handler)
-  }, [])
-
-  // 同步播放状态
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
-    const onPlay = () => setIsPlaying(true)
-    const onPause = () => setIsPlaying(false)
-    video.addEventListener('play', onPlay)
-    video.addEventListener('pause', onPause)
-    return () => {
-      video.removeEventListener('play', onPlay)
-      video.removeEventListener('pause', onPause)
-    }
-  }, [])
-
-  // 清理隐藏定时器
-  useEffect(() => {
-    return () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
-    }
-  }, [])
-
   return (
-    <div
-      ref={containerRef}
-      className={`group relative h-full w-full ${className ?? ''}`}
-      onMouseMove={showControls}
-      onMouseLeave={handleMouseLeave}
-    >
-      <video
-        ref={videoRef}
-        autoPlay={autoPlay}
-        playsInline
-        muted={isMuted}
-        className="h-full w-full object-contain"
-      />
-
-      {/* 控制栏 */}
-      {!loading && !errorMsg && (
-        <div
-          className={cn(
-            'vc-container absolute inset-x-0 bottom-0 z-20 p-2 transition-opacity duration-200',
-            controlsVisible ? 'opacity-100' : 'opacity-0'
-          )}
-        >
-          <div className="glass-strong flex items-center justify-center rounded-xl px-2 py-1.5 shadow-lg vc-gap">
-            <IconButton
-              icon={isPlaying ? <Pause /> : <Play />}
-              label={isPlaying ? '暂停' : '播放'}
-              onClick={handleTogglePlay}
-            />
-            <IconButton
-              icon={isMuted ? <VolumeX /> : <Volume2 />}
-              label={isMuted ? '取消静音' : '静音'}
-              onClick={handleToggleMute}
-            />
-            <IconButton
-              icon={isFullscreen ? <Minimize /> : <Maximize />}
-              label={isFullscreen ? '退出全屏' : '全屏'}
-              onClick={handleFullscreen}
-            />
-            <IconButton
-              icon={<RefreshCw />}
-              label="刷新"
-              onClick={handleRefresh}
-            />
-          </div>
-        </div>
-      )}
+    <div className={cn('zart-stage group', className)}>
+      <div ref={containerRef} className="h-full w-full" />
 
       {loading && !errorMsg && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80">
@@ -452,13 +350,20 @@ export function FlvPlayer({
         </div>
       )}
       {errorMsg && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/90 p-6 text-center">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/90 p-6 text-center">
           <div className="text-base font-medium text-[var(--md-sys-color-error)]">
             {errorMsg}
           </div>
           <div className="text-sm text-[var(--md-sys-color-on-surface-variant)]">
             请检查网络连接或房主推流状态
           </div>
+          <button
+            type="button"
+            className="mt-1 rounded-lg border border-white/20 px-4 py-1.5 text-sm text-white transition-colors hover:bg-white/10"
+            onClick={() => setReloadVersion((v) => v + 1)}
+          >
+            重新连接
+          </button>
         </div>
       )}
     </div>

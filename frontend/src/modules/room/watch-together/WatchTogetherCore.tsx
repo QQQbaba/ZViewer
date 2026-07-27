@@ -1,0 +1,1065 @@
+/**
+ * WatchTogetherCore —— 一起看播放器业务核心（ArtPlayer 版）。
+ *
+ * 由 WatchTogetherPanel（Shell）在 ArtPlayer 实例就绪后渲染。
+ * 承担重构前 WatchTogetherPanel 的全部业务逻辑：
+ * - useWatchTogether 同步编排（房主广播 / 观众跟随 / 心跳 / 状态恢复）
+ * - 观众申请审批（加入 / 跳转 / 暂停 / 继续播放）
+ * - B站 官方弹幕加载、多轨道弹幕同步、实时弹幕收发
+ * - 字幕轨道管理（命令式 <track> 挂载 + textTracks mode 控制）
+ * - B站 清晰度切换（ArtPlayer 原生 selector 控件）
+ *
+ * UI 通过 createPortal 挂载到 Shell 提供的 ArtPlayer 插槽（弹幕图层 / 覆盖层 / 设置面板），
+ * 底部控制栏由 PlayerControlBar 直接渲染为覆盖层。
+ */
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import type Artplayer from 'artplayer'
+import { PlayerControlBar } from './PlayerControlBar'
+import { Text } from '@/components/ui/Typography'
+import { message } from '@/components/ui/message'
+import { Spinner } from '@/components/ui/Spinner'
+import { useSocket } from '@/hooks/useSocket'
+import { useSubtitles } from '@/hooks/useSubtitles'
+import { useRoomStore } from '@/store/roomStore'
+import { useDanmakuStore } from '@/store/danmakuStore'
+import {
+  DanmakuLayer,
+  type DanmakuLayerHandle,
+} from '@/components/DanmakuLayer'
+import { VideoStatsMenu } from '@/components/VideoStatsMenu'
+import { useWatchTogether } from './useWatchTogether'
+import { fetchBilibiliDanmakuByCid } from '@/modules/danmaku/api'
+import type { DanmakuItem } from '@/modules/danmaku/types'
+import {
+  RequestNotification,
+  type RequestNotificationItem,
+} from '@/components/ui/RequestNotification'
+import type { MediaFormat } from '@/lib/mediaFormat'
+import { useVideoPlayingState } from '@/modules/art-player/useVideoPlayingState'
+import { SettingsPanel } from '@/components/VideoPlayer/SettingsPanel'
+import type { ArtSlots } from './WatchTogetherPanel'
+
+// 格式化跳转时间用于提示信息（mm:ss 或 h:mm:ss）
+function formatSeekTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '00:00'
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  const mm = m.toString().padStart(2, '0')
+  const ss = s.toString().padStart(2, '0')
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
+}
+
+interface WatchTogetherCoreProps {
+  roomId: string
+  isHost: boolean
+  art: Artplayer
+  video: HTMLVideoElement
+  videoRef: React.RefObject<HTMLVideoElement | null>
+  slots: ArtSlots
+  initialPlayback?: {
+    currentTime: number
+    isPlaying: boolean
+    playbackRate: number
+    duration?: number
+    sourceUrl?: string
+    sourceType?: string
+    audioUrl?: string
+    format?: MediaFormat
+    videoCodec?: string
+    audioCodec?: string
+    cid?: number
+    currentQn?: number
+    acceptQuality?: { id: number; label: string; resolution?: string }[]
+    currentMovieId?: number
+    headers?: Record<string, string>
+    updatedAt: number
+  } | null
+}
+
+export function WatchTogetherCore({
+  roomId,
+  isHost,
+  art,
+  video,
+  videoRef,
+  slots,
+  initialPlayback,
+}: WatchTogetherCoreProps) {
+  const { socket } = useSocket()
+  const setMode = useRoomStore((state) => state.setMode)
+  const isReloading = useRoomStore((state) => state.isReloading)
+  const {
+    watchTogether,
+    setWatchTogether,
+    forceSync,
+    isResolving,
+    currentQuality,
+    availableQualities,
+    reloadVideo,
+    reloadBilibili,
+  } = useWatchTogether({
+    roomId,
+    isHost,
+    videoRef,
+    initialPlayback,
+  })
+
+  // 字幕状态：房主操作广播同步，观众监听应用
+  const subtitles = useSubtitles({ roomId, isHost })
+
+  // ── 观众申请状态（与重构前一致）─────────────────────────
+  const [confirmJoin, setConfirmJoin] = useState<{
+    viewerSocketId: string
+  } | null>(null)
+  const [seekRequest, setSeekRequest] = useState<{
+    viewerSocketId: string
+    viewerUsername?: string
+    time: number
+  } | null>(null)
+  const [pauseRequest, setPauseRequest] = useState<{
+    viewerSocketId: string
+    viewerUsername?: string
+  } | null>(null)
+  const [playRequest, setPlayRequest] = useState<{
+    viewerSocketId: string
+    viewerUsername?: string
+  } | null>(null)
+  const [seekPending, setSeekPending] = useState(false)
+  const [pausePending, setPausePending] = useState(false)
+  const [playPending, setPlayPending] = useState(false)
+
+  const autoApproveRequests = useRoomStore((state) => state.autoApproveRequests)
+  const autoApproveRef = useRef(autoApproveRequests)
+  useEffect(() => {
+    autoApproveRef.current = autoApproveRequests
+  }, [autoApproveRequests])
+
+  // ── 弹幕状态 ─────────────────────────────────────────
+  const danmakuLayerRef = useRef<DanmakuLayerHandle | null>(null)
+  const danmakuItemsRef = useRef<DanmakuItem[]>([])
+  const loadedTracksRef = useRef<Set<string>>(new Set())
+  const [danmakuEnabled, setDanmakuEnabled] = useState(true)
+
+  const tracks = useDanmakuStore((state) => state.tracks)
+  const style = useDanmakuStore((state) => state.style)
+  const blockKeywords = useDanmakuStore((state) => state.blockKeywords)
+  const setDefaultTrack = useDanmakuStore((state) => state.setDefaultTrack)
+  const setStyle = useDanmakuStore((state) => state.setStyle)
+  const setFilters = useDanmakuStore((state) => state.setFilters)
+  const setAdvancedStyle = useDanmakuStore((state) => state.setAdvancedStyle)
+  const resetStyle = useDanmakuStore((state) => state.resetStyle)
+  const addRealtime = useDanmakuStore((state) => state.addRealtime)
+
+  // ── 面板开关 ─────────────────────────────────────────
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  // ── 原生全屏状态跟踪 ────────────────────────────────
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement))
+    }
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange)
+    }
+  }, [])
+
+  const handleToggleFullscreen = useCallback(() => {
+    // 直接对 video 元素调用 requestFullscreen，而非 art.template.$container。
+    // 原因：$container 的祖先链上有 Card（glass-card backdrop-filter + zen-card
+    // will-change: transform）造成持续合成层隔离。DASH 模式下 MSE video 在全屏
+    // 切换时合成层重建会丢失 GPU 解码缓冲区关联，导致全屏黑屏。
+    // 对 video 元素本身全屏（与 DirectWatchPage/WatchPage 保持一致）可让 video
+    // 成为 top layer 元素，避免合成层剥离。
+    if (!video) return
+    if (document.fullscreenElement) {
+      void document.exitFullscreen()
+    } else {
+      void video.requestFullscreen()
+    }
+  }, [video])
+
+  // 加载 B站 官方弹幕：缓存后通过 DanmakuLayer 时间轴弹幕接口加载
+  useEffect(() => {
+    const cid = watchTogether.cid
+    if (!cid || watchTogether.sourceType !== 'bilibili') {
+      danmakuItemsRef.current = []
+      setDefaultTrack([])
+      danmakuLayerRef.current?.loadDanmakuTrack('default', [])
+      danmakuLayerRef.current?.clear()
+      return
+    }
+    fetchBilibiliDanmakuByCid(cid)
+      .then((items) => {
+        danmakuItemsRef.current = items
+        setDefaultTrack(items)
+        danmakuLayerRef.current?.loadDanmakuTrack('default', items, 0)
+        danmakuLayerRef.current?.seek(videoRef.current?.currentTime ?? 0)
+      })
+      .catch((err) => {
+        console.error('[WatchTogether] load danmaku error:', err)
+      })
+  }, [watchTogether.cid, watchTogether.sourceType, setDefaultTrack, videoRef])
+
+  // 弹幕开关重新开启时，重新加载当前时间轴弹幕并 seek 到当前时间
+  useEffect(() => {
+    if (!danmakuEnabled) return
+    const items = danmakuItemsRef.current
+    if (items.length > 0) {
+      danmakuLayerRef.current?.loadDanmakuTrack('default', items, 0)
+      danmakuLayerRef.current?.seek(videoRef.current?.currentTime ?? 0)
+    }
+  }, [danmakuEnabled, videoRef])
+
+  // 同步 store 中的轨道变化到弹幕引擎
+  useEffect(() => {
+    const layer = danmakuLayerRef.current
+    if (!layer) return
+    const current = new Set<string>()
+    tracks.forEach((track) => {
+      if (track.hidden) {
+        return
+      }
+      layer.loadDanmakuTrack(track.trackId, track.items, track.offset)
+      current.add(track.trackId)
+    })
+    loadedTracksRef.current.forEach((id) => {
+      if (!current.has(id)) {
+        layer.removeDanmakuTrack(id)
+      }
+    })
+    loadedTracksRef.current = current
+  }, [tracks])
+
+  // 侧栏屏蔽 / 删除弹幕后刷新弹幕层：清屏并按当前时间重载
+  const refreshSignal = useDanmakuStore((state) => state.refreshSignal)
+  useEffect(() => {
+    const layer = danmakuLayerRef.current
+    if (!layer) return
+    const current = videoRef.current?.currentTime ?? 0
+    layer.clear()
+    layer.seek(current)
+  }, [refreshSignal, videoRef])
+
+  // 实时弹幕接收（'danmaku' 事件）：上屏 + 记录到实时弹幕列表
+  useEffect(() => {
+    if (!socket) return
+    const handleDanmaku = (payload: {
+      id?: string
+      text: string
+      sender?: string
+    }) => {
+      if (!payload?.text) return
+      danmakuLayerRef.current?.sendDanmaku(payload.text, {
+        sender: payload.sender,
+      })
+      addRealtime({
+        id:
+          payload.id ??
+          `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        content: payload.text,
+        sender: payload.sender,
+        time: videoRef.current?.currentTime ?? 0,
+      })
+    }
+    socket.on('danmaku', handleDanmaku)
+    return () => {
+      socket.off('danmaku', handleDanmaku)
+    }
+  }, [socket, addRealtime, videoRef])
+
+  // 视频加载后，仅在 store 中尚未获得权威 duration 时，用 video.duration 兜底填充。
+  useEffect(() => {
+    const storeDuration = useRoomStore.getState().watchTogether.duration
+    if (Number.isFinite(storeDuration) && storeDuration > 0) return
+
+    const handleLoadedMetadata = () => {
+      if (video.duration && isFinite(video.duration) && video.duration > 0) {
+        setWatchTogether({ duration: video.duration })
+      }
+    }
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata)
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+    }
+  }, [video, setWatchTogether])
+
+  // ── 字幕轨道命令式挂载 ────────────────────────────────
+  // ArtPlayer 自行创建 video 元素，无法以 JSX children 声明 <track>，
+  // 改为命令式追加（data-zc-subtitle 标记与 ArtPlayer 自带 $track 区分）。
+  useEffect(() => {
+    video
+      .querySelectorAll('track[data-zc-subtitle]')
+      .forEach((el) => el.remove())
+    subtitles.subtitleTracks.forEach((t) => {
+      const el = document.createElement('track')
+      el.kind = 'subtitles'
+      el.src = t.url
+      el.label = t.label
+      el.srclang = t.lang || 'zh'
+      el.setAttribute('data-zc-subtitle', '1')
+      video.appendChild(el)
+    })
+  }, [subtitles.subtitleTracks, video])
+
+  // 应用字幕状态到 textTracks（track 元素顺序与 textTracks 一一对应）
+  const applySubtitleModes = useCallback(() => {
+    const els = Array.from(video.querySelectorAll('track'))
+    let zcIndex = -1
+    els.forEach((el, i) => {
+      if (!el.hasAttribute('data-zc-subtitle')) return
+      zcIndex += 1
+      const textTrack = video.textTracks[i]
+      if (!textTrack) return
+      textTrack.mode =
+        subtitles.subtitleEnabled && zcIndex === subtitles.activeTrackIndex
+          ? 'showing'
+          : 'disabled'
+    })
+  }, [video, subtitles.subtitleEnabled, subtitles.activeTrackIndex])
+
+  useEffect(() => {
+    applySubtitleModes()
+  }, [applySubtitleModes, subtitles.subtitleTracks])
+
+  // 引擎重载（video.load()）后 textTracks mode 会被重置，loadstart 时重新应用
+  useEffect(() => {
+    const handleLoadStart = () => {
+      setTimeout(applySubtitleModes, 0)
+    }
+    video.addEventListener('loadstart', handleLoadStart)
+    return () => {
+      video.removeEventListener('loadstart', handleLoadStart)
+    }
+  }, [video, applySubtitleModes])
+
+  // ── 观众申请处理（socket 逻辑与重构前一致）─────────────────
+  useEffect(() => {
+    if (!socket || !isHost) return
+
+    const handleJoinRequest = (data: { viewerSocketId: string }) => {
+      setConfirmJoin({ viewerSocketId: data.viewerSocketId })
+    }
+
+    socket.on('join-request', handleJoinRequest)
+    return () => {
+      socket.off('join-request', handleJoinRequest)
+    }
+  }, [socket, isHost])
+
+  useEffect(() => {
+    if (!socket || !isHost) return
+
+    const handleSeekRequest = (data: {
+      viewerSocketId: string
+      viewerUsername?: string
+      time: number
+    }) => {
+      if (!data?.viewerSocketId) return
+      if (autoApproveRef.current) {
+        if (Number.isFinite(data.time) && videoRef.current) {
+          videoRef.current.currentTime = data.time
+        }
+        socket.emit(
+          'seek-response',
+          {
+            roomId,
+            viewerSocketId: data.viewerSocketId,
+            accept: true,
+            time: data.time,
+          },
+          () => {
+            /* ack */
+          }
+        )
+        return
+      }
+      setSeekRequest({
+        viewerSocketId: data.viewerSocketId,
+        viewerUsername: data.viewerUsername,
+        time: data.time,
+      })
+    }
+
+    socket.on('seek-request', handleSeekRequest)
+    return () => {
+      socket.off('seek-request', handleSeekRequest)
+    }
+  }, [socket, isHost, roomId, videoRef])
+
+  useEffect(() => {
+    if (!socket || !isHost) return
+
+    const handlePauseRequest = (data: {
+      viewerSocketId: string
+      viewerUsername?: string
+    }) => {
+      if (!data?.viewerSocketId) return
+      if (autoApproveRef.current) {
+        videoRef.current?.pause()
+        socket.emit(
+          'pause-response',
+          { roomId, viewerSocketId: data.viewerSocketId, accept: true },
+          () => {
+            /* ack */
+          }
+        )
+        return
+      }
+      setPauseRequest({
+        viewerSocketId: data.viewerSocketId,
+        viewerUsername: data.viewerUsername,
+      })
+    }
+
+    socket.on('pause-request', handlePauseRequest)
+    return () => {
+      socket.off('pause-request', handlePauseRequest)
+    }
+  }, [socket, isHost, roomId, videoRef])
+
+  useEffect(() => {
+    if (!socket || !isHost) return
+
+    const handlePlayRequest = (data: {
+      viewerSocketId: string
+      viewerUsername?: string
+    }) => {
+      if (!data?.viewerSocketId) return
+      if (autoApproveRef.current) {
+        if (videoRef.current) {
+          void videoRef.current.play().catch(() => {
+            /* 浏览器自动播放策略可能拒绝，忽略 */
+          })
+        }
+        socket.emit(
+          'play-response',
+          { roomId, viewerSocketId: data.viewerSocketId, accept: true },
+          () => {
+            /* ack */
+          }
+        )
+        return
+      }
+      setPlayRequest({
+        viewerSocketId: data.viewerSocketId,
+        viewerUsername: data.viewerUsername,
+      })
+    }
+
+    socket.on('play-request', handlePlayRequest)
+    return () => {
+      socket.off('play-request', handlePlayRequest)
+    }
+  }, [socket, isHost, roomId, videoRef])
+
+  // 观众：监听房主对申请的回应
+  useEffect(() => {
+    if (!socket || isHost) return
+
+    const handleSeekResponse = (data: { accept: boolean; time?: number }) => {
+      setSeekPending(false)
+      if (data?.accept) {
+        message.success(`房主已同意跳转到 ${formatSeekTime(data.time ?? 0)}`)
+      } else {
+        message.info('房主拒绝了您的跳转申请')
+      }
+    }
+    const handlePauseResponse = (data: { accept: boolean }) => {
+      setPausePending(false)
+      if (data?.accept) {
+        message.success('房主已同意暂停')
+      } else {
+        message.info('房主拒绝了您的暂停申请')
+      }
+    }
+    const handlePlayResponse = (data: { accept: boolean }) => {
+      setPlayPending(false)
+      if (data?.accept) {
+        message.success('房主已同意继续播放')
+      } else {
+        message.info('房主拒绝了您的继续播放申请')
+      }
+    }
+
+    socket.on('seek-response', handleSeekResponse)
+    socket.on('pause-response', handlePauseResponse)
+    socket.on('play-response', handlePlayResponse)
+    return () => {
+      socket.off('seek-response', handleSeekResponse)
+      socket.off('pause-response', handlePauseResponse)
+      socket.off('play-response', handlePlayResponse)
+    }
+  }, [socket, isHost])
+
+  // 所有用户：监听房间模式切换
+  useEffect(() => {
+    if (!socket) return
+
+    const handleRoomModeChanged = (data: {
+      mode: 'screen-share' | 'watch-together'
+    }) => {
+      setMode(data.mode)
+    }
+
+    socket.on('room-mode-changed', handleRoomModeChanged)
+    return () => {
+      socket.off('room-mode-changed', handleRoomModeChanged)
+    }
+  }, [socket, setMode])
+
+  // ── 申请审批操作（与重构前一致）─────────────────────────
+  const handleApproveJoin = () => {
+    if (!confirmJoin) return
+    const viewerSocketId = confirmJoin.viewerSocketId
+    if (!socket || !viewerSocketId) return
+    socket.emit(
+      'approve-join',
+      { viewerSocketId },
+      (response: { success: boolean; message?: string }) => {
+        if (response.success) {
+          message.success('已允许加入')
+        } else {
+          message.error(response.message || '操作失败')
+        }
+      }
+    )
+    setConfirmJoin(null)
+  }
+
+  const handleRejectJoin = () => {
+    if (!confirmJoin) return
+    const viewerSocketId = confirmJoin.viewerSocketId
+    if (!socket || !viewerSocketId) return
+    socket.emit(
+      'reject-join',
+      { viewerSocketId },
+      (response: { success: boolean; message?: string }) => {
+        if (response.success) {
+          message.info('已拒绝加入')
+        } else {
+          message.error(response.message || '操作失败')
+        }
+      }
+    )
+    setConfirmJoin(null)
+  }
+
+  const handleAcceptSeek = () => {
+    if (!seekRequest) return
+    const { viewerSocketId, time } = seekRequest
+    if (!socket || !viewerSocketId) return
+    if (videoRef.current && Number.isFinite(time)) {
+      videoRef.current.currentTime = time
+    }
+    socket.emit(
+      'seek-response',
+      { roomId, viewerSocketId, accept: true, time },
+      () => {}
+    )
+    setSeekRequest(null)
+  }
+
+  const handleRejectSeek = () => {
+    if (!seekRequest) return
+    const { viewerSocketId } = seekRequest
+    if (!socket || !viewerSocketId) return
+    socket.emit(
+      'seek-response',
+      { roomId, viewerSocketId, accept: false },
+      () => {}
+    )
+    setSeekRequest(null)
+  }
+
+  const handleAcceptPause = () => {
+    if (!pauseRequest) return
+    const { viewerSocketId } = pauseRequest
+    if (!socket || !viewerSocketId) return
+    videoRef.current?.pause()
+    socket.emit(
+      'pause-response',
+      { roomId, viewerSocketId, accept: true },
+      () => {}
+    )
+    setPauseRequest(null)
+  }
+
+  const handleRejectPause = () => {
+    if (!pauseRequest) return
+    const { viewerSocketId } = pauseRequest
+    if (!socket || !viewerSocketId) return
+    socket.emit(
+      'pause-response',
+      { roomId, viewerSocketId, accept: false },
+      () => {}
+    )
+    setPauseRequest(null)
+  }
+
+  const handleAcceptPlay = () => {
+    if (!playRequest) return
+    const { viewerSocketId } = playRequest
+    if (!socket || !viewerSocketId) return
+    if (videoRef.current) {
+      void videoRef.current.play().catch(() => {})
+    }
+    socket.emit(
+      'play-response',
+      { roomId, viewerSocketId, accept: true },
+      () => {}
+    )
+    setPlayRequest(null)
+  }
+
+  const handleRejectPlay = () => {
+    if (!playRequest) return
+    const { viewerSocketId } = playRequest
+    if (!socket || !viewerSocketId) return
+    socket.emit(
+      'play-response',
+      { roomId, viewerSocketId, accept: false },
+      () => {}
+    )
+    setPlayRequest(null)
+  }
+
+  // ── 观众申请发起（与重构前一致）─────────────────────────
+  const handleRequestSeek = useCallback(
+    (time: number) => {
+      if (!socket || isHost || seekPending) return
+      if (!Number.isFinite(time)) return
+      setSeekPending(true)
+      socket.emit(
+        'seek-request',
+        { roomId, time },
+        (response: { success: boolean; message?: string }) => {
+          if (!response.success) {
+            setSeekPending(false)
+            message.error(response.message || '申请跳转失败')
+          } else {
+            message.info('已发送跳转申请，等待房主确认')
+          }
+        }
+      )
+    },
+    [socket, isHost, roomId, seekPending]
+  )
+
+  const handleRequestPause = useCallback(() => {
+    if (!socket || isHost || pausePending) return
+    setPausePending(true)
+    socket.emit(
+      'pause-request',
+      { roomId },
+      (response: { success: boolean; message?: string }) => {
+        if (!response.success) {
+          setPausePending(false)
+          message.error(response.message || '申请暂停失败')
+        } else {
+          message.info('已发送暂停申请，等待房主确认')
+        }
+      }
+    )
+  }, [socket, isHost, roomId, pausePending])
+
+  const handleRequestPlay = useCallback(() => {
+    if (!socket || isHost || playPending) return
+    setPlayPending(true)
+    socket.emit(
+      'play-request',
+      { roomId },
+      (response: { success: boolean; message?: string }) => {
+        if (!response.success) {
+          setPlayPending(false)
+          message.error(response.message || '申请继续播放失败')
+        } else {
+          message.info('已发送继续播放申请，等待房主确认')
+        }
+      }
+    )
+  }, [socket, isHost, roomId, playPending])
+
+  // ── 控制栏操作 ─────────────────────────────────────────
+  const handleToggleDanmaku = useCallback(() => {
+    setDanmakuEnabled((prev) => !prev)
+  }, [])
+
+  // 弹幕点击：复制文本到剪贴板
+  // 弹幕渲染时可能拼接了 "发送者: 内容" 前缀，复制时去掉前缀只保留内容部分
+  const handleDanmakuClick = useCallback((text: string) => {
+    // 提取内容：若文本以 "xxx: " 开头（发送者前缀），则取冒号后内容；否则用原文
+    const colonIdx = text.indexOf(': ')
+    const content = colonIdx >= 0 && colonIdx < 30 ? text.slice(colonIdx + 2) : text
+    const textToCopy = content.trim() || text.trim()
+    if (!textToCopy) return
+
+    const fallbackCopy = () => {
+      const textarea = document.createElement('textarea')
+      textarea.value = textToCopy
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      try {
+        document.execCommand('copy')
+        message.success('已复制弹幕内容')
+      } catch {
+        message.error('复制失败')
+      }
+      document.body.removeChild(textarea)
+    }
+
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard
+        .writeText(textToCopy)
+        .then(() => message.success('已复制弹幕内容'))
+        .catch(() => fallbackCopy())
+    } else {
+      fallbackCopy()
+    }
+  }, [])
+
+  const handleSendDanmaku = useCallback(
+    (text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed) return
+
+      const item: DanmakuItem = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        content: trimmed,
+        time: videoRef.current?.currentTime ?? 0,
+        mode: 1,
+        color: 16777215,
+        size: 25,
+      }
+
+      // 本地立即上屏（发送者自己看到）
+      danmakuLayerRef.current?.sendDanmaku(trimmed, { sender: '我' })
+      addRealtime({ ...item, self: true, sender: '我' })
+
+      if (!socket) return
+      // 发送评论（持久化 + 广播 new-comment）
+      socket.emit(
+        'send-comment',
+        { roomId, content: trimmed, isDanmaku: true },
+        (response: { success: boolean; message?: string }) => {
+          if (!response.success) {
+            message.error(response.message ?? '弹幕发送失败')
+          }
+        }
+      )
+      // 广播弹幕事件（其他客户端通过 'danmaku' 事件上屏）
+      socket.emit('send-danmaku', { roomId, content: trimmed })
+    },
+    [socket, roomId, videoRef, addRealtime]
+  )
+
+  const handleSync = useCallback(() => {
+    if (!isHost) return
+    forceSync()
+  }, [isHost, forceSync])
+
+  const handleReload = useCallback(() => {
+    if (isHost && watchTogether.sourceType === 'bilibili') {
+      void reloadBilibili()
+      return
+    }
+    if (!videoRef.current) return
+    void reloadVideo(videoRef.current)
+  }, [isHost, watchTogether.sourceType, reloadBilibili, reloadVideo, videoRef])
+
+  // ── 面板外点击 / ESC 关闭 ──────────────────────────────
+  const settingsAnchorRef = useRef<HTMLDivElement | null>(null)
+  const settingsButtonRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    if (!settingsOpen) return
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (
+        settingsOpen &&
+        settingsAnchorRef.current &&
+        !settingsAnchorRef.current.contains(target) &&
+        settingsButtonRef.current &&
+        !settingsButtonRef.current.contains(target)
+      ) {
+        setSettingsOpen(false)
+      }
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSettingsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [settingsOpen, slots])
+
+  // ── 补充快捷键（F 全屏 / M 静音，与重构前一致；Space/方向键由 ArtPlayer 内置处理）──
+  useEffect(() => {
+    if (!isHost) return
+    const handler = (e: KeyboardEvent) => {
+      const tag = (document.activeElement?.tagName ?? '').toUpperCase()
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      if (e.key === 'f' || e.key === 'F') {
+        // 使用 handleToggleFullscreen（对 video 元素全屏），避免 $container 全屏导致
+        // DASH 模式合成层重建黑屏
+        handleToggleFullscreen()
+      } else if (e.key === 'm' || e.key === 'M') {
+        video.muted = !video.muted
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => {
+      document.removeEventListener('keydown', handler)
+    }
+  }, [isHost, art, video, handleToggleFullscreen])
+
+  // ── 观众申请按钮（渲染用）──────────────────────────────
+  const isPlaying = useVideoPlayingState(video)
+
+  // ── 房主端申请审批通知列表（与重构前一致）─────────────────
+  const requestNotifications: RequestNotificationItem[] = []
+  if (confirmJoin) {
+    requestNotifications.push({
+      id: 'join',
+      title: '观看请求',
+      okText: '允许',
+      cancelText: '拒绝',
+      onOk: handleApproveJoin,
+      onCancel: handleRejectJoin,
+      autoCloseMs: 12000,
+      content: (
+        <>
+          有观看者请求加入房间（
+          <span style={{ color: 'var(--md-sys-color-primary)' }}>
+            {confirmJoin.viewerSocketId.slice(0, 8)}
+          </span>
+          ），是否允许？
+        </>
+      ),
+    })
+  }
+  if (seekRequest) {
+    requestNotifications.push({
+      id: 'seek',
+      title: '跳转申请',
+      okText: '同意',
+      cancelText: '拒绝',
+      onOk: handleAcceptSeek,
+      onCancel: handleRejectSeek,
+      autoCloseMs: 12000,
+      content: (
+        <>
+          观众{' '}
+          <span style={{ color: 'var(--md-sys-color-primary)' }}>
+            {seekRequest.viewerUsername ||
+              seekRequest.viewerSocketId.slice(0, 8)}
+          </span>{' '}
+          申请跳转到{' '}
+          <span style={{ color: 'var(--md-sys-color-primary)' }}>
+            {formatSeekTime(seekRequest.time)}
+          </span>
+        </>
+      ),
+    })
+  }
+  if (pauseRequest) {
+    requestNotifications.push({
+      id: 'pause',
+      title: '暂停申请',
+      okText: '同意',
+      cancelText: '拒绝',
+      onOk: handleAcceptPause,
+      onCancel: handleRejectPause,
+      autoCloseMs: 12000,
+      content: (
+        <>
+          观众{' '}
+          <span style={{ color: 'var(--md-sys-color-primary)' }}>
+            {pauseRequest.viewerUsername ||
+              pauseRequest.viewerSocketId.slice(0, 8)}
+          </span>{' '}
+          申请暂停播放
+        </>
+      ),
+    })
+  }
+  if (playRequest) {
+    requestNotifications.push({
+      id: 'play',
+      title: '播放申请',
+      okText: '同意',
+      cancelText: '拒绝',
+      onOk: handleAcceptPlay,
+      onCancel: handleRejectPlay,
+      autoCloseMs: 12000,
+      content: (
+        <>
+          观众{' '}
+          <span style={{ color: 'var(--md-sys-color-primary)' }}>
+            {playRequest.viewerUsername ||
+              playRequest.viewerSocketId.slice(0, 8)}
+          </span>{' '}
+          申请继续播放
+        </>
+      ),
+    })
+  }
+
+  const handleCloseNotification = (id: string) => {
+    if (id === 'join') setConfirmJoin(null)
+    else if (id === 'seek') setSeekRequest(null)
+    else if (id === 'pause') setPauseRequest(null)
+    else if (id === 'play') setPlayRequest(null)
+  }
+
+  return (
+    <>
+      {/* 字幕样式：使用 Monet 主题变量，字号可调、底色半透明 */}
+      <style>{`
+        .zart-stage video::cue {
+          font-size: ${subtitles.subtitleFontSize}px;
+          background-color: rgba(var(--md-sys-color-surface-container-rgb), var(--glass-strength));
+          color: var(--md-sys-color-on-surface, #ffffff);
+          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        }
+      `}</style>
+
+      {/* 弹幕图层（Portal → ArtPlayer layer） */}
+      {watchTogether.sourceUrl &&
+        createPortal(
+          <DanmakuLayer
+            ref={danmakuLayerRef}
+            videoElement={video}
+            enabled={danmakuEnabled}
+            opacity={style.opacity}
+            displayArea={style.displayArea}
+            density={style.advanced.density}
+            speed={style.speed}
+            scaleWithScreen={style.scaleWithScreen}
+            filters={style.filters}
+            advancedStyle={style.advanced}
+            fontSize={style.fontSize}
+            blockKeywords={blockKeywords}
+            onDanmakuClick={handleDanmakuClick}
+          />,
+          slots.danmakuRoot
+        )}
+
+      {/* 覆盖层：解析中 / 重载中加载动画。
+          挂载到 panelRoot（z-index: 70，直接 append 到 $player），
+          避免使用 ArtPlayer layer 系统导致 loading 状态下 layer 被隐藏 */}
+      {(isResolving || isReloading) &&
+        createPortal(
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <Spinner size={36} />
+          </div>,
+          slots.panelRoot
+        )}
+
+      {/* 空源占位（覆盖整个播放器区域，与重构前行为一致：隐藏控制栏） */}
+      {!watchTogether.sourceUrl &&
+        createPortal(
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black">
+            <img
+              src="/player-empty.jpg"
+              alt="等待播放"
+              className="h-32 w-32 rounded-[var(--md-sys-shape-corner)] object-cover"
+            />
+            <Text className="text-sm text-white">
+              {isHost ? '请在下方添加并播放影片' : '等待房主播放影片'}
+            </Text>
+          </div>,
+          slots.panelRoot
+        )}
+
+      {/* 设置面板锚点（右下角，控制栏上方） */}
+      {createPortal(
+        <div
+          ref={settingsAnchorRef}
+          className="absolute"
+          style={{ right: 8, bottom: 64 }}
+        >
+          {settingsOpen && (
+            <SettingsPanel
+              isHost={isHost}
+              danmakuStyle={style}
+              subtitleEnabled={subtitles.subtitleEnabled}
+              subtitleTracks={subtitles.subtitleTracks}
+              activeTrackIndex={subtitles.activeTrackIndex}
+              subtitleFontSize={subtitles.subtitleFontSize}
+              onToggleSubtitles={subtitles.setEnabled}
+              onSelectSubtitleTrack={subtitles.setActiveTrack}
+              onAddSubtitleUrl={subtitles.addTrackFromUrl}
+              onAddSubtitleFile={subtitles.addTrackFromFile}
+              onChangeSubtitleFontSize={subtitles.setFontSize}
+              onDanmakuStyleChange={setStyle}
+              onDanmakuFilterChange={setFilters}
+              onDanmakuAdvancedChange={setAdvancedStyle}
+              onResetDanmakuStyle={resetStyle}
+            />
+          )}
+        </div>,
+        slots.panelRoot
+      )}
+
+      {/* 自定义底部玻璃拟态控制栏 */}
+      {watchTogether.sourceUrl && (
+        <PlayerControlBar
+          isHost={isHost}
+          videoRef={videoRef}
+          watchTogether={watchTogether}
+          isPlaying={isPlaying}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={handleToggleFullscreen}
+          danmakuEnabled={danmakuEnabled}
+          onToggleDanmaku={handleToggleDanmaku}
+          onSendDanmaku={handleSendDanmaku}
+          onSync={handleSync}
+          onReload={handleReload}
+          settingsOpen={settingsOpen}
+          onToggleSettings={() => setSettingsOpen((v) => !v)}
+          settingsButtonRef={settingsButtonRef}
+          onRequestSeek={handleRequestSeek}
+          onRequestPause={handleRequestPause}
+          onRequestPlay={handleRequestPlay}
+          pausePending={pausePending}
+          playPending={playPending}
+        />
+      )}
+
+      {/* 视频统计信息（右键菜单，绑定 art.video） */}
+      <VideoStatsMenu
+        videoElement={video}
+        sourceType={
+          watchTogether.sourceType === 'bilibili' ? 'bilibili' : 'custom'
+        }
+        videoCodec={watchTogether.videoCodec}
+        sourceUrl={watchTogether.sourceUrl}
+        currentQuality={currentQuality}
+        availableQualities={availableQualities}
+        format={
+          watchTogether.format === 'dash' || watchTogether.format === 'mp4'
+            ? watchTogether.format
+            : undefined
+        }
+      />
+
+      <RequestNotification
+        items={requestNotifications}
+        onClose={handleCloseNotification}
+      />
+    </>
+  )
+}

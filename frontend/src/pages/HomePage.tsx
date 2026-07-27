@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Share2,
@@ -6,6 +7,7 @@ import {
   LayoutDashboard,
   Wifi,
   WifiOff,
+  Loader2,
   Settings,
   User,
 } from 'lucide-react'
@@ -14,6 +16,7 @@ import { Card } from '@/components/ui/Card'
 import { Space } from '@/components/ui/Space'
 import { Title, Paragraph } from '@/components/ui/Typography'
 import { useAuthStore } from '@/store/authStore'
+import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import { useSocket } from '@/hooks/useSocket'
 import { cn } from '@/lib/utils'
 
@@ -36,13 +39,41 @@ const Fade = ({
 
 function HomePage() {
   const navigate = useNavigate()
-  const { user } = useAuthStore()
+  const { user, autoLoginStatus } = useAuthStore()
   const { connected } = useSocket()
+  const { roomCreationMode } = useSystemSettingsStore()
 
   const isRoot = user?.role === 'root'
   const isAdmin = user?.role === 'admin' || isRoot
   const isGuest = user?.role === 'guest'
-  const canCreateRoom = isAdmin
+  // 创建房间权限由系统设置 roomCreationMode 决定，禁止在此处硬编码角色判断。
+  // - guest 始终禁止
+  // - admin-only：仅 root / admin
+  // - all-users：root / admin / user
+  const canCreateRoom =
+    !isGuest && (isAdmin || roomCreationMode === 'all-users')
+
+  // 连接状态区分三种情况：
+  // 1. autoLogin 未完成 / socket 刚创建还未建立连接 → "连接中…"
+  //    （避免在认证完成瞬间、socket.connect() 发起到 connect 事件触发之间
+  //     误显示"连接断开"）
+  // 2. socket 已连接 → "已连接"
+  // 3. autoLogin 完成 + socket 已存在 + 连接建立后断开 → "连接断开"
+  //
+  // 实现方式：autoLogin done 后延迟 1.5s 才允许显示"断开"，
+  // 给 socket.io 足够的握手时间（含 websocket 升级 + 后端认证中间件）。
+  const [allowDisconnected, setAllowDisconnected] = useState(false)
+  useEffect(() => {
+    if (autoLoginStatus !== 'done') {
+      setAllowDisconnected(false)
+      return
+    }
+    // autoLogin 完成后延迟 1.5s 启用"断开"显示
+    const timer = setTimeout(() => setAllowDisconnected(true), 1500)
+    return () => clearTimeout(timer)
+  }, [autoLoginStatus])
+
+  const isConnecting = autoLoginStatus !== 'done' || (!connected && !allowDisconnected)
 
   return (
     <div className="flex-1 flex items-center justify-center p-6">
@@ -121,7 +152,9 @@ function HomePage() {
               {!canCreateRoom && (
                 <Fade delay={220}>
                   <Paragraph type="secondary" className="text-xs m-0">
-                    仅管理员可创建房间
+                    {isGuest
+                      ? '登录后可创建房间'
+                      : '当前仅管理员可创建房间，请联系管理员开启权限'}
                   </Paragraph>
                 </Fade>
               )}
@@ -231,6 +264,20 @@ function HomePage() {
               >
                 <Wifi className="w-3.5 h-3.5" />
                 已连接
+              </div>
+            ) : isConnecting ? (
+              <div
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium"
+                style={{
+                  backgroundColor:
+                    'color-mix(in srgb, var(--md-sys-color-primary) 12%, transparent)',
+                  color: 'var(--md-sys-color-primary)',
+                  border:
+                    '1px solid color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent)',
+                }}
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                连接中…
               </div>
             ) : (
               <div

@@ -22,8 +22,7 @@
 import { useCallback, useRef } from 'react'
 import type { RefObject, MutableRefObject } from 'react'
 import { selectEngine, resetVideoElement } from '@/modules/player'
-import type { PlayerSource } from '@/modules/player'
-import type { MsePlayer } from '@/modules/player/engines/mse'
+import type { PlayerSource, PlayerController } from '@/modules/player'
 import {
   isBrowserPlayableFormat,
   getUnsupportedFormatMessage,
@@ -49,8 +48,12 @@ export interface UsePlayerSourceReturn {
   cleanup: () => void
   /** 当前已应用的 sourceUrl（用于去重与 seek-to-unbuffered 逻辑） */
   appliedSourceUrlRef: MutableRefObject<string | null>
-  /** MsePlayer 实例（仅 MSE 引擎有值，供外部调用 seekTo） */
-  msePlayerRef: MutableRefObject<MsePlayer | null>
+  /**
+   * 引擎控制器实例（MSE / DASH 引擎返回，供外部调用 seekTo）。
+   * 替代旧 msePlayerRef，使用 PlayerController 接口抽象，
+   * 可同时持有 MsePlayer 或 DashPlayer 实例。
+   */
+  playerRef: MutableRefObject<PlayerController | null>
   /**
    * seek 到目标时间。不重建 MediaSource。
    * 仅对 MSE 流有效，非 MSE 流直接设置 video.currentTime。
@@ -79,7 +82,7 @@ export function usePlayerSource(
   const blobUrlRef = useRef<string | null>(null)
   const engineCleanupRef = useRef<(() => void) | null>(null)
   const appliedSourceUrlRef = useRef<string | null>(null)
-  const msePlayerRef = useRef<MsePlayer | null>(null)
+  const playerRef = useRef<PlayerController | null>(null)
   // 串行操作队列：所有 attach / reload 依次执行，杜绝并发互相 abort
   const queueRef = useRef<Promise<unknown>>(Promise.resolve())
   // forceReload 合并：多次调用只执行最新 source 的一次重载
@@ -112,7 +115,7 @@ export function usePlayerSource(
         /* ignore */
       }
     }
-    msePlayerRef.current = null
+    playerRef.current = null
   }, [])
 
   /**
@@ -132,7 +135,7 @@ export function usePlayerSource(
           blobUrlRef.current = result.blobUrl
         }
         engineCleanupRef.current = result.cleanup
-        msePlayerRef.current = result.msePlayer ?? null
+        playerRef.current = result.player ?? null
       } catch (err) {
         // 加载失败时回滚 appliedSourceUrlRef，允许下次重试
         appliedSourceUrlRef.current = previousUrl
@@ -151,8 +154,8 @@ export function usePlayerSource(
         return
       }
 
-      // 格式预检：浏览器 <video> 仅原生支持 mp4/webm/mov，DASH 通过 MSE 支持。
-      // mkv/avi/flv/wmv/ts 等容器直接赋值会抛 NotSupportedError。
+      // 格式预检：浏览器 <video> 仅原生支持 mp4/webm/mov/mkv，DASH 通过 MSE 支持。
+      // mkv 需 Chrome 91+ 且编码为 H.264/AAC。avi/flv/wmv/ts 等容器直接赋值会抛 NotSupportedError。
       // 预检放在更新 appliedSourceUrlRef 之前，失败时不污染"已应用"标记。
       if (source.format && !isBrowserPlayableFormat(source.format)) {
         throw new Error(getUnsupportedFormatMessage(source.format))
@@ -184,7 +187,7 @@ export function usePlayerSource(
       busy?: boolean
       message?: string
     }> => {
-      const player = msePlayerRef.current
+      const player = playerRef.current
       if (!player || !player.isAttached) {
         return { success: false }
       }
@@ -234,7 +237,7 @@ export function usePlayerSource(
     attachSource,
     cleanup,
     appliedSourceUrlRef,
-    msePlayerRef,
+    playerRef,
     seekTo,
     forceReload,
   }

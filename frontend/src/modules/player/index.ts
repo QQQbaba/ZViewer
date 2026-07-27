@@ -28,6 +28,7 @@
  */
 
 // 引擎
+export { dashEngine } from './engines/dash-engine'
 export { mseEngine } from './engines/mse-engine'
 export { hlsEngine } from './engines/hls-engine'
 export { flvEngine } from './engines/flv-engine'
@@ -52,25 +53,15 @@ export {
 
 // MSE 专用导出
 export { MsePlayer } from './engines/mse'
-export type { SeekResult, MsePlayerOptions } from './engines/mse'
+export type { MsePlayerOptions } from './engines/mse'
+
+// DASH (dash.js) 专用导出
+export { DashPlayer } from './engines/dash'
+export type { DashPlayerOptions } from './engines/dash'
 
 // Hooks
-export {
-  usePlayerSource,
-  usePlayerControls,
-  usePlayerEvents,
-  usePlayer,
-} from './hooks'
-export type {
-  UsePlayerSourceOptions,
-  UsePlayerSourceReturn,
-  UsePlayerControlsOptions,
-  UsePlayerControlsReturn,
-  UsePlayerEventsOptions,
-  UsePlayerEventsReturn,
-  UsePlayerOptions,
-  UsePlayerReturn,
-} from './hooks'
+export { usePlayerSource } from './hooks'
+export type { UsePlayerSourceOptions, UsePlayerSourceReturn } from './hooks'
 
 // 类型
 export type {
@@ -78,4 +69,6 @@ export type {
   PlayerSource,
   EngineAttachResult,
   PlayerEngine,
+  PlayerController,
+  SeekResult,
 } from './types'

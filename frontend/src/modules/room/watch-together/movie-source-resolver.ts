@@ -69,12 +69,14 @@ export interface ResolveMovieSourceOptions {
  */
 export async function resolveBilibiliOnline(
   movie: Movie,
-  onProgress?: (step: string, message: string) => void
+  onProgress?: (step: string, message: string) => void,
+  options?: { preferMp4?: boolean }
 ): Promise<ResolvedMovieSource> {
   const resolved = await resolveBilibiliWithOptions(
     movie.url,
     movie.currentQn,
-    onProgress
+    onProgress,
+    options
   )
   if (!resolved.videoUrl) {
     throw new Error('未获取到对应清晰度的播放地址')
