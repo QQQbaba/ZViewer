@@ -4,6 +4,7 @@ import { Layout } from '@/components/Layout'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { RequireAuth } from '@/components/RequireAuth'
 import { useAuthStore, type User } from '@/store/authStore'
+import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import { apiFetch } from '@/lib/api'
 import { useBackendHealth } from '@/hooks/useBackendHealth'
 import { ReturnToRoomButton } from '@/components/ReturnToRoomButton'
@@ -148,6 +149,13 @@ function WatchRedirect() {
 function App() {
   // 监听后端自动重启：socket 重连后对比 /health.startedAt，变化时在网页内提示
   useBackendHealth()
+
+  // 启动时拉取公开系统设置（registrationMode / roomCreationMode / betaFeaturesEnabled）。
+  // 此接口无需鉴权，guest 也可访问；用于 HomePage 决定是否显示「开始共享」按钮。
+  const fetchSettings = useSystemSettingsStore((s) => s.fetchSettings)
+  useEffect(() => {
+    void fetchSettings()
+  }, [fetchSettings])
 
   return (
     <Layout>

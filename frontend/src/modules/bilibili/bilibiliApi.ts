@@ -134,6 +134,8 @@ function mapResolvedBilibili(data: ResolveProgressLine): ResolvedSource {
     currentQn: data.currentQn,
     acceptQuality: data.acceptQuality,
     vipStatus: data.vipStatus,
+    pages: data.pages,
+    currentPage: data.currentPage,
   }
 }
 
@@ -201,7 +203,7 @@ export async function resolveBilibili(
   url: string,
   qn?: number,
   onProgress?: (step: string, message: string) => void,
-  options?: { codec?: string }
+  options?: { codec?: string; preferMp4?: boolean; page?: number }
 ): Promise<ResolvedSource> {
   let fetchUrl = `${API_URL}/api/stream/resolve-bilibili?url=${encodeURIComponent(url)}`
   if (qn != null && Number.isFinite(qn)) {
@@ -209,6 +211,12 @@ export async function resolveBilibili(
   }
   if (options?.codec && options.codec !== 'auto') {
     fetchUrl += `&codec=${encodeURIComponent(options.codec)}`
+  }
+  if (options?.preferMp4) {
+    fetchUrl += `&preferMp4=true`
+  }
+  if (options?.page != null && Number.isFinite(options.page) && options.page > 0) {
+    fetchUrl += `&page=${options.page}`
   }
 
   // 整体超时兜底：后端流式响应永不结束时主动 abort，避免前端永久挂起。
@@ -249,10 +257,13 @@ export async function resolveBilibili(
 export async function resolveBilibiliWithOptions(
   url: string,
   qn?: number,
-  onProgress?: (step: string, message: string) => void
+  onProgress?: (step: string, message: string) => void,
+  extraOptions?: { preferMp4?: boolean; page?: number }
 ): Promise<ResolvedSource> {
   const options = getBilibiliParseOptions()
   return resolveBilibili(url, qn, onProgress, {
     codec: options.codec,
+    preferMp4: extraOptions?.preferMp4,
+    page: extraOptions?.page,
   })
 }

@@ -149,10 +149,25 @@ export async function proxyHttpUpstream(
       return;
     }
 
-    res.setHeader(
-      'Content-Type',
-      upstream.headers.get('content-type') || defaultContentType,
-    );
+    // 转发上游状态码：Range 请求上游返回 206 时必须转发 206，
+    // 否则前端 fetch 看到 200 会误判为完整响应（而非部分内容），
+    // 影响后续 Content-Range / Content-Length 解析与缓存语义。
+    res.status(upstream.status);
+
+    // Content-Type 处理：B站 CDN 偶发返回 application/json（实际是视频数据），
+    // 此时使用调用方提供的 defaultContentType（如 video/mp4）纠正，
+    // 避免 MSE 引擎或浏览器因 Content-Type 不匹配而拒绝处理。
+    const upstreamContentType = upstream.headers.get('content-type');
+    const isJsonMismatch =
+      upstreamContentType &&
+      upstreamContentType.toLowerCase().includes('application/json') &&
+      defaultContentType &&
+      !defaultContentType.toLowerCase().includes('json');
+    if (isJsonMismatch) {
+      res.setHeader('Content-Type', defaultContentType);
+    } else {
+      res.setHeader('Content-Type', upstreamContentType || defaultContentType);
+    }
     for (const name of PASSTHROUGH_HEADERS) {
       const value = upstream.headers.get(name);
       if (value) res.setHeader(name, value);

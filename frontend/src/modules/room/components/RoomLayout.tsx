@@ -131,11 +131,8 @@ export function RoomLayout({
   const isSharing =
     sharingActive ?? (roomMode === 'screen-share' && storeIsSharing)
 
-  // 是否使用 aspect-video（16:9）布局。
-  // - watch-together：始终 aspect-video
-  // - screen-share：始终 aspect-video，与一起看/观众端 CinemaLayout 保持统一高度
-  const useAspectRatio =
-    roomMode === 'watch-together' || roomMode === 'screen-share'
+  // 播放器容器使用固定高度（calc(100vh - 220px)），不使用 aspect-video，
+  // 避免右侧面板内容撑开导致播放器高度变化。
 
   // 监听 room-mode-changed：观众端跟随房主切换无需刷新；
   // 同时清除本地加载占位（房主切换完成后）。
@@ -284,26 +281,24 @@ export function RoomLayout({
   )
 
   // 右侧评论/弹幕面板：
-  // - 非全屏：固定宽度侧边栏（320px），独立卡片式设计（圆角 + 边框 + 阴影），
-  //   与视频区域保持 gap 间距，maxHeight 限制防止内容过多撑大容器。
+  // - 非全屏：固定宽度侧边栏（320px），独立卡片式设计（圆角 + 边框 + 阴影）。
+  //   高度通过外层 absolute 容器 h-full 与左侧视频严格等高；动画由父容器
+  //   的 translateX 与占位区 width 共同完成，避免直接对 panel 做 width/scale。
   // - 原生全屏：悬浮卡片从右侧滑入，带圆角和强阴影。
   const rightPanelNode = (
     <div
       className={cn(
-        'flex min-h-0 min-w-0 flex-col overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+        'flex min-h-0 min-w-0 flex-col overflow-hidden',
         isNativeFullscreen
-          ? 'glass-strong absolute inset-y-0 right-0 z-20 w-[85%] max-w-[340px] rounded-l-2xl border-l'
-          : 'glass-card w-[320px] flex-shrink-0 self-stretch rounded-xl',
-        isNativeFullscreen && !isRightPanelOpen && 'translate-x-full',
-        !isNativeFullscreen && !isRightPanelOpen && 'w-0 scale-x-95 opacity-0'
+          ? 'glass-strong absolute inset-y-0 right-0 z-20 w-[85%] max-w-[340px] rounded-l-2xl border-l transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]'
+          : 'glass-card h-full w-full rounded-xl',
+        isNativeFullscreen && !isRightPanelOpen && 'translate-x-full'
       )}
       style={{
         boxShadow: isNativeFullscreen
           ? '0 8px 32px -4px rgba(0, 0, 0, 0.3)'
-          : isRightPanelOpen
-            ? '0 2px 12px -4px rgba(0, 0, 0, 0.08)'
-            : 'none',
-        maxHeight: isNativeFullscreen ? undefined : 'calc(100vh - 220px)',
+          : '0 4px 24px -6px color-mix(in srgb, var(--md-sys-color-shadow) 22%, transparent), 0 0 0 1px color-mix(in srgb, var(--md-sys-color-outline-variant) 50%, transparent)',
+        backfaceVisibility: 'hidden',
       }}
     >
       {effectiveRightPanel}
@@ -374,32 +369,42 @@ export function RoomLayout({
         )}
 
         <div
-          className={cn(
-            'relative mt-4 flex min-h-0 flex-none overflow-hidden transition-[gap] duration-300',
-            isRightPanelOpen ? 'gap-3' : 'gap-0'
-          )}
+          className="relative mt-4 flex min-h-0 flex-none gap-3 overflow-hidden"
+          style={{
+            maxHeight: isNativeFullscreen ? undefined : 'calc(100vh - 220px)',
+          }}
         >
+          {/* 左侧播放器：决定整个容器高度，flex-1 随侧栏开闭平滑改变宽度 */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <div
-              className={cn(
-                'relative w-full overflow-hidden rounded-lg bg-black',
-                isNativeFullscreen
-                  ? 'h-full'
-                  : useAspectRatio
-                    ? 'aspect-video'
-                    : 'h-full min-h-[480px]'
-              )}
-              style={{
-                maxHeight: isNativeFullscreen
-                  ? undefined
-                  : 'calc(100vh - 220px)',
-              }}
-            >
+            <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
               {renderMainContent()}
               {isNativeFullscreen && rightPanelNode}
             </div>
           </div>
-          {!isNativeFullscreen && rightPanelNode}
+          {/* 右侧占位区：宽度动画，与绝对定位面板同步滑动，避免左侧播放器跳变 */}
+          {!isNativeFullscreen && (
+            <div
+              className={cn(
+                'flex-shrink-0 overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                isRightPanelOpen ? 'w-[320px]' : 'w-0'
+              )}
+              aria-hidden="true"
+            />
+          )}
+          {/* 右侧面板：绝对定位保持与左侧视频等高，translateX 滑入滑出更流畅 */}
+          {!isNativeFullscreen && (
+            <div
+              className={cn(
+                'pointer-events-none absolute top-0 right-0 h-full overflow-hidden transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                isRightPanelOpen ? 'translate-x-0' : 'translate-x-full'
+              )}
+              style={{ willChange: 'transform' }}
+            >
+              <div className="pointer-events-auto h-full w-[320px] overflow-hidden">
+                {rightPanelNode}
+              </div>
+            </div>
+          )}
         </div>
       </Card>
 
@@ -415,8 +420,9 @@ export function RoomLayout({
                 </div>
               )
             }
+            // 三个控制卡片固定等高，内部内容各自滚动，避免某个卡片展开/撑高影响整体布局
             return (
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 h-[340px]">
                 {controlChildren.map((child, index) => (
                   <Fragment key={index}>{child}</Fragment>
                 ))}

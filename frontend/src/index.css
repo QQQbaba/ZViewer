@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 控制卡片内容区统一滚动条样式：细轨道、圆角 thumb、悬停增强 */
+.zen-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.zen-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.zen-scroll::-webkit-scrollbar-thumb {
+  background-color: color-mix(
+    in srgb,
+    var(--md-sys-color-outline) 60%,
+    transparent
+  );
+  border-radius: 999px;
+}
+.zen-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--md-sys-color-outline);
+}
+
 :root {
   /* Material Design 3 形状与玻璃拟态默认值 */
   --md-sys-shape-corner: 16px;
@@ -486,29 +505,33 @@ video {
 @keyframes zen-modal-content-exit {
   0% {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
   100% {
     opacity: 0;
-    transform: translateY(8px) scale(0.97);
+    transform: translateY(-8px);
   }
 }
 
 .zen-modal-backdrop-enter {
-  animation: zen-modal-backdrop-enter 0.25s var(--ease-out-expo) forwards;
+  animation: zen-modal-backdrop-enter 0.22s var(--ease-out-expo) forwards;
 }
 
 .zen-modal-backdrop-exit {
-  animation: zen-modal-backdrop-exit 0.2s var(--ease-in-expo) forwards;
+  animation: zen-modal-backdrop-exit 0.18s var(--ease-soft) forwards;
 }
 
 .zen-modal-content-enter {
-  animation: zen-modal-content-enter 0.32s var(--ease-out-expo) backwards;
+  animation: zen-modal-content-enter 0.3s var(--ease-out-expo) backwards;
+  contain: layout paint;
+  will-change: transform, opacity;
 }
 
 .zen-modal-content-exit {
-  animation: zen-modal-content-exit 0.2s var(--ease-in-expo) forwards;
+  animation: zen-modal-content-exit 0.18s var(--ease-soft) forwards;
+  contain: layout paint;
   will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 
 /* ---------- Toast / Message 动画 ---------- */

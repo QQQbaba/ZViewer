@@ -18,6 +18,7 @@ import { User } from './entities/User';
 import { Comment } from './entities/Comment';
 import { SystemSettings } from './entities/SystemSettings';
 import { Movie as MovieEntity } from './entities/Movie';
+import { PlaybackState } from './entities/PlaybackState';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
 import streamRoutes from './routes/stream';
@@ -71,21 +72,9 @@ import {
   ensureDataDirs,
   migrateLegacyDataIfNeeded,
 } from './services/paths';
-
-export async function getSystemSettings(): Promise<SystemSettings> {
-  const settingsRepo = AppDataSource.getRepository(SystemSettings);
-  let settings = await settingsRepo.findOne({ where: {} });
-  if (!settings) {
-    settings = settingsRepo.create({
-      autoDeleteInactiveRooms: true,
-      autoDeleteAfterHours: 24,
-      registrationMode: 'approval',
-      betaFeaturesEnabled: false,
-    });
-    await settingsRepo.save(settings);
-  }
-  return settings;
-}
+// getSystemSettings 抽到独立服务文件，避免子模块从根 index.ts 导入造成循环依赖。
+import { getSystemSettings } from './services/system-settings';
+export { getSystemSettings };
 
 export async function deleteRoomAndRelations(
   roomId: string,
@@ -95,6 +84,7 @@ export async function deleteRoomAndRelations(
   const sessionRepo = AppDataSource.getRepository(Session);
   const movieRepo = AppDataSource.getRepository(MovieEntity);
   const commentRepo = AppDataSource.getRepository(Comment);
+  const playbackStateRepo = AppDataSource.getRepository(PlaybackState);
 
   // 清理运行时状态（通过 RoomStateService 而非直接操作全局 Map）
   roomStateService.delete(roomId);
@@ -106,8 +96,11 @@ export async function deleteRoomAndRelations(
   );
 
   // 删除关联数据
+  // 注意删除顺序：PlaybackState 通过外键引用 Room，必须在删除 Room 之前清除，
+  // 否则 SQLite 会抛 FOREIGN KEY constraint failed（Movie/Comment 无外键约束不敏感）
   await movieRepo.delete({ roomId });
   await commentRepo.delete({ roomId });
+  await playbackStateRepo.delete({ roomId });
 
   // 删除房间
   await roomRepo.delete({ roomId });
@@ -214,9 +207,10 @@ async function bootstrap() {
   // 信任反向代理头（X-Forwarded-Proto / X-Forwarded-For）：
   // - req.secure / req.protocol / req.ip 才能反映真实客户端协议
   // - cookie 的 secure 属性才能根据真实协议动态决定（HTTP 下不强制 Secure）
-  // 'loopback, linklocal, uniquelocal' 允许本机/局域网代理可信，公网代理默认不可信
-  // 生产环境若部署在 Nginx/Caddy 后，建议显式配置具体代理 IP
-  app.set('trust proxy', 'loopback, linklocal, uniquelocal');
+  // 信任所有私有网络范围（含 Docker 172.x.x.x / 10.x.x.x / 192.168.x.x），
+  // 确保 Nginx/Caddy 反向代理后 req.protocol 能正确反映 HTTPS。
+  // 公网部署时建议改为具体代理 IP 以提高安全性。
+  app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal', '172.16.0.0/12', '10.0.0.0/8', '192.168.0.0/16']);
   app.use(
     cors({
       origin: CORS_ORIGIN,

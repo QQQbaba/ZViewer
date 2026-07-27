@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { RefObject, MutableRefObject } from 'react'
 import { useRoomStore } from '@/store/roomStore'
 import type { WatchTogetherState, ControlAction } from '../types'
-import { BROADCAST_THROTTLE_MS, SEEK_DEBOUNCE_MS } from '../constants'
+import { SEEK_DEBOUNCE_MS } from '../constants'
 
 export interface UseVideoEventBindingsOptions {
   isHostRef: MutableRefObject<boolean>
@@ -19,20 +19,27 @@ export type UseVideoEventBindingsReturn = void
  * 房主 video 元素事件绑定 Hook：监听 play/pause/seeked/ratechange/timeupdate，
  * 在房主操作时广播状态与控制指令给观众。
  *
- * 性能要点：
+ * v3 重构（解决观众端频繁卡顿）：
  *
- * 1. **updateState 内部通过 useRoomStore.getState() 读取最新 watchTogether 源字段**，
- *    不依赖闭包变量，避免 setWatchTogether 触发组件 re-render 后 effect 依赖变化
- *    导致事件监听器频繁解绑/重新绑定（拖动进度条时严重卡顿）。
+ * 1. **timeupdate 不再触发广播**：
+ *    旧实现每 500ms 节流广播一次完整 state，观众端每秒收到 2 次完整状态，
+ *    每次都设置 currentTime 导致视频频繁卡顿。
+ *    新实现 timeupdate 仅更新本地 store 的 currentTime 字段（用于 UI 显示），
+ *    不触发 broadcastState。观众端进度由离散事件 + 定时心跳驱动。
  *
- * 2. **timeupdate 频率高（~250ms），不每次都 setWatchTogether 更新 store**，
- *    仅做节流广播。store 中的 currentTime 在 play/pause/seeked/ratechange 等
- *    离散事件时更新即可，UI 上的实时进度由 useVideoControls 直接读取 video 元素。
+ * 2. **离散事件立即广播**：
+ *    play/pause/seeked/ratechange 事件立即通过 sendControl 发送控制指令，
+ *    并通过 broadcastState 广播完整状态（forceBroadcast=true 跳过节流）。
+ *    观众端通过 control 事件获得亚秒级响应。
  *
- * 3. **seek 事件防抖（SEEK_DEBOUNCE_MS=200ms）**：避免拖动进度条时频繁广播。
+ * 3. **定时心跳广播**：
+ *    useHostHeartbeat 每 5s 广播一次完整 state（含 currentTime），
+ *    观众端据此校正小幅进度漂移（仅差异 > 3s 才 seek）。
  *
- * 4. **timeupdate 节流（BROADCAST_THROTTLE_MS=500ms）**：仅当距离上次广播
- *    超过 500ms 时才触发新广播；forceBroadcast=true 时跳过节流（用于离散事件）。
+ * 4. **seek 事件防抖（SEEK_DEBOUNCE_MS=300ms）**：避免拖动进度条时频繁广播。
+ *
+ * 5. **updateState 通过 useRoomStore.getState() 读取最新源字段**，
+ *    不依赖闭包变量，避免 re-render 导致事件监听器频繁解绑/重新绑定。
  */
 export function useVideoEventBindings({
   isHostRef,
@@ -43,13 +50,16 @@ export function useVideoEventBindings({
   sendControl,
 }: UseVideoEventBindingsOptions): UseVideoEventBindingsReturn {
   const seekDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastBroadcastTimeRef = useRef(0)
 
   useEffect(() => {
     const video = videoRef.current
     if (!video || !isHostRef.current) return
 
-    const updateState = (forceBroadcast = false, updateStore = true) => {
+    /**
+     * 构建当前状态并广播（离散事件专用，forceBroadcast=true 跳过节流）。
+     * updateStore=true 时同时更新 roomStore（用于 UI 同步）。
+     */
+    const updateAndBroadcast = (updateStore = true) => {
       if (suppressEventsRef.current) return
       const current = useRoomStore.getState().watchTogether
       const state: WatchTogetherState = {
@@ -73,25 +83,19 @@ export function useVideoEventBindings({
       if (updateStore) {
         setWatchTogether(state)
       }
-      const now = Date.now()
-      if (
-        forceBroadcast ||
-        now - lastBroadcastTimeRef.current > BROADCAST_THROTTLE_MS
-      ) {
-        broadcastState(state)
-        lastBroadcastTimeRef.current = now
-      }
+      // 离散事件总是强制广播，跳过节流
+      broadcastState(state)
     }
 
     const handlePlay = () => {
       if (suppressEventsRef.current) return
       sendControl('play')
-      updateState(true)
+      updateAndBroadcast(true)
     }
     const handlePause = () => {
       if (suppressEventsRef.current) return
       sendControl('pause')
-      updateState(true)
+      updateAndBroadcast(true)
     }
     const handleSeeked = () => {
       if (suppressEventsRef.current) return
@@ -100,19 +104,34 @@ export function useVideoEventBindings({
       }
       seekDebounceRef.current = setTimeout(() => {
         sendControl('seek', video.currentTime)
-        updateState(true)
+        updateAndBroadcast(true)
       }, SEEK_DEBOUNCE_MS)
     }
     const handleRateChange = () => {
       if (suppressEventsRef.current) return
       sendControl('rate', video.playbackRate)
-      updateState(true)
+      updateAndBroadcast(true)
     }
+    /**
+     * timeupdate 仅更新本地 store 的 currentTime（用于 UI 进度条显示），
+     * 不触发广播。观众端进度同步由：
+     * - 离散事件（play/pause/seek/rate）即时响应
+     * - 定时心跳（useHostHeartbeat 每 5s）周期校正
+     * 驱动，避免高频广播导致观众端卡顿。
+     */
     const handleTimeUpdate = () => {
       if (suppressEventsRef.current) return
-      // timeupdate 频率高，只做节流广播，不更新 store
-      // 避免 roomStore watchTogether 引用频繁变化触发订阅组件 re-render
-      updateState(false, false)
+      // 仅更新 store 的 currentTime 字段，不触发广播
+      // 使用 partial update 避免 setWatchTogether 触发引用变化导致订阅组件 re-render
+      const current = useRoomStore.getState().watchTogether
+      // 仅当差异 > 0.1s 才更新，避免无意义的 store 写入
+      if (Math.abs(current.currentTime - video.currentTime) > 0.1) {
+        setWatchTogether({
+          ...current,
+          currentTime: video.currentTime,
+          isPlaying: !video.paused,
+        })
+      }
     }
 
     video.addEventListener('play', handlePlay)

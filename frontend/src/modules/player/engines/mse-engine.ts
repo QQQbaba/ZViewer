@@ -47,7 +47,7 @@ export const mseEngine: PlayerEngine = {
       const blobUrl = await player.attach(source.startTime)
       return {
         blobUrl,
-        msePlayer: player,
+        player,
         cleanup: () => {
           player.cleanup()
         },

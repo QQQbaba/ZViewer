@@ -17,6 +17,7 @@ import { Tag } from '@/components/ui/Tag'
 import { Spinner } from '@/components/ui/Spinner'
 import { message } from '@/components/ui/message'
 import { ConnectionStatsPanel } from '@/modules/screen-sharing/components/ConnectionStatsPanel'
+import { LiveArtPlayer } from '@/modules/art-player'
 
 const ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }]
 
@@ -104,6 +105,12 @@ function DirectWatchPage() {
   )
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  // LiveArtPlayer 通过 onVideoReady 暴露 video 元素（state 跟踪以便 effect 依赖）
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null)
+  const handleVideoReady = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node
+    setVideoEl(node)
+  }, [])
   const candidateQueueRef = useRef<RTCIceCandidateInit[]>([])
 
   const cleanup = useCallback(() => {
@@ -130,7 +137,7 @@ function DirectWatchPage() {
   }, [cleanup])
 
   useEffect(() => {
-    const video = videoRef.current
+    const video = videoEl
     if (!video) return
 
     const handleEnterPiP = () => setIsPictureInPicture(true)
@@ -155,7 +162,7 @@ function DirectWatchPage() {
         handleLeavePiP
       )
     }
-  }, [])
+  }, [videoEl])
 
   const handleCreateAnswer = async () => {
     const signal = parseSignal(offerCode.trim())
@@ -339,16 +346,20 @@ function DirectWatchPage() {
             </div>
           ) : (
             <>
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                className="w-full rounded-lg bg-black"
+              <div
+                className="w-full overflow-hidden rounded-lg bg-black"
                 style={{
                   maxHeight: 320,
                   display: hasRemoteStream ? 'block' : 'none',
                 }}
-              />
+              >
+                <LiveArtPlayer
+                  muted={false}
+                  showControls={false}
+                  onVideoReady={handleVideoReady}
+                  className="max-h-[320px]"
+                />
+              </div>
               {!hasRemoteStream && <Spinner tip="正在接收画面…" size={32} />}
               {hasRemoteStream && (
                 <Space wrap className="justify-center">

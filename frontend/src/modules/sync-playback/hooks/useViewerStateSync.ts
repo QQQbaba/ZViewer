@@ -32,25 +32,28 @@ export type UseViewerStateSyncReturn = void
  * 观众状态同步 Hook：接收房主的 `watch-together-state` 与 `watch-together-control` 事件，
  * 并应用到本地 video 元素。
  *
- * 关键设计：
+ * v3 重构（解决观众端频繁卡顿）：
  *
- * 1. **串行化 applySourceToVideo（Bug #8 修复）**：
- *    房主每 500ms 广播 state，若 sourceUrl 变化（切清晰度/切影片），
- *    两个 applySourceToVideo 会并发：后者的 resetVideoElement abort 前者 MSE attach，
- *    前者 .then() 用旧 state.currentTime 写入新 video.src，导致状态错乱。
- *    用 isApplyingRef 锁 + pendingStateRef 缓存最新 state，串行处理。
+ * 1. **分离字段同步**：
+ *    旧实现每次收到 state 都执行 applySourceToVideo + currentTime 设置 + play/pause，
+ *    即使 sourceUrl / isPlaying / playbackRate 都没变也会强制设置 currentTime，
+ *    导致视频每 500ms 被打断一次。
+ *    新实现按字段变化类型决定操作：
+ *    - sourceUrl 变化 → applySourceToVideo（含完整同步）
+ *    - isPlaying 变化 → play/pause
+ *    - playbackRate 变化 → 设置 playbackRate
+ *    - currentTime 不再单独设置（由 host-heartbeat 校正）
  *
- * 2. **自适应 seek 跟随阈值**：
- *    使用 `shouldSeekToHost` 服务函数按播放倍速自适应判断是否需要 seek，
- *    避免高倍速下高频 seek 抖动。
+ * 2. **串行化 applySourceToVideo（Bug #8 修复）**：
+ *    sourceUrl 变化时用 isApplyingRef 锁 + pendingStateRef 缓存最新 state，串行处理。
  *
- * 3. **seek 到未缓冲区域的 MSE seek**：
- *    观众端跟随房主 seek 时，若目标位置不在缓冲范围内且为 MSE 流，
+ * 3. **进度校正由 host-heartbeat 驱动**：
+ *    收到 state 时不再设置 currentTime，进度校正完全由 useViewerHeartbeat 处理
+ *    （差异 > SEEK_FOLLOW_THRESHOLD=3s 才 seek，小差异让视频自然播放）。
+ *
+ * 4. **seek 到未缓冲区域的 MSE seek**：
+ *    观众端跟随房主 seek 时（通过 control 事件），若目标位置不在缓冲范围内且为 MSE 流，
  *    调用 executeSeek → MsePlayer.seekTo（不重建 MediaSource）。用 isReloadingRef 锁防止并发。
- *
- * 4. **初始状态请求由 usePlaybackStateRequest 负责**：
- *    该 Hook 仅处理实时 state/control 事件，加入房间时的初始状态请求
- *    由 usePlaybackStateRequest 通过 ack 直接从服务器获取推算后的状态。
  */
 export function useViewerStateSync({
   roomId,
@@ -69,80 +72,110 @@ export function useViewerStateSync({
   const pendingStateRef = useRef<WatchTogetherState | null>(null)
   // seek 并发锁：防止 executeSeek 期间重复触发
   const isReloadingRef = useRef(false)
+  // 缓存上次应用的 sourceUrl，用于判断是否需要 applySourceToVideo
+  const lastAppliedSourceUrlRef = useRef<string | null>(null)
+  // 缓存上次应用的 isPlaying，用于判断是否需要 play/pause
+  const lastAppliedIsPlayingRef = useRef<boolean | null>(null)
+  // 缓存上次应用的 playbackRate，用于判断是否需要设置 playbackRate
+  const lastAppliedPlaybackRateRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!socket || isHostRef.current) return
+
+    /**
+     * 应用状态变化：按字段分离同步，避免不必要的操作导致视频卡顿。
+     *
+     * @param state 房主广播的完整状态
+     * @param isSourceChange 是否为 sourceUrl 变化触发的调用（需要 applySourceToVideo）
+     */
+    const applyStateChanges = async (
+      state: WatchTogetherState,
+      isSourceChange: boolean
+    ) => {
+      const video = videoRef.current
+      if (!video) return
+
+      // 1. sourceUrl 变化 → applySourceToVideo（含完整同步）
+      if (isSourceChange) {
+        await applySourceToVideo(video, state)
+        // applySourceToVideo 后视频元素可能已替换，重新获取
+        const currentVideo = videoRef.current
+        if (!currentVideo) return
+
+        // 源变化时完整同步所有字段
+        if (state.currentTime > 0) {
+          try {
+            currentVideo.currentTime = state.currentTime
+          } catch {
+            // ignore
+          }
+        }
+        if (currentVideo.playbackRate !== state.playbackRate) {
+          currentVideo.playbackRate = state.playbackRate
+        }
+        if (state.isPlaying && currentVideo.paused) {
+          void safePlay(currentVideo)
+        } else if (!state.isPlaying && !currentVideo.paused) {
+          currentVideo.pause()
+        }
+
+        // 更新缓存
+        lastAppliedSourceUrlRef.current = state.sourceUrl
+        lastAppliedIsPlayingRef.current = state.isPlaying
+        lastAppliedPlaybackRateRef.current = state.playbackRate
+        return
+      }
+
+      // 2. 非 sourceUrl 变化：按字段分离同步
+      // 2.1 isPlaying 变化 → play/pause
+      if (lastAppliedIsPlayingRef.current !== state.isPlaying) {
+        if (state.isPlaying && video.paused) {
+          void safePlay(video)
+        } else if (!state.isPlaying && !video.paused) {
+          video.pause()
+        }
+        lastAppliedIsPlayingRef.current = state.isPlaying
+      }
+
+      // 2.2 playbackRate 变化 → 设置 playbackRate
+      if (
+        lastAppliedPlaybackRateRef.current === null ||
+        Math.abs(
+          (lastAppliedPlaybackRateRef.current as number) - state.playbackRate
+        ) > 0.01
+      ) {
+        if (video.playbackRate !== state.playbackRate) {
+          video.playbackRate = state.playbackRate
+        }
+        lastAppliedPlaybackRateRef.current = state.playbackRate
+      }
+
+      // 2.3 currentTime 不再单独设置（由 host-heartbeat 校正）
+      // 进度校正由 useViewerHeartbeat 处理，避免高频 seek 卡顿
+    }
 
     const handleState = (payload: StatePayload) => {
       const state = payload.state
       suppressEventsRef.current = true
       setWatchTogether(state)
 
+      // 判断是否为 sourceUrl 变化
+      const isSourceChange =
+        lastAppliedSourceUrlRef.current !== state.sourceUrl
+
       // 串行化 applySourceToVideo：若上一次 apply 还在进行中，
       // 仅缓存最新 state，等上一次完成后处理最新值。
-      pendingStateRef.current = state
-      if (isApplyingRef.current) return
+      if (isSourceChange) {
+        pendingStateRef.current = state
+        if (isApplyingRef.current) return
+      }
 
       const processState = async (s: WatchTogetherState) => {
         isApplyingRef.current = true
-        const video = videoRef.current
-        if (!video) {
-          isApplyingRef.current = false
-          pendingStateRef.current = null
-          suppressEventsRef.current = false
-          return
-        }
-
         try {
-          // 先应用源（若 sourceUrl 未变则直接返回，不会重置视频），
-          // 再设置进度/播放状态，避免在 MSE attach 完成前设置 currentTime 无效。
-          await applySourceToVideo(video, s)
-
-          // 异步期间 video 元素可能已被卸载或替换，重新获取最新引用
-          const currentVideo = videoRef.current
-          if (!currentVideo) {
-            return
-          }
-
-          // 自适应 seek 跟随：使用 shouldSeekToHost 服务函数判断是否需要 seek
-          if (
-            shouldSeekToHost(
-              currentVideo.currentTime,
-              s.currentTime,
-              s.playbackRate
-            )
-          ) {
-            // executeSeek 内部检查 isMseStream + isInBufferedRange，
-            // 若不需要 MSE seek 则返回 false，由调用方执行普通 seek
-            void executeSeek({
-              video: currentVideo,
-              targetTime: s.currentTime,
-              state: s,
-              seekTo,
-              suppressEventsRef,
-              isReloadingRef,
-              onSeekFailed: reloadVideo,
-            }).then((didSeek) => {
-              if (!didSeek) {
-                currentVideo.currentTime = s.currentTime
-              }
-            })
-          } else {
-            currentVideo.currentTime = s.currentTime
-          }
-          if (currentVideo.playbackRate !== s.playbackRate) {
-            currentVideo.playbackRate = s.playbackRate
-          }
-          if (s.isPlaying && currentVideo.paused) {
-            // 观众端进入房间时通常无用户交互，浏览器自动播放策略会阻止 play()，
-            // 需要自动静音重试；否则会出现"进度条动但黑屏"的现象。
-            void safePlay(currentVideo)
-          } else if (!s.isPlaying && !currentVideo.paused) {
-            currentVideo.pause()
-          }
+          await applyStateChanges(s, isSourceChange)
         } catch (err: unknown) {
-          console.error('[useViewerStateSync] applySourceToVideo failed:', err)
-          // 向观众展示错误（如不支持的视频格式），避免黑屏无反馈
+          console.error('[useViewerStateSync] applyStateChanges failed:', err)
           message.error(err instanceof Error ? err.message : '视频源加载失败')
         } finally {
           isApplyingRef.current = false
@@ -159,7 +192,14 @@ export function useViewerStateSync({
         suppressEventsRef.current = false
       }
 
-      void drain()
+      if (isSourceChange) {
+        void drain()
+      } else {
+        // 非 sourceUrl 变化：直接同步，不需要串行化
+        void processState(state).then(() => {
+          suppressEventsRef.current = false
+        })
+      }
     }
 
     const handleControl = (payload: ControlPayload) => {
@@ -194,13 +234,16 @@ export function useViewerStateSync({
       switch (payload.action) {
         case 'play':
           void safePlay(video)
+          lastAppliedIsPlayingRef.current = true
           break
         case 'pause':
           video.pause()
+          lastAppliedIsPlayingRef.current = false
           break
         case 'rate':
           if (typeof payload.value === 'number') {
             video.playbackRate = payload.value
+            lastAppliedPlaybackRateRef.current = payload.value
           }
           break
       }
@@ -227,4 +270,101 @@ export function useViewerStateSync({
     suppressEventsRef,
     isHostRef,
   ])
+}
+
+/**
+ * 观众心跳订阅 Hook：监听房主的 `host-heartbeat` 事件，
+ * 用于进度校正与房主离线检测。
+ *
+ * v3 新增：之前观众端未订阅 host-heartbeat，导致：
+ * - 房主在线时观众端无法校正进度漂移
+ * - 房主心跳超时检测失效（虽然有 server-heartbeat 兜底）
+ *
+ * 行为：
+ * - 收到 host-heartbeat 时，重置房主离线计时器
+ * - 进度差异 > SEEK_FOLLOW_THRESHOLD（3s）时 seek 到房主进度
+ * - 小差异不操作，让视频自然播放
+ * - isPlaying 变化时同步 play/pause
+ */
+export function useViewerHeartbeat({
+  isHostRef,
+  videoRef,
+  suppressEventsRef,
+}: {
+  isHostRef: MutableRefObject<boolean>
+  videoRef: RefObject<HTMLVideoElement | null>
+  suppressEventsRef: MutableRefObject<boolean>
+}): void {
+  const { socket } = useSocket()
+  // seek 并发锁
+  const isReloadingRef = useRef(false)
+  // 缓存上次应用的 isPlaying，用于判断是否需要 play/pause
+  const lastAppliedIsPlayingRef = useRef<boolean | null>(null)
+
+  useEffect(() => {
+    if (!socket || isHostRef.current) return
+
+    const handleHeartbeat = (payload: { currentTime: number; isPlaying: boolean }) => {
+      const video = videoRef.current
+      if (!video) return
+      if (suppressEventsRef.current) return
+
+      // isPlaying 变化时同步 play/pause
+      if (lastAppliedIsPlayingRef.current !== payload.isPlaying) {
+        suppressEventsRef.current = true
+        if (payload.isPlaying && video.paused) {
+          void safePlay(video)
+        } else if (!payload.isPlaying && !video.paused) {
+          video.pause()
+        }
+        lastAppliedIsPlayingRef.current = payload.isPlaying
+        suppressEventsRef.current = false
+      }
+
+      // 进度校正：仅差异 > SEEK_FOLLOW_THRESHOLD 才 seek
+      // 使用 playbackRate=1 计算（心跳不携带 playbackRate，按 1x 倍速阈值）
+      if (
+        shouldSeekToHost(
+          video.currentTime,
+          payload.currentTime,
+          1 // 心跳不携带 playbackRate，使用 1x 倍速阈值（=SEEK_FOLLOW_THRESHOLD=3s）
+        )
+      ) {
+        const state = useRoomStore.getState().watchTogether
+        const targetTime = payload.currentTime
+        void executeSeek({
+          video,
+          targetTime,
+          state,
+          seekTo: async (_video, time) => {
+            // 复用 useViewerStateSync 的 seekTo 不便，这里直接用普通 seek
+            // MSE seek 由上层处理，心跳校正通常在缓冲范围内
+            try {
+              _video.currentTime = time
+              return { success: true }
+            } catch {
+              return { success: false }
+            }
+          },
+          suppressEventsRef,
+          isReloadingRef,
+        }).then((didSeek) => {
+          if (!didSeek) {
+            suppressEventsRef.current = true
+            try {
+              video.currentTime = targetTime
+            } catch {
+              // ignore
+            }
+            suppressEventsRef.current = false
+          }
+        })
+      }
+    }
+
+    socket.on(SOCKET_EVENT.HOST_HEARTBEAT, handleHeartbeat)
+    return () => {
+      socket.off(SOCKET_EVENT.HOST_HEARTBEAT, handleHeartbeat)
+    }
+  }, [socket, isHostRef, videoRef, suppressEventsRef])
 }

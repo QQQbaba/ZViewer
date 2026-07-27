@@ -17,16 +17,34 @@ import type { StreamMeta } from './types'
 const MAX_SEEK_RATIO = 0.99
 
 /**
- * 从 Response 头中提取文件总大小（Content-Range 优先，Content-Length 兜底）。
+ * 从 Response 头中提取文件总大小。
+ *
+ * 优先级：
+ * 1. Content-Range: bytes X-Y/TOTAL → TOTAL（完整 206 响应）
+ * 2. Content-Range: bytes X-Y/* → null（开放式 Range，总大小未知）
+ *    此时不能 fallback 到 Content-Length：开放式 Range 的 Content-Length
+ *    是请求范围的大小（如 HEAD_SIZE），不是文件总大小，误用会导致
+ *    meta.totalSize 被设为 HEAD_SIZE（512KB），stream 方法中
+ *    `offset >= totalSize` 检查会过早终止下载。
+ * 3. 无 Content-Range 但有 Content-Length（200 响应）→ Content-Length
+ *    仅当响应是完整文件（status=200）时才可靠。
  */
 export function parseTotalSize(response: Response): number | null {
   const contentRange = response.headers.get('Content-Range')
   if (contentRange) {
-    const match = contentRange.match(/\/(\d+)/)
+    // Content-Range: bytes X-Y/TOTAL 或 bytes X-Y/*
+    const match = contentRange.match(/\/(\d+)$/)
     if (match) return parseInt(match[1], 10)
+    // Content-Range: bytes X-Y/* → 总大小未知，返回 null
+    // 不 fallback 到 Content-Length（那只是范围大小，不是文件总大小）
+    return null
   }
-  const contentLength = response.headers.get('Content-Length')
-  if (contentLength) return parseInt(contentLength, 10)
+  // 无 Content-Range 头：仅当 200 响应时 Content-Length 才是文件总大小
+  // 206 响应无 Content-Range 头是不规范的，Content-Length 不可信
+  if (response.status === 200) {
+    const contentLength = response.headers.get('Content-Length')
+    if (contentLength) return parseInt(contentLength, 10)
+  }
   return null
 }
 

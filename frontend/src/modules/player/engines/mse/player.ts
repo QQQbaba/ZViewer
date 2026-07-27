@@ -26,6 +26,7 @@ import {
   getFirstBufferedStartAfter,
 } from '../../services/buffer-manager'
 import { MediaTrack } from './track'
+import type { PlayerController } from '../../types'
 import {
   INITIAL_APPEND_TIMEOUT_MS,
   SEEK_FLUSH_TIMEOUT_MS,
@@ -59,7 +60,7 @@ function fail(message: string, needReload = false): SeekResult {
   return { success: false, message, needReload }
 }
 
-export class MsePlayer {
+export class MsePlayer implements PlayerController {
   private readonly video: HTMLVideoElement
   private readonly videoUrl: string
   private readonly audioUrl: string
@@ -647,4 +648,6 @@ export class MsePlayer {
   }
 }
 
-export type { SeekResult, MsePlayerOptions } from './types'
+export type { MsePlayerOptions } from './types'
+// SeekResult 已上移到 player/types.ts（PlayerController 接口的一部分）
+export type { SeekResult } from '../../types'

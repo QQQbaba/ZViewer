@@ -281,11 +281,18 @@ export class MediaTrack {
             ? appendBuffer(this.sb, this.meta.initSegment)
             : Promise.resolve()
 
-          const { data: fragData } = await downloadRange(
+          console.warn(
+            `[MediaTrack] sidx 精确路径: 开始 downloadRange ${frag.offset}-${frag.offset + frag.size - 1} (${frag.size}B)`
+          )
+          const rangeStart = Date.now()
+          const { data: fragData, response: fragResp } = await downloadRange(
             this.url,
             frag.offset,
             frag.offset + frag.size - 1,
             signal
+          )
+          console.warn(
+            `[MediaTrack] sidx 精确路径: downloadRange 完成 ${fragData.byteLength}B status=${fragResp.status} 耗时=${Date.now() - rangeStart}ms`
           )
           await initPromise
 

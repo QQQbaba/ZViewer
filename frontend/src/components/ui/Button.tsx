@@ -108,9 +108,9 @@ export function Button({
   }
 
   const sizes = {
-    sm: 'px-3 py-1.5 text-sm',
-    md: 'px-4 py-2 text-sm',
-    lg: 'px-5 py-2.5 text-base',
+    sm: 'h-8 shrink-0 px-3 py-1.5 text-sm leading-tight',
+    md: 'h-10 shrink-0 px-4 py-2 text-sm leading-tight',
+    lg: 'h-12 shrink-0 px-5 py-2.5 text-base leading-tight',
   }
 
   return (

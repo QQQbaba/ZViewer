@@ -32,7 +32,7 @@ function searchVideoToResult(item: BilibiliSearchVideo): DanmakuSearchResult {
     title: item.title,
     cover: item.pic,
     description: item.author,
-    source: 'bilibili',
+    source: 'bilibili-video',
     stats: {
       play: item.play,
       danmaku: item.danmaku,
@@ -61,7 +61,7 @@ export const bilibiliVideoDanmakuProvider: DanmakuSourceProvider = {
           id: info.bvid,
           title: info.title,
           cover: info.pic,
-          source: 'bilibili',
+          source: 'bilibili-video',
           stats: info.stat
             ? {
                 play: info.stat.view,

@@ -13,6 +13,7 @@ interface MountBrowserProps {
   open: boolean
   onClose: () => void
   onSelectFile?: (path: string) => void
+  onSelectFiles?: (paths: string[]) => void
   selectable?: boolean
 }
 
@@ -21,15 +22,25 @@ export default function MountBrowser({
   open,
   onClose,
   onSelectFile,
+  onSelectFiles,
   selectable = false,
 }: MountBrowserProps) {
+  const handleFiles = (paths: string[]) => {
+    if (onSelectFiles) {
+      onSelectFiles(paths)
+    } else if (onSelectFile && paths[0]) {
+      onSelectFile(paths[0])
+    }
+    onClose()
+  }
+
   if (mount && isWebDAVMount(mount)) {
     return (
       <WebDAVBrowser
         mountId={mount.id}
         open={open}
         onClose={onClose}
-        onSelectFile={onSelectFile}
+        onSelectFiles={selectable ? handleFiles : undefined}
         selectable={selectable}
       />
     )
@@ -41,7 +52,7 @@ export default function MountBrowser({
         mountId={mount.id}
         open={open}
         onClose={onClose}
-        onSelectFile={onSelectFile}
+        onSelectFiles={selectable ? handleFiles : undefined}
         selectable={selectable}
       />
     )
@@ -53,7 +64,7 @@ export default function MountBrowser({
         mountId={mount.id}
         open={open}
         onClose={onClose}
-        onSelectFile={onSelectFile}
+        onSelectFiles={selectable ? handleFiles : undefined}
         selectable={selectable}
       />
     )
@@ -65,7 +76,7 @@ export default function MountBrowser({
       mountId={null}
       open={open}
       onClose={onClose}
-      onSelectFile={onSelectFile}
+      onSelectFiles={undefined}
       selectable={selectable}
     />
   )

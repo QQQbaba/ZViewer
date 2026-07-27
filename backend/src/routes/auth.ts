@@ -247,6 +247,38 @@ router.get(
   },
 );
 
+/**
+ * 公开接口：返回前端启动所需的公开系统设置（无需鉴权）。
+ *
+ * 仅暴露非敏感字段：
+ * - registrationMode：注册模式（登录/注册页展示）
+ * - roomCreationMode：房间创建权限模式（HomePage 据此决定是否显示「开始共享」按钮）
+ *
+ * 管理员级完整设置走 GET /api/admin/settings。
+ */
+router.get(
+  '/public-settings',
+  async (
+    _req: import('express').Request,
+    res: import('express').Response,
+  ): Promise<void> => {
+    try {
+      const settings = await getSystemSettings();
+      res.json({
+        success: true,
+        settings: {
+          registrationMode: settings.registrationMode,
+          roomCreationMode: settings.roomCreationMode,
+          betaFeaturesEnabled: settings.betaFeaturesEnabled,
+        },
+      });
+    } catch (err) {
+      console.error('public-settings error:', err);
+      res.status(500).json({ success: false, message: '获取公开设置失败' });
+    }
+  },
+);
+
 router.get(
   '/me',
   authenticateToken,

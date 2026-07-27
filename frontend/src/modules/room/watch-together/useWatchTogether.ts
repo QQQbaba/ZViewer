@@ -10,6 +10,7 @@ import {
 } from '@/store/roomStore'
 import { type QualityOption } from './resolveSource'
 import { useBilibiliQuality } from '@/modules/bilibili/useBilibiliQuality'
+import { getBilibiliParseOptions } from '@/modules/bilibili/parseOptions'
 import {
   useHostSync,
   useViewerSync,
@@ -349,7 +350,7 @@ export function useWatchTogether({
   )
 
   // 房主：重新解析当前 B站 视频（用于解析偏好变更后即时生效）
-  const reloadBilibili = useCallback(async () => {
+  const reloadBilibili = useCallback(async (options?: { preferMp4?: boolean }) => {
     // 并发重入保护：上一次解析仍在进行中（含超时未返回的挂起场景）时直接跳过，
     // 避免多个解析请求并发导致 suppressEventsRef / isResolving 状态错乱。
     if (isReloadingBilibiliRef.current) {
@@ -386,7 +387,11 @@ export function useWatchTogether({
     const shouldPlay = !video.paused
 
     try {
-      const resolved = await resolveBilibiliOnline(movie)
+      // 未显式传入 options 时，从 localStorage 读取播放模式偏好
+      // （BilibiliParseSettings 中切换播放模式触发 triggerReloadBilibili 走此路径）
+      const resolvedOptions =
+        options ?? { preferMp4: getBilibiliParseOptions().preferMp4 }
+      const resolved = await resolveBilibiliOnline(movie, undefined, resolvedOptions)
 
       const newState: WatchTogetherState = {
         ...state,
@@ -517,11 +522,12 @@ export function useWatchTogether({
     suppressEventsRef.current = true
     lastLoadedMovieRef.current = { id: movie.id, url: movie.url }
 
-    /** 带解析进度 UI 的在线解析（B站） */
+    /** 带解析进度 UI 的在线解析（B站），读取 localStorage 中的播放模式偏好 */
     const resolveOnline = async (): Promise<ResolvedMovieSource> => {
       setIsResolving(true)
       try {
-        return await resolveBilibiliOnline(movie)
+        const preferMp4 = getBilibiliParseOptions().preferMp4
+        return await resolveBilibiliOnline(movie, undefined, { preferMp4 })
       } finally {
         setIsResolving(false)
       }

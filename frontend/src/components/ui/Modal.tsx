@@ -4,7 +4,7 @@ import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from './Button'
 
-const MODAL_ANIMATION_DURATION = 400
+const MODAL_ANIMATION_DURATION = 220
 
 export interface ModalProps {
   open: boolean
@@ -62,7 +62,7 @@ export function Modal({
   return createPortal(
     <div
       className="fixed inset-0 flex items-center justify-center p-4"
-      style={{ zIndex: 999 }}
+      style={{ zIndex: 999, transform: 'translateZ(0)' }}
     >
       <div
         className={cn(

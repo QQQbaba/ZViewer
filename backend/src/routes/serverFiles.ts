@@ -536,7 +536,8 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
     }
     const name = basename(targetAbs);
     const format = detectMediaFormat(name);
-    const proxyUrl = `${req.protocol}://${req.get('host')}/api/server-files/proxy?path=${encodeURIComponent(target)}`;
+    // 使用相对路径，由前端根据当前页面 origin 自动解析，避免反向代理后协议错误（http vs https）
+    const proxyUrl = `/api/server-files/proxy?path=${encodeURIComponent(target)}`;
     res.json({
       success: true,
       title: name,

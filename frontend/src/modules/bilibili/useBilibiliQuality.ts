@@ -3,6 +3,7 @@ import type { RefObject, MutableRefObject } from 'react'
 import { resolveBilibiliWithOptions } from './bilibiliApi'
 import type { QualityOption, ResolvedSource } from './types'
 import { useRoomStore } from '@/store/roomStore'
+// 分P 切换支持：applyQualityChange 在有 preResolved 时跳过 format 检查
 import type { WatchTogetherState, Movie } from '@/store/roomStore'
 import { safePlay } from '@/modules/sync-playback/safePlay'
 
@@ -69,12 +70,20 @@ export function useBilibiliQuality(ctx: BilibiliQualityContext) {
       if (!video) return
 
       const state = useRoomStore.getState().watchTogether
-      if (state.sourceType !== 'bilibili' || state.format !== 'dash') return
-
       const {
         broadcast = false,
         resolved: preResolved,
       } = options
+
+      // format 检查仅在内部解析路径（无 preResolved）时生效，
+      // 因为 MP4 模式下清晰度由 B站 决定，无需手动切换。
+      // 但分P 切换（外部已解析，传入 preResolved）在 MP4 模式下也需要生效，
+      // 因此有 preResolved 时跳过 format 检查。
+      if (
+        state.sourceType !== 'bilibili' ||
+        (!preResolved && state.format !== 'dash')
+      )
+        return
 
       setIsSwitchingQuality(true)
       ctx.setIsResolving(true)

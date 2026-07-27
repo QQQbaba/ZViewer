@@ -64,11 +64,13 @@ interface UpdateInfo {
 }
 
 type RegistrationMode = 'open' | 'approval' | 'closed'
+type RoomCreationMode = 'admin-only' | 'all-users'
 
 interface AdminSettings {
   autoDeleteInactiveRooms: boolean
   autoDeleteAfterHours: number
   registrationMode: RegistrationMode
+  roomCreationMode: RoomCreationMode
   betaFeaturesEnabled: boolean
   dataSourceConfig?: {
     aniSubsSubscriptions?: string[]
@@ -100,6 +102,7 @@ export default function AdminPage() {
     autoDeleteInactiveRooms: true,
     autoDeleteAfterHours: 24,
     registrationMode: 'approval',
+    roomCreationMode: 'admin-only',
     betaFeaturesEnabled: false,
   })
   const [loading, setLoading] = useState(false)
@@ -171,6 +174,8 @@ export default function AdminPage() {
     }
     if (data.success && data.settings) {
       setSettings(data.settings)
+      // 同步更新 systemSettingsStore，避免 HomePage 等公开页面拿到过期值
+      invalidateSystemSettings()
     } else {
       message.error(data.message ?? '获取设置失败')
     }
@@ -448,6 +453,7 @@ export default function AdminPage() {
           autoDeleteInactiveRooms: settings.autoDeleteInactiveRooms,
           autoDeleteAfterHours: settings.autoDeleteAfterHours,
           registrationMode: settings.registrationMode,
+          roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
           dataSourceConfig: settings.dataSourceConfig,
         }),
@@ -1039,6 +1045,29 @@ export default function AdminPage() {
                 </div>
 
                 <Title level={5} className="mb-4 mt-6">
+                  房间创建权限
+                </Title>
+                <div className="mb-6 max-w-md">
+                  <Select
+                    label="允许创建房间的用户范围"
+                    value={settings.roomCreationMode}
+                    options={[
+                      { label: '仅管理员（root / admin）', value: 'admin-only' },
+                      { label: '所有登录用户（user / admin / root）', value: 'all-users' },
+                    ]}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        roomCreationMode: value as RoomCreationMode,
+                      }))
+                    }
+                  />
+                  <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                    切换为「所有登录用户」后，普通用户也可在主页点击「开始共享」创建房间；游客始终不能创建房间。
+                  </p>
+                </div>
+
+                <Title level={5} className="mb-4 mt-6">
                   Beta 功能
                 </Title>
                 <div className="mb-6">
@@ -1255,12 +1284,15 @@ export default function AdminPage() {
 
       <ConfirmModal
         open={cleanupConfirm}
-        onClose={() => setCleanupConfirm(false)}
+        onClose={() => {
+          if (!cleanupLoading) setCleanupConfirm(false)
+        }}
         title="移除无人使用的房间"
         onOk={handleCleanupUnusedRooms}
         onCancel={() => setCleanupConfirm(false)}
         okText="确认"
         cancelText="取消"
+        confirmLoading={cleanupLoading}
       >
         确定要移除所有当前无人使用的房间吗？此操作不可撤销。
       </ConfirmModal>

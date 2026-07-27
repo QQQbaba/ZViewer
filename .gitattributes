@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts must use LF line endings, otherwise bash reports:
+#   /usr/bin/env: 'bash\r': No such file or directory
+*.sh text eol=lf

@@ -9,6 +9,7 @@ import { IsNull } from 'typeorm';
 import { AppDataSource } from '../../data-source';
 import { Session } from '../../entities/Session';
 import { Room } from '../../entities/Room';
+import { SystemSettings } from '../../entities/SystemSettings';
 import type { UserRole } from '../../entities/User';
 
 /**
@@ -17,6 +18,23 @@ import type { UserRole } from '../../entities/User';
  * 封装所有基于 Session 表的权限校验逻辑。
  */
 export class RoomPermissionService {
+  /**
+   * 判断给定角色是否可以创建房间。
+   *
+   * 权限规则（基于系统设置 `roomCreationMode`）：
+   * - `guest` 始终禁止创建房间（未登录用户不允许）
+   * - `admin-only` 模式：仅 `root` / `admin` 可创建
+   * - `all-users` 模式：`root` / `admin` / `user` 均可创建
+   *
+   * 将此逻辑集中到权限服务，消除在 handler/路由中硬编码角色判断的反复出现。
+   */
+  canCreateRoom(role: UserRole, settings: SystemSettings): boolean {
+    if (role === 'guest') return false;
+    if (role === 'root' || role === 'admin') return true;
+    // role === 'user'
+    return settings.roomCreationMode === 'all-users';
+  }
+
   /**
    * 检查 socket 是否为指定房间的活跃房主（sharer）。
    *

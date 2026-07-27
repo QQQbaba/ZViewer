@@ -14,15 +14,17 @@ import type { DanmakuSource } from '@/modules/danmaku/types'
 const BV_REGEX = /^BV[0-9A-Za-z]{10}$/
 
 const SOURCE_LABELS: Record<DanmakuSource, string> = {
-  bilibili: 'B站',
+  'bilibili-video': 'B站视频',
+  'bilibili-bangumi': 'B站番剧',
   bahamut: '巴哈',
   dandanplay: '弹弹',
 }
 
 const SOURCE_COLORS: Record<DanmakuSource, string> = {
-  bilibili: 'var(--md-sys-color-primary)',
-  bahamut: 'var(--md-sys-color-tertiary)',
-  dandanplay: 'var(--md-sys-color-secondary)',
+  'bilibili-video': 'var(--md-sys-color-primary)',
+  'bilibili-bangumi': 'var(--md-sys-color-tertiary)',
+  bahamut: 'var(--md-sys-color-secondary)',
+  dandanplay: 'var(--md-sys-color-error)',
 }
 
 export function DanmakuTrackCard() {
@@ -33,7 +35,7 @@ export function DanmakuTrackCard() {
   const toggleTrackHidden = useDanmakuStore((state) => state.toggleTrackHidden)
 
   const [searchOpen, setSearchOpen] = useState(false)
-  const [danmakuSource, setDanmakuSource] = useState<DanmakuSource>('bilibili')
+  const [danmakuSource, setDanmakuSource] = useState<DanmakuSource>('bilibili-video')
   const [bvInput, setBvInput] = useState('')
   const [bvLoading, setBvLoading] = useState(false)
   const [modalInitialKeyword, setModalInitialKeyword] = useState<
@@ -49,7 +51,7 @@ export function DanmakuTrackCard() {
 
     setBvLoading(true)
     try {
-      const episodes = await getDanmakuEpisodes('bilibili', bvid)
+      const episodes = await getDanmakuEpisodes('bilibili-video', bvid)
       if (episodes.length === 0) {
         message.info('未找到可用集数')
         return
@@ -57,13 +59,13 @@ export function DanmakuTrackCard() {
       if (episodes.length === 1) {
         // 单集：直接获取弹幕并添加
         const episode = episodes[0]
-        const trackId = `bilibili:${episode.id}`
+        const trackId = `bilibili-video:${episode.id}`
         if (tracks.some((t) => t.trackId === trackId)) {
           message.warning('该弹幕轨道已存在')
           return
         }
-        const items = await fetchDanmaku('bilibili', episode)
-        addTrack(trackId, episode.title, 'bilibili', items, 0)
+        const items = await fetchDanmaku('bilibili-video', episode)
+        addTrack(trackId, episode.title, 'bilibili-video', items, 0)
         message.success(
           `已添加 ${episode.title} 弹幕轨道（共 ${items.length} 条）`
         )
@@ -71,7 +73,7 @@ export function DanmakuTrackCard() {
       } else {
         // 多集：打开搜索弹窗预填 BV 号并自动搜索
         setModalInitialKeyword(bvid)
-        setDanmakuSource('bilibili')
+        setDanmakuSource('bilibili-video')
         setSearchOpen(true)
         setBvInput('')
       }
@@ -94,7 +96,7 @@ export function DanmakuTrackCard() {
   }
 
   return (
-    <div className="glass flex min-h-0 flex-col gap-3 rounded-[var(--md-sys-shape-corner)] p-3">
+    <div className="glass flex h-full min-h-0 flex-col gap-3 rounded-[var(--md-sys-shape-corner)] p-3">
       <div className="flex items-center justify-between">
         <Text className="text-sm font-medium">弹幕轨道</Text>
         <Text type="secondary" className="text-[10px]">
@@ -144,8 +146,8 @@ export function DanmakuTrackCard() {
         />
       </div>
 
-      <div className="flex min-h-0 flex-col gap-2 overflow-hidden">
-        <div className="max-h-[240px] min-h-[120px] overflow-y-auto pr-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+        <div className="zen-scroll min-h-0 flex-1 overflow-y-auto pr-1">
           {tracks.length === 0 && (
             <div
               className="flex h-full min-h-[120px] flex-col items-center justify-center gap-2 rounded-[var(--md-sys-shape-corner)] border py-8"

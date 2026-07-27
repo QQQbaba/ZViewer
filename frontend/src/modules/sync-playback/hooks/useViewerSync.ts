@@ -20,7 +20,7 @@
 import type { RefObject, MutableRefObject } from 'react'
 import type { WatchTogetherState } from '../types'
 import type { SeekToResult } from '../services'
-import { useViewerStateSync } from './useViewerStateSync'
+import { useViewerStateSync, useViewerHeartbeat } from './useViewerStateSync'
 import {
   useServerHeartbeat,
   usePlaybackStateRequest,
@@ -70,7 +70,14 @@ export function useViewerSync({
     reloadVideo,
   })
 
-  // 2. 从服务器请求初始状态（加入房间时，ack 直返）
+  // 2. 订阅房主心跳（房主在线时，每 5s 校正进度漂移）
+  useViewerHeartbeat({
+    isHostRef,
+    videoRef,
+    suppressEventsRef,
+  })
+
+  // 3. 从服务器请求初始状态（加入房间时，ack 直返）
   usePlaybackStateRequest({
     roomId,
     isHostRef,
@@ -80,7 +87,7 @@ export function useViewerSync({
     applySourceToVideo,
   })
 
-  // 3. 订阅服务器心跳（房主离线时服务器接管广播，观众继续播放）
+  // 4. 订阅服务器心跳（房主离线时服务器接管广播，观众继续播放）
   useServerHeartbeat({
     isHostRef,
     videoRef,

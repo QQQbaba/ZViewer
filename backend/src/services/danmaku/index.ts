@@ -1,12 +1,14 @@
 import { DanmakuSourceProvider } from './types';
 import { bilibiliVideoDanmakuProvider } from './providers/bilibiliVideo';
+import { bilibiliBangumiDanmakuProvider } from './providers/bilibiliBangumi';
 import { bahamutDanmakuProvider } from './providers/bahamut';
 import { dandanplayDanmakuProvider } from './providers/dandanplay';
 
 export * from './types';
 
 export const danmakuProviders: Record<string, DanmakuSourceProvider> = {
-  bilibili: bilibiliVideoDanmakuProvider,
+  'bilibili-video': bilibiliVideoDanmakuProvider,
+  'bilibili-bangumi': bilibiliBangumiDanmakuProvider,
   bahamut: bahamutDanmakuProvider,
   dandanplay: dandanplayDanmakuProvider,
 };

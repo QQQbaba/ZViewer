@@ -5,7 +5,8 @@
  * 消除旧架构中 index.ts 内联的 create-room / close-room / admin-close-room 逻辑。
  *
  * 设计要点：
- * - 创建房间仅 root/admin 可调用，使用 8 位 nanoid 作为 roomId
+ * - 创建房间权限由 roomPermissionService.canCreateRoom 统一判断（依据系统设置 roomCreationMode）
+ * - 使用 8 位 nanoid 作为 roomId
  * - 密码使用 bcrypt 加密后持久化
  * - 关闭房间统一走 roomStateService.closeRoomAndNotify
  */
@@ -15,6 +16,7 @@ import bcrypt from 'bcryptjs';
 import { AppDataSource } from '../../../data-source';
 import { Room } from '../../../entities/Room';
 import type { UserRole } from '../../../entities/User';
+import { getSystemSettings } from '../../../services/system-settings';
 import {
   type AckCallback,
   type SocketEventHandler,
@@ -51,17 +53,25 @@ export class RoomLifecycleHandler implements SocketEventHandler {
   readonly name = 'room-lifecycle';
 
   register(socket: Socket, io: SocketIOServer): void {
-    // --- 创建房间：仅 root/admin ---
+    // --- 创建房间：根据系统设置 roomCreationMode 校验 ---
+    // 权限规则集中在 roomPermissionService.canCreateRoom，禁止在此硬编码角色判断。
     socket.on(
       'create-room',
       async (payload: CreateRoomPayload, callback: AckCallback) => {
         try {
           const userId: number = socket.data.userId;
           const role: UserRole = socket.data.role;
-          if (role !== 'root' && role !== 'admin') {
+          const settings = await getSystemSettings();
+          if (!roomPermissionService.canCreateRoom(role, settings)) {
+            const hint =
+              role === 'guest'
+                ? '请先登录后再创建房间'
+                : settings.roomCreationMode === 'admin-only'
+                  ? '无权限：当前仅管理员可创建房间（请联系管理员开启「所有用户」权限）'
+                  : '无权限：当前账号无法创建房间';
             return safeAck(callback, {
               success: false,
-              message: '无权限：仅管理员可创建房间',
+              message: hint,
             });
           }
 

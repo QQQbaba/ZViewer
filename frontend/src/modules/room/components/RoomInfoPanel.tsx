@@ -27,6 +27,7 @@ import { message } from '@/components/ui/message'
 import { useSocket } from '@/hooks/useSocket'
 import { useRoomStore } from '@/store/roomStore'
 import { useAuthStore } from '@/store/authStore'
+import { cn } from '@/lib/utils'
 
 interface RoomInfoPanelProps {
   roomId: string
@@ -76,6 +77,7 @@ export function RoomInfoPanel({
   const { connected, socket } = useSocket()
   const viewers = useRoomStore((state) => state.viewers)
   const roomName = useRoomStore((state) => state.roomName)
+  const roomMode = useRoomStore((state) => state.mode)
   const roomSettings = useRoomStore((state) => state.roomSettings)
   const addMutedViewer = useRoomStore((state) => state.addMutedViewer)
   const removeMutedViewer = useRoomStore((state) => state.removeMutedViewer)
@@ -374,7 +376,7 @@ export function RoomInfoPanel({
     return (
       <div
         key={viewer.socketId}
-        className="glass flex items-center gap-2 rounded-lg px-3 py-2"
+        className="glass flex max-w-full items-center gap-2 rounded-lg px-3 py-2"
       >
         <MessageSquare
           className="h-4 w-4 shrink-0"
@@ -502,7 +504,23 @@ export function RoomInfoPanel({
         </div>
 
         {/* 卡片内容 */}
-        <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 py-3">
+        <div
+          className={cn(
+            'zen-scroll flex min-h-0 flex-1 gap-3 overflow-y-auto px-4 py-3',
+            roomMode === 'screen-share' && isHost
+              ? 'flex-row'
+              : 'flex-col'
+          )}
+        >
+          {/* 房间状态信息（左列 / 单列） */}
+          <div
+            className={cn(
+              'flex flex-col gap-3',
+              roomMode === 'screen-share' && isHost
+                ? 'min-w-0 flex-1'
+                : 'w-full'
+            )}
+          >
           {/* 房间名称 */}
           <div className="flex flex-col gap-1">
             <Text
@@ -650,10 +668,18 @@ export function RoomInfoPanel({
               </Button>
             )}
           </div>
+          </div>
 
-          {/* 房主端在线观众列表 */}
+          {/* 房主端在线观众列表（投屏模式为右列，其他模式为下方） */}
           {isHost && (
-            <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+            <div
+              className={cn(
+                'flex min-h-0 flex-col gap-1.5',
+                roomMode === 'screen-share'
+                  ? 'min-w-0 flex-1 border-l border-[var(--glass-border)] pl-3'
+                  : 'flex-1'
+              )}
+            >
               <div className="flex items-center gap-1.5">
                 <Users
                   className="h-3.5 w-3.5"
@@ -668,7 +694,7 @@ export function RoomInfoPanel({
               </div>
               {viewers.length === 0 ? (
                 <div
-                  className="flex items-center justify-center rounded-[var(--md-sys-shape-corner)] py-3"
+                  className="flex flex-1 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
                   style={{
                     backgroundColor: 'var(--glass-bg)',
                   }}
@@ -678,14 +704,15 @@ export function RoomInfoPanel({
                   </Text>
                 </div>
               ) : (
-                <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+                <div className="flex min-h-0 flex-1 flex-row flex-wrap content-start gap-1.5 overflow-y-auto">
                   {viewers.map((viewer) => (
                     <div
                       key={viewer.socketId}
-                      className="flex items-center gap-1.5 rounded-[var(--md-sys-shape-corner)] px-2 py-1.5 transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
+                      className="flex max-w-full items-center gap-1 rounded-[var(--md-sys-shape-corner)] px-2 py-1 transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
                       style={{
                         backgroundColor: 'var(--glass-bg)',
                       }}
+                      title={viewer.username || viewer.socketId.slice(0, 8)}
                     >
                       <MessageSquare
                         className="h-3 w-3 shrink-0"
@@ -697,7 +724,7 @@ export function RoomInfoPanel({
                       <RoleBadge role={viewer.role} />
                       {viewer.muted && (
                         <VolumeX
-                          className="ml-auto h-3 w-3 shrink-0"
+                          className="h-3 w-3 shrink-0"
                           style={{ color: 'var(--md-sys-color-error)' }}
                         />
                       )}
@@ -868,7 +895,7 @@ export function RoomInfoPanel({
                   </Text>
                 </div>
               ) : (
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-row flex-wrap content-start gap-2 overflow-y-auto">
                   {viewers.map((viewer) => renderViewerItem(viewer, true))}
                 </div>
               )}

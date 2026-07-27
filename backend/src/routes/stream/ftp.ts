@@ -48,14 +48,13 @@ function readFtpParams(
 }
 
 function buildProxyUrl(
-  req: AuthenticatedRequest,
+  _req: AuthenticatedRequest,
   type: string,
   params: Record<string, string>,
 ): string {
-  const protocol = req.protocol;
-  const host = req.get('host') || 'localhost';
+  // 使用相对路径，由前端根据当前页面 origin 自动解析，避免反向代理后协议错误（http vs https）
   const query = new URLSearchParams(params).toString();
-  return `${protocol}://${host}/api/stream/proxy-${type}?${query}`;
+  return `/api/stream/proxy-${type}?${query}`;
 }
 
 // FTP 解析

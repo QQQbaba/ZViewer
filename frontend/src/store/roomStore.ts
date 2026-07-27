@@ -4,6 +4,7 @@ import type {
   ResolvedSource,
   QualityOption,
 } from '@/modules/room/watch-together/resolveSource'
+import type { BilibiliVideoPage } from '@/modules/bilibili/types'
 import type { MediaFormat } from '@/lib/mediaFormat'
 import type { WatchTogetherState } from '@/modules/sync-playback/types'
 
@@ -63,6 +64,10 @@ export interface Movie {
   // 持久化的清晰度信息
   currentQn?: number
   acceptQuality?: { id: number; label: string; resolution?: string }[]
+  /** 多 P 视频的分集列表（单 P 视频为 undefined） */
+  pages?: BilibiliVideoPage[]
+  /** 当前播放的分集序号（从 1 开始，默认 1） */
+  currentPage?: number
 }
 
 export interface MovieDto {
@@ -80,6 +85,8 @@ export interface MovieDto {
   cid: number | null
   currentQn: number | null
   acceptQuality: { id: number; label: string; resolution?: string }[] | null
+  pages: { page: number; cid: number; part: string; duration: number }[] | null
+  currentPage: number | null
   serverUrl: string | null
   path: string | null
   username: string | null
@@ -110,6 +117,8 @@ export function mapDtoToMovie(dto: MovieDto): Movie {
     cid: dto.cid ?? undefined,
     currentQn: dto.currentQn ?? undefined,
     acceptQuality: dto.acceptQuality ?? undefined,
+    pages: dto.pages ?? undefined,
+    currentPage: dto.currentPage ?? undefined,
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
   }
@@ -254,6 +263,8 @@ interface RoomState {
       cid?: number
       currentQn?: number
       acceptQuality?: { id: number; label: string; resolution?: string }[]
+      pages?: { page: number; cid: number; part: string; duration: number }[]
+      currentPage?: number
       serverUrl?: string
       path?: string
       username?: string
@@ -277,6 +288,8 @@ interface RoomState {
       cid?: number
       currentQn?: number
       acceptQuality?: QualityOption[]
+      pages?: { page: number; cid: number; part: string; duration: number }[]
+      currentPage?: number
       serverUrl?: string
       path?: string
       username?: string

@@ -13,6 +13,22 @@ export interface QualityOption {
   resolution?: string
 }
 
+/**
+ * B站视频分集（P）信息。
+ * 多 P 视频的每个分集有独立的 cid 和 m4s 文件。
+ * 前端用于在影片列表中显示分P选择器，切换分P时使用对应 cid 重新解析。
+ */
+export interface BilibiliVideoPage {
+  /** 分集序号，从 1 开始 */
+  page: number
+  /** 分集 cid */
+  cid: number
+  /** 分集标题（part） */
+  part: string
+  /** 分集时长（秒） */
+  duration: number
+}
+
 export interface ResolvedSource {
   title?: string
   videoUrl: string
@@ -28,6 +44,10 @@ export interface ResolvedSource {
   acceptQuality?: QualityOption[]
   /** 大会员状态：0=非大会员，1=大会员。用于统一会员感知逻辑。 */
   vipStatus?: number
+  /** 多 P 视频的分集列表（单 P 视频为 undefined） */
+  pages?: BilibiliVideoPage[]
+  /** 当前播放的分集序号（从 1 开始，默认 1） */
+  currentPage?: number
 }
 
 export interface BilibiliQrData {
@@ -62,10 +82,19 @@ export interface ResolveProgressLine {
   acceptQuality?: QualityOption[]
   /** 大会员状态：0=非大会员，1=大会员。后端在解析时会回传该字段。 */
   vipStatus?: number
+  /** 多 P 视频的分集列表（单 P 视频为 undefined） */
+  pages?: BilibiliVideoPage[]
+  /** 当前播放的分集序号（从 1 开始） */
+  currentPage?: number
 }
 
 export type BilibiliCodec = 'auto' | 'avc' | 'hevc' | 'av1'
 
 export interface BilibiliParseOptions {
   codec?: BilibiliCodec
+  /**
+   * 播放模式偏好：true=MP4 直链（流畅，seek 无卡顿，清晰度通常 480P/720P）；
+   * false/undefined=DASH 分离流（高清，支持 1080P/4K，seek 需 MSE 重新缓冲）。
+   */
+  preferMp4?: boolean
 }

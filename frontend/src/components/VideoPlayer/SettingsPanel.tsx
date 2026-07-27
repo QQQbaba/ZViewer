@@ -153,14 +153,14 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </div>
         ) : danmakuStyle && !isHost ? (
           <div
-            className="mb-1.5 text-sm font-semibold"
+            className="mb-1.5 text-xs font-semibold"
             style={{ color: 'var(--md-sys-color-on-surface)' }}
           >
             弹幕
           </div>
         ) : (
           <div
-            className="mb-1.5 text-sm font-semibold"
+            className="mb-1.5 text-xs font-semibold"
             style={{ color: 'var(--md-sys-color-on-surface)' }}
           >
             字幕
@@ -172,7 +172,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           <>
             <div className="flex items-center justify-between py-0.5">
               <span
-                className="text-sm"
+                className="text-xs"
                 style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
               >
                 启用字幕
@@ -202,7 +202,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                           type="button"
                           onClick={() => onSelectSubtitleTrack?.(i)}
                           className={cn(
-                            'flex items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                            'flex items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors',
                             active
                               ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
                               : 'text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]'

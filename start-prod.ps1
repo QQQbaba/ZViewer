@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 #Requires -Version 5.1
 
 <#
@@ -198,13 +198,21 @@ function Cleanup-OldArchives {
 
 function Test-DepsInstalled {
     # npm workspaces：根目录 node_modules 存在 + 关键依赖存在即视为已安装
+    # 检查后端运行时关键依赖（reflect-metadata / better-sqlite3 / typeorm 等），
+    # 避免部分安装失败时误判为"已就绪"导致启动后 MODULE_NOT_FOUND。
     $rootNodeModules = Join-Path $script:rootDir "node_modules"
     $expressPath = Join-Path $script:rootDir "node_modules\express"
     $vitePath = Join-Path $script:rootDir "node_modules\vite"
+    $reflectPath = Join-Path $script:rootDir "node_modules\reflect-metadata"
+    $typeormPath = Join-Path $script:rootDir "node_modules\typeorm"
+    $sqlitePath = Join-Path $script:rootDir "node_modules\better-sqlite3"
     $hasRoot = Test-Path $rootNodeModules
     $hasExpress = Test-Path $expressPath
     $hasVite = Test-Path $vitePath
-    return [bool]($hasRoot -and $hasExpress -and $hasVite)
+    $hasReflect = Test-Path $reflectPath
+    $hasTypeorm = Test-Path $typeormPath
+    $hasSqlite = Test-Path $sqlitePath
+    return [bool]($hasRoot -and $hasExpress -and $hasVite -and $hasReflect -and $hasTypeorm -and $hasSqlite)
 }
 
 function Resolve-ViteJs {
@@ -232,12 +240,46 @@ function Install-ProjectDependencies {
             Write-Host "  npm ci 失败，回退到 npm install ..." -ForegroundColor Yellow
             npm install --no-audit --no-fund
             if ($LASTEXITCODE -ne 0) {
+                Write-Host ""
+                Write-Host "  ============================================" -ForegroundColor Red
+                Write-Host "  依赖安装失败！" -ForegroundColor Red
+                Write-Host "  最常见原因：better-sqlite3 原生模块编译失败" -ForegroundColor Red
+                Write-Host "  解决方法：" -ForegroundColor Red
+                Write-Host "    安装 Visual Studio Build Tools（C++ 工作负载）" -ForegroundColor Red
+                Write-Host "    或运行: npm install --global windows-build-tools" -ForegroundColor Red
+                Write-Host "  安装后重新运行: .\start-prod.ps1 start -ForceDeps" -ForegroundColor Red
+                Write-Host "  ============================================" -ForegroundColor Red
                 throw "依赖安装失败"
             }
         }
     } finally {
         Pop-Location
     }
+
+    # 安装后验证关键依赖是否存在（防止 npm 部分成功但关键模块缺失）
+    if (-not (Test-DepsInstalled)) {
+        $missing = @()
+        $checks = @{
+            'reflect-metadata' = 'node_modules\reflect-metadata'
+            'typeorm'          = 'node_modules\typeorm'
+            'better-sqlite3'   = 'node_modules\better-sqlite3'
+            'express'          = 'node_modules\express'
+        }
+        foreach ($kv in $checks.GetEnumerator()) {
+            $p = Join-Path $rootDir $kv.Value
+            if (-not (Test-Path $p)) { $missing += $kv.Key }
+        }
+        Write-Host ""
+        Write-Host "  ============================================" -ForegroundColor Red
+        Write-Host "  依赖安装后验证失败，缺失模块: $($missing -join ', ')" -ForegroundColor Red
+        Write-Host "  这通常是因为 better-sqlite3 编译失败导致 npm 回滚了部分安装。" -ForegroundColor Red
+        Write-Host "  解决方法：" -ForegroundColor Red
+        Write-Host "    1. 安装 Visual Studio Build Tools（C++ 工作负载）" -ForegroundColor Red
+        Write-Host "    2. 重新安装: .\start-prod.ps1 start -ForceDeps" -ForegroundColor Red
+        Write-Host "  ============================================" -ForegroundColor Red
+        throw "依赖验证失败：缺失 $($missing -join ', ')"
+    }
+    Write-Host "  依赖安装完成，关键模块验证通过。" -ForegroundColor Green
 }
 
 function Read-PidsFile {
@@ -539,6 +581,72 @@ function Stop-ServiceByPidOrPort {
 
 # ============ 命令实现 ============
 
+function Test-ServiceRunning {
+    # 服务运行检测：PID 文件 + 端口监听双重判定
+    #
+    # 返回 @{ Running = $true/$false; BackendPid = ...; FrontendPid = ...;
+    #         BackendByPort = $true/$false; FrontendByPort = $true/$false;
+    #         PidFile = $existing; StalePidFile = $true/$false }
+    #
+    # 判定规则：
+    # 1. PID 文件中记录的进程仍存活 → 视为运行中（最可靠）
+    # 2. PID 文件不存在或进程已死，但端口仍被监听 → 视为运行中（兜底）
+    #    此场景常见于：服务通过其他方式启动（dev 模式、手动 node）、
+    #                 PID 文件被误删、系统重启后 PID 复用
+    # 3. 两者都不满足 → 未运行
+    $existing = Read-PidsFile
+    $result = @{
+        Running       = $false
+        BackendPid    = $null
+        FrontendPid   = $null
+        BackendByPort = $false
+        FrontendByPort = $false
+        PidFile       = $existing
+        StalePidFile  = $false
+    }
+
+    # 路径 1：PID 文件 + 进程存活检测
+    if ($existing) {
+        $backendProc = Get-ProcessByIdSafe -ProcessId $existing.backend.pid
+        $frontendProc = Get-ProcessByIdSafe -ProcessId $existing.frontend.pid
+        if ($backendProc) {
+            $result.Running = $true
+            $result.BackendPid = $backendProc.Id
+        }
+        if ($frontendProc) {
+            $result.Running = $true
+            $result.FrontendPid = $frontendProc.Id
+        }
+        # PID 文件存在但进程都死了 → 标记为过期文件，调用方可清理
+        if (-not $backendProc -and -not $frontendProc) {
+            $result.StalePidFile = $true
+        }
+    }
+
+    # 路径 2：端口监听兜底检测
+    # 即使 PID 文件不存在或过期，只要端口被监听就视为服务在运行
+    $backendPortInUse = Test-PortInUse -LocalPort $Port
+    $frontendPortInUse = Test-PortInUse -LocalPort $FrontendPort
+    if ($backendPortInUse -and -not $result.BackendPid) {
+        $portPid = Get-PidByPort -LocalPort $Port -TimeoutMs 500
+        if ($portPid) {
+            $result.Running = $true
+            $result.BackendPid = $portPid
+            $result.BackendByPort = $true
+        }
+    }
+    if ($frontendPortInUse -and -not $result.FrontendPid) {
+        $portPid = Get-PidByPort -LocalPort $FrontendPort -TimeoutMs 500
+        if ($portPid) {
+            $result.Running = $true
+            $result.FrontendPid = $portPid
+            $result.FrontendByPort = $true
+        }
+    }
+
+    return $result
+}
+
 function Invoke-Start {
     Write-Title "ZControl 生产服务启动"
 
@@ -546,19 +654,31 @@ function Invoke-Start {
     Write-Host "  后端端口：$Port"
     Write-Host "  前端端口：$FrontendPort"
 
-    # 检查是否已在运行
-    $existing = Read-PidsFile
-    if ($existing) {
-        $backendProc = Get-ProcessByIdSafe -ProcessId $existing.backend.pid
-        $frontendProc = Get-ProcessByIdSafe -ProcessId $existing.frontend.pid
-        if ($backendProc -or $frontendProc) {
-            Write-Host "服务已在运行中，如需重启请使用 restart 子命令" -ForegroundColor Yellow
-            if ($backendProc) { Write-Host "  后端 PID: $($backendProc.Id)" }
-            if ($frontendProc) { Write-Host "  前端 PID: $($frontendProc.Id)" }
-            return
-        } else {
-            Remove-Item $pidsFile -Force -ErrorAction SilentlyContinue
+    # 检查是否已在运行（PID 文件 + 端口监听双重判定）
+    $running = Test-ServiceRunning
+    if ($running.Running) {
+        Write-Host "服务已在运行中，如需重启请使用 restart 子命令" -ForegroundColor Yellow
+        if ($running.BackendPid) {
+            $source = if ($running.BackendByPort) { "端口检测" } else { "PID 文件" }
+            Write-Host "  后端 PID: $($running.BackendPid) (来源: $source)"
         }
+        if ($running.FrontendPid) {
+            $source = if ($running.FrontendByPort) { "端口检测" } else { "PID 文件" }
+            Write-Host "  前端 PID: $($running.FrontendPid) (来源: $source)"
+        }
+        # 如果 PID 文件不存在但端口被占用，提示用户
+        if (-not $running.PidFile -and ($running.BackendByPort -or $running.FrontendByPort)) {
+            Write-Host ""
+            Write-Host "  提示：检测到端口被占用但未找到 PID 文件，" -ForegroundColor DarkYellow
+            Write-Host "        可能是服务通过其他方式启动（如 dev 模式或手动 node）。" -ForegroundColor DarkYellow
+            Write-Host "        如需强制启动，请先停止占用端口的进程，或使用 -Port / -FrontendPort 指定其他端口。" -ForegroundColor DarkYellow
+        }
+        return
+    }
+
+    # 清理过期的 PID 文件
+    if ($running.StalePidFile) {
+        Remove-Item $pidsFile -Force -ErrorAction SilentlyContinue
     }
 
     # 1. 检查环境
@@ -619,15 +739,19 @@ function Invoke-Start {
     $supervisorScript = Join-Path $rootDir "supervisor.ps1"
 
     Write-Host "  启动后端 (PORT=$Port, supervisor 模式) ..."
+    # 注意：Start-Process -ArgumentList 接收数组时按空格分词，
+    # 无法处理包含空格的参数（如 vite.js preview --port 4173 --host ::）。
+    # 改用单个字符串形式传递完整 ArgumentList，外层用双引号包裹每个参数。
     $backendSupervisorArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass',
-        '-File', "`"$supervisorScript`"",
-        '-Command', 'node',
-        '-CommandArgs', '"dist/index.js"',
-        '-WorkingDirectory', "`"$backendDir`"",
-        '-LogStdout', "`"$backendLog`"",
+        '-NoProfile'
+        '-ExecutionPolicy', 'Bypass'
+        '-File', "`"$supervisorScript`""
+        '-Command', 'node'
+        '-CommandArgs', '"dist/index.js"'
+        '-WorkingDirectory', "`"$backendDir`""
+        '-LogStdout', "`"$backendLog`""
         '-LogStderr', "`"$backendErrLog`""
-    )
+    ) -join ' '
     $backendSupervisor = Start-Process -FilePath 'powershell.exe' -ArgumentList $backendSupervisorArgs -PassThru -WindowStyle Hidden
     $backendSupervisorPid = $backendSupervisor.Id
     Write-Host "  后端 supervisor PID: $backendSupervisorPid (等待端口监听...)"
@@ -656,16 +780,23 @@ function Invoke-Start {
         throw "未找到 vite.js，请确认 frontend 依赖已安装"
     }
     Write-Host "  vite.js: $viteJs"
+    # 注意：-CommandArgs 参数包含空格（vite.js preview --port ...），
+    # 用数组传 -ArgumentList 会被空格分词截断；用单字符串传时，外层双引号
+    # 会被 PowerShell 吃掉，导致 "vite.js" 后的部分被当作独立参数。
+    # 解决方案：用反引号转义内层双引号，让整个 -CommandArgs 值作为一个参数传递。
+    # 实际传递：-CommandArgs "\"F:\...\vite.js\" preview --port 4179 --host ::"
+    $frontendCommandArgs = "`"$viteJs`" preview --port $FrontendPort --host ::"
     $frontendSupervisorArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass',
-        '-File', "`"$supervisorScript`"",
-        '-Command', 'node',
+        '-NoProfile'
+        '-ExecutionPolicy', 'Bypass'
+        '-File', "`"$supervisorScript`""
+        '-Command', 'node'
         # --host :: 让 Vite preview 绑定到 IPv6 双栈（同时接受 IPv4/IPv6 连接）
-        '-CommandArgs', "`"$viteJs`" preview --port $FrontendPort --host ::",
-        '-WorkingDirectory', "`"$frontendDir`"",
-        '-LogStdout', "`"$frontendLog`"",
+        '-CommandArgs', "`"$frontendCommandArgs`""
+        '-WorkingDirectory', "`"$frontendDir`""
+        '-LogStdout', "`"$frontendLog`""
         '-LogStderr', "`"$frontendErrLog`""
-    )
+    ) -join ' '
     $frontendSupervisor = Start-Process -FilePath 'powershell.exe' -ArgumentList $frontendSupervisorArgs -PassThru -WindowStyle Hidden
     $frontendSupervisorPid = $frontendSupervisor.Id
     Write-Host "  前端 supervisor PID: $frontendSupervisorPid (等待端口监听...)"
@@ -775,21 +906,30 @@ function Invoke-Status {
     # 端口已在主入口统一解析（命令行参数 > 配置文件 > 默认值）
     $savedPorts = Read-PortsFile  # 仅用于显示配置文件状态
 
-    $existing = Read-PidsFile
-    if (-not $existing) {
-        Write-Host "  PID 文件不存在，服务未运行（或未通过本脚本启动）" -ForegroundColor Yellow
+    # 使用统一的检测函数（PID 文件 + 端口监听双重判定）
+    $running = Test-ServiceRunning
+    if (-not $running.Running) {
+        Write-Host "  服务未运行" -ForegroundColor Yellow
+        if ($running.PidFile) {
+            Write-Host "  （PID 文件存在但进程已退出，属过期文件）" -ForegroundColor DarkGray
+        }
     } else {
-        $backendProc = Get-ProcessByIdSafe -ProcessId $existing.backend.pid
-        $frontendProc = Get-ProcessByIdSafe -ProcessId $existing.frontend.pid
-
+        # 后端状态
         Write-Host "  后端:"
-        Write-Host "    PID:   $($existing.backend.pid) (supervisor)"
-        Write-Host "    端口:  $($existing.backend.port)"
-        Write-Host "    URL:   $($existing.backend.url)"
-        if ($backendProc) {
-            $svcPid = Get-PidByPort -LocalPort $existing.backend.port -TimeoutMs 500
+        if ($running.PidFile -and $running.PidFile.backend) {
+            Write-Host "    PID:   $($running.PidFile.backend.pid) (supervisor)"
+            Write-Host "    端口:  $($running.PidFile.backend.port)"
+            Write-Host "    URL:   $($running.PidFile.backend.url)"
+        } else {
+            Write-Host "    PID:   $($running.BackendPid) (无 PID 文件，端口检测)"
+            Write-Host "    端口:  $Port"
+            Write-Host "    URL:   http://localhost:$Port"
+        }
+        if ($running.BackendPid) {
+            $svcPid = Get-PidByPort -LocalPort $Port -TimeoutMs 500
             if ($svcPid) {
-                Write-Host "    状态:  运行中 (服务 PID $svcPid)" -ForegroundColor Green
+                $source = if ($running.BackendByPort) { "端口检测" } else { "PID 文件" }
+                Write-Host "    状态:  运行中 (服务 PID $svcPid, 来源: $source)" -ForegroundColor Green
             } else {
                 Write-Host "    状态:  supervisor 运行中，服务正在重启..." -ForegroundColor Yellow
             }
@@ -799,13 +939,20 @@ function Invoke-Status {
 
         Write-Host ""
         Write-Host "  前端:"
-        Write-Host "    PID:   $($existing.frontend.pid) (supervisor)"
-        Write-Host "    端口:  $($existing.frontend.port)"
-        Write-Host "    URL:   $($existing.frontend.url)"
-        if ($frontendProc) {
-            $svcPid = Get-PidByPort -LocalPort $existing.frontend.port -TimeoutMs 500
+        if ($running.PidFile -and $running.PidFile.frontend) {
+            Write-Host "    PID:   $($running.PidFile.frontend.pid) (supervisor)"
+            Write-Host "    端口:  $($running.PidFile.frontend.port)"
+            Write-Host "    URL:   $($running.PidFile.frontend.url)"
+        } else {
+            Write-Host "    PID:   $($running.FrontendPid) (无 PID 文件，端口检测)"
+            Write-Host "    端口:  $FrontendPort"
+            Write-Host "    URL:   http://localhost:$FrontendPort"
+        }
+        if ($running.FrontendPid) {
+            $svcPid = Get-PidByPort -LocalPort $FrontendPort -TimeoutMs 500
             if ($svcPid) {
-                Write-Host "    状态:  运行中 (服务 PID $svcPid)" -ForegroundColor Green
+                $source = if ($running.FrontendByPort) { "端口检测" } else { "PID 文件" }
+                Write-Host "    状态:  运行中 (服务 PID $svcPid, 来源: $source)" -ForegroundColor Green
             } else {
                 Write-Host "    状态:  supervisor 运行中，服务正在重启..." -ForegroundColor Yellow
             }

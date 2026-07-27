@@ -132,7 +132,7 @@ export function useVideoSource({
   watchTogether,
   isHostRef,
 }: UseVideoSourceOptions): UseVideoSourceReturn {
-  const { attachSource, cleanup, seekTo, forceReload, msePlayerRef } = usePlayerSource({
+  const { attachSource, cleanup, seekTo, forceReload, playerRef } = usePlayerSource({
     videoRef,
   })
   const restoredRef = useRef(false)
@@ -267,10 +267,10 @@ export function useVideoSource({
       // 由 executeSeek 记录为待处理目标，锁释放后接续处理（连续拖拽不丢目标）
       const targetTime = video.currentTime
       const state = useRoomStore.getState().watchTogether
-      const msePlayer = msePlayerRef.current
+      const player = playerRef.current
 
       console.warn(
-        `[useVideoSource] handleSeeking target=${targetTime.toFixed(1)}s isMseStream=${state.format === 'dash' || !!state.audioUrl} msePlayer=${!!msePlayer} isAttached=${msePlayer?.isAttached} isReloading=${isReloadingRef.current} bufferedRanges=${video.buffered.length} sourceUrl=${!!state.sourceUrl}`
+        `[useVideoSource] handleSeeking target=${targetTime.toFixed(1)}s isMseStream=${state.format === 'dash' || !!state.audioUrl} player=${!!player} isAttached=${player?.isAttached} isReloading=${isReloadingRef.current} bufferedRanges=${video.buffered.length} sourceUrl=${!!state.sourceUrl}`
       )
 
       void executeSeek({

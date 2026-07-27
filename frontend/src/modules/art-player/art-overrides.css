@@ -1,0 +1,90 @@
+/**
+ * ArtPlayer 项目级样式覆盖。
+ *
+ * 命名约定：.zart-stage 为播放器外壳（WatchTogetherPanel / LiveArtPlayer 根节点），
+ * 所有覆盖均限定在其内部，避免污染其他 ArtPlayer 实例与全局样式。
+ */
+
+.zart-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-color: #000;
+  overflow: hidden;
+}
+
+.zart-stage .art-video-player {
+  width: 100%;
+  height: 100%;
+}
+
+/* 与原播放器一致的 object-fit: contain（ArtPlayer 默认不设置，视频会拉伸铺满） */
+.zart-stage .art-video {
+  object-fit: contain;
+}
+
+/* 原生控制栏已完全由 PlayerControlBar 替代，强制隐藏避免与自定义栏重叠 */
+.zart-stage .art-controls,
+.zart-stage .art-control,
+.zart-stage .art-controls-left,
+.zart-stage .art-controls-right,
+.zart-stage .art-controls-center,
+.zart-stage .art-progress,
+.zart-stage .art-volume,
+.zart-stage .art-fullscreen,
+.zart-stage .art-playAndPause,
+.zart-stage .art-setting,
+.zart-stage .art-playback-rate {
+  display: none !important;
+}
+
+/* 弹幕图层根：铺满图层容器、禁止指针事件（弹幕本身不需要交互） */
+.zart-danmaku-root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 覆盖层根（加载动画 / 空源占位）：铺满且不拦截交互 */
+.zart-overlay-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* 浮动面板根（设置面板挂载点，append 到 $player） */
+.zart-panel-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 70;
+}
+.zart-panel-root > * {
+  pointer-events: auto;
+}
+
+/* 观众端进度条只读提示：鼠标样式保持默认（交互由守卫拦截转为申请跳转） */
+.zart-stage.zart-viewer .art-progress {
+  cursor: pointer;
+}
+
+/* 隐藏 ArtPlayer 底部黑色渐变遮罩 / 阴影层，避免与自定义玻璃控制栏冲突 */
+.zart-stage .art-bottom,
+.zart-stage .art-layer-bottom,
+.zart-stage .art-mask,
+.zart-stage .art-layer-mask {
+  display: none !important;
+}
+
+/* 隐藏 ArtPlayer 的 poster 黑底（空源时由我们的占位图覆盖层负责展示） */
+.zart-stage .art-poster {
+  display: none;
+}
+
+/* 隐藏 ArtPlayer 自带 loading 指示器（解析中 / 缓冲 / seek 均会触发），
+   改用自研 Spinner（通过 WatchTogetherCore 的 overlay portal 渲染），
+   避免两套加载动画重叠 */
+.zart-stage .art-loading {
+  display: none !important;
+}

@@ -12,4 +12,6 @@
  * 缓存说明：仅依赖 SourceBuffer 实时缓冲（MSE 原生），不再做 IndexedDB 持久化。
  */
 export { MsePlayer } from './player'
-export type { SeekResult, MsePlayerOptions } from './types'
+export type { MsePlayerOptions } from './types'
+// SeekResult 已上移到 player/types.ts 作为公共 PlayerController 接口的一部分
+export type { SeekResult } from '../../types'

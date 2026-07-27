@@ -34,9 +34,9 @@ export function isBilibiliUrlExpired(url: string): boolean {
     const deadlineSec = parseInt(deadline, 10)
     if (Number.isNaN(deadlineSec)) return false
 
-    // 当前时间（秒）
+    // 当前时间（秒），预留 60s 缓冲，避免临界时间戳或设备时间偏差导致误报
     const nowSec = Math.floor(Date.now() / 1000)
-    return nowSec >= deadlineSec
+    return nowSec >= deadlineSec + 60
   } catch {
     // URL 解析失败，无法判断
     return false
@@ -49,16 +49,27 @@ export function isBilibiliUrlExpired(url: string): boolean {
  * B站 URL 过期后，video 元素会触发 error 事件，code 通常是 4 (MEDIA_ERR_SRC_NOT_SUPPORTED)
  * 或网络层 403。
  *
+ * 为避免切换视频源、加载 transient error 等场景误报，仅在以下情况判定：
+ * - error.code === 4 (MEDIA_ERR_SRC_NOT_SUPPORTED)
+ * - video 已处于 NETWORK_NO_SOURCE 状态，说明当前 src 完全无法加载
+ *
  * @param error MediaError 对象
+ * @param video video 元素
  * @returns true 表示可能是 URL 过期
  */
 export function isVideoErrorFromExpiry(
-  error: HTMLMediaElement['error']
+  error: HTMLMediaElement['error'],
+  video?: HTMLVideoElement | null
 ): boolean {
   if (!error) return false
-  // code 4: MEDIA_ERR_SRC_NOT_SUPPORTED（B站 URL 过期后常见）
-  // 但也可能是真正的格式问题，需要结合 URL 检测
-  return error.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+  if (error.code !== MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) return false
+  if (
+    video &&
+    video.networkState !== HTMLMediaElement.NETWORK_NO_SOURCE
+  ) {
+    return false
+  }
+  return true
 }
 
 /**
@@ -68,17 +79,19 @@ export function isVideoErrorFromExpiry(
  *
  * @param url 视频 URL
  * @param videoError video 元素的 error 对象
+ * @param video video 元素
  * @returns true 表示已过期
  */
 export function isVideoSourceExpired(
   url: string,
-  videoError?: HTMLMediaElement['error'] | null
+  videoError?: HTMLMediaElement['error'] | null,
+  video?: HTMLVideoElement | null,
 ): boolean {
   // 优先检查 URL deadline
   if (isBilibiliUrlExpired(url)) return true
 
-  // 兜底：video error + URL 包含 bilivideo.com
-  if (videoError && isVideoErrorFromExpiry(videoError)) {
+  // 兜底：video error + URL 包含 bilivideo.com + 视频已无法加载
+  if (videoError && isVideoErrorFromExpiry(videoError, video)) {
     try {
       const urlObj = new URL(url)
       return urlObj.hostname.includes('bilivideo.com')

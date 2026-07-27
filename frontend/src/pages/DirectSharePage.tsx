@@ -8,6 +8,7 @@ import { Title, Paragraph } from '@/components/ui/Typography'
 import { Tag } from '@/components/ui/Tag'
 import { message } from '@/components/ui/message'
 import { ConnectionStatsPanel } from '@/modules/screen-sharing/components/ConnectionStatsPanel'
+import { LiveArtPlayer } from '@/modules/art-player'
 
 const ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }]
 
@@ -81,6 +82,17 @@ function DirectSharePage() {
     useState<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
+  // LiveArtPlayer 通过 onVideoReady 暴露 video 元素
+  const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(
+    null
+  )
+  const handleLocalVideoReady = useCallback(
+    (node: HTMLVideoElement | null) => {
+      localVideoRef.current = node
+      setLocalVideoEl(node)
+    },
+    []
+  )
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const candidateQueueRef = useRef<RTCIceCandidateInit[]>([])
 
@@ -108,6 +120,16 @@ function DirectSharePage() {
       cleanup()
     }
   }, [cleanup])
+
+  // LiveArtPlayer 挂载完成后绑定本地预览流（修复旧实现中
+  // setIsSharing 后同步读取 ref 为 null 导致预览不显示的问题）
+  useEffect(() => {
+    if (localVideoEl && localStreamRef.current) {
+      if (localVideoEl.srcObject !== localStreamRef.current) {
+        localVideoEl.srcObject = localStreamRef.current
+      }
+    }
+  }, [localVideoEl])
 
   const handleStartDirectShare = async () => {
     if (pcRef.current) {
@@ -262,14 +284,17 @@ function DirectSharePage() {
             </Button>
           ) : (
             <>
-              <video
-                ref={localVideoRef}
-                autoPlay
-                muted
-                playsInline
-                className="w-full rounded-lg bg-black"
+              <div
+                className="w-full overflow-hidden rounded-lg bg-black"
                 style={{ maxHeight: 320 }}
-              />
+              >
+                <LiveArtPlayer
+                  muted
+                  showControls={false}
+                  onVideoReady={handleLocalVideoReady}
+                  className="max-h-[320px]"
+                />
+              </div>
               <Button
                 variant="danger"
                 icon={<Power className="h-5 w-5" />}

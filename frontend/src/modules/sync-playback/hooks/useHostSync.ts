@@ -50,7 +50,7 @@ export function useHostSync({
   })
 
   useHostStateRequest({ roomId, isHostRef, videoRef })
-  useHostHeartbeat({ roomId, isHostRef, videoRef })
+  useHostHeartbeat({ roomId, isHostRef, videoRef, suppressEventsRef })
   useVideoEventBindings({
     isHostRef,
     videoRef,

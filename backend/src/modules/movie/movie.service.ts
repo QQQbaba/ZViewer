@@ -37,6 +37,68 @@ function normalizeAcceptQuality(value: unknown): string | null {
 }
 
 /**
+ * 将 DB 中的 acceptQuality JSON 字符串解析为数组。
+ *
+ * DB 中存储为 JSON 字符串（如 '[{"id":80,"label":"1080P","resolution":"1920x1080"}]'），
+ * 前端期望数组形式。解析失败或非数组时返回 null。
+ */
+function parseAcceptQualityArray(
+  value: string | null | undefined,
+): { id: number; label: string; resolution?: string }[] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed as { id: number; label: string; resolution?: string }[];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 将任意值规范化为 pages 字符串（JSON 序列化）。
+ *
+ * - string：trim 后返回（空字符串返回 null，视为已序列化的 JSON）
+ * - 数组：JSON.stringify 后返回
+ * - 其他类型：null
+ */
+function normalizePages(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'string') return value.trim() || null;
+  if (Array.isArray(value)) {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * 将 DB 中的 pages JSON 字符串解析为数组。
+ *
+ * DB 中存储为 JSON 字符串（如 '[{"page":1,"cid":123,"part":"P1","duration":176}]'），
+ * 前端期望数组形式。解析失败或非数组时返回 null。
+ */
+function parsePagesArray(
+  value: string | null | undefined,
+): { page: number; cid: number; part: string; duration: number }[] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed as { page: number; cid: number; part: string; duration: number }[];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 影片 CRUD 服务。
  *
  * 单例服务，所有方法均返回 Promise。
@@ -67,6 +129,15 @@ export class MovieService {
   async createMovie(roomId: string, data: Partial<MovieDto>): Promise<MovieDto> {
     const repo = AppDataSource.getRepository(Movie);
 
+    // 调试日志：检查 pages 字段是否被正确接收
+    console.log('[movie.service] createMovie input data:', {
+      hasPages: data.pages !== undefined,
+      pagesType: typeof data.pages,
+      pagesValue: data.pages,
+      currentPage: data.currentPage,
+      title: data.title,
+    });
+
     // 计算 nextOrder：取当前最大 order + 1
     const existing = await repo.find({
       where: { roomId },
@@ -95,6 +166,11 @@ export class MovieService {
           ? data.currentQn
           : null,
       acceptQuality: normalizeAcceptQuality(data.acceptQuality),
+      pages: normalizePages(data.pages),
+      currentPage:
+        typeof data.currentPage === 'number' && Number.isFinite(data.currentPage)
+          ? data.currentPage
+          : null,
       serverUrl: typeof data.serverUrl === 'string' ? data.serverUrl : null,
       path: typeof data.path === 'string' ? data.path : null,
       username: typeof data.username === 'string' ? data.username : null,
@@ -137,6 +213,8 @@ export class MovieService {
     if (typeof data.cid === 'number' && Number.isFinite(data.cid)) update.cid = data.cid;
     if (typeof data.currentQn === 'number' && Number.isFinite(data.currentQn)) update.currentQn = data.currentQn;
     if (data.acceptQuality !== undefined) update.acceptQuality = normalizeAcceptQuality(data.acceptQuality);
+    if (data.pages !== undefined) update.pages = normalizePages(data.pages);
+    if (typeof data.currentPage === 'number' && Number.isFinite(data.currentPage)) update.currentPage = data.currentPage;
     if (typeof data.serverUrl === 'string') update.serverUrl = data.serverUrl;
     if (typeof data.path === 'string') update.path = data.path;
     if (typeof data.username === 'string') update.username = data.username;
@@ -187,7 +265,7 @@ export class MovieService {
    * 序列化 DB Movie 实体为 MovieDto。
    *
    * - password 字段由 ValueTransformer 自动解密
-   * - acceptQuality 保持 JSON 字符串形式
+   * - acceptQuality JSON 字符串解析为数组返回（前端期望数组形式）
    * - createdAt/updatedAt 转 ISO 字符串
    */
   serializeMovie(movie: MovieEntity): MovieDto {
@@ -205,7 +283,9 @@ export class MovieService {
       duration: movie.duration,
       cid: movie.cid,
       currentQn: movie.currentQn,
-      acceptQuality: movie.acceptQuality,
+      acceptQuality: parseAcceptQualityArray(movie.acceptQuality),
+      pages: parsePagesArray(movie.pages),
+      currentPage: movie.currentPage,
       serverUrl: movie.serverUrl,
       path: movie.path,
       username: movie.username,

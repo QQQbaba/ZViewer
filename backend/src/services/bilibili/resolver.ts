@@ -12,7 +12,7 @@
  * - CDN 健康检查使用 race 模式，先返回的可达 URL 立即采用。
  */
 
-import { getVideoInfo } from './video';
+import { getVideoInfo, type BilibiliVideoInfo } from './video';
 import {
   getPlayUrl,
   NoPermissionError,
@@ -24,6 +24,7 @@ import {
   computeFnval,
   getDefaultQn,
   VIP_ONLY_QNS,
+  QN_QUALITY_MAP,
 } from './permission';
 import { findReachableMediaUrl } from './cdn';
 import {
@@ -35,6 +36,31 @@ export interface ResolveProgress {
   status: 'parsing' | 'done' | 'error';
   step?: string;
   message?: string;
+}
+
+/**
+ * B站 MP4 直链（fnval=1）支持的最高清晰度 qn。
+ *
+ * B站 MP4 单流格式通常仅支持 360P/480P/720P，1080P 及以上需要 DASH。
+ * 在 preferMp4 路径下收窄 acceptQuality，避免前端展示无法实际播放的高清晰度选项。
+ */
+const MP4_MAX_QN = 64; // 720P
+
+/**
+ * 收窄清晰度列表到 MP4 支持的范围（qn ≤ MP4_MAX_QN）。
+ *
+ * 收窄后为空时回退到 [480P, 360P] 兜底，保证前端至少有可选项展示。
+ */
+function narrowAcceptQualityForMp4(
+  list: { id: number; label: string; resolution?: string }[],
+): { id: number; label: string; resolution?: string }[] {
+  const filtered = list.filter((q) => q.id <= MP4_MAX_QN);
+  if (filtered.length > 0) return filtered;
+  // 兜底：B站 MP4 至少支持 480P/360P
+  return [
+    { id: 32, label: QN_QUALITY_MAP[32]?.label ?? '480P', resolution: '854x480' },
+    { id: 16, label: QN_QUALITY_MAP[16]?.label ?? '360P', resolution: '640x360' },
+  ];
 }
 
 export interface ResolveOptions {
@@ -50,6 +76,32 @@ export interface ResolveOptions {
   codec?: string;
   /** 解析进度回调，用于 NDJSON 流式输出。 */
   onProgress?: (msg: ResolveProgress) => void;
+  /**
+   * 优先 MP4 单流格式（fnval=1）。
+   * - true：先请求 MP4 直链，浏览器原生 video.src 播放，无需 MSE，seek 流畅
+   * - false/undefined：默认 DASH 路径（分离 m4s，需 MSE 双轨合并）
+   * MP4 通常仅支持低清晰度（360P/480P/720P），失败时自动回退 DASH。
+   */
+  preferMp4?: boolean;
+  /**
+   * 指定播放分集（P），从 1 开始。
+   * - 未传或 <=0：使用视频默认 cid（第一 P）
+   * - 有效值：使用 info.pages[page-1].cid 获取对应分集的播放地址
+   * 多 P 视频每个分集有独立的 cid 和 m4s 文件，必须用对应 cid 请求 playurl。
+   */
+  page?: number;
+}
+
+/** 分集信息（前端用于展示分P列表和切换） */
+export interface ResolvePageInfo {
+  /** 分集序号，从 1 开始 */
+  page: number;
+  /** 分集 cid */
+  cid: number;
+  /** 分集标题（part） */
+  part: string;
+  /** 分集时长（秒） */
+  duration: number;
 }
 
 export interface ResolveResult {
@@ -65,6 +117,13 @@ export interface ResolveResult {
   vipStatus: number;
   currentQn?: number;
   acceptQuality?: { id: number; label: string; resolution?: string }[];
+  /**
+   * 视频所有分集列表（多 P 视频才有，单 P 视频为单元素数组）。
+   * 前端用于在影片列表中显示分P选择器，切换分P时使用对应 cid 重新解析。
+   */
+  pages?: ResolvePageInfo[];
+  /** 当前播放的分集序号（从 1 开始，默认 1） */
+  currentPage?: number;
 }
 
 export class ResolveError extends Error {
@@ -129,7 +188,39 @@ async function fetchVideoInfo(bvid: string, cookie?: string) {
 }
 
 /**
+ * 获取当前播放分集（P）的时长。
+ *
+ * B站多 P 视频的 data.duration 是所有 P 的总时长，
+ * 但实际播放的是某个分集（cid 对应的 m4s 文件），时长只是该分集的时长。
+ * 如果用 info.duration 作为播放时长，会导致：
+ * - DASH 模式下 MPD mediaPresentationDuration 远超实际文件时长
+ * - dash.js 认为 video.duration = 1133s，但 m4s 文件只有 176s
+ * - seek 到超出实际文件范围的位置时无法下载对应 segment
+ *
+ * 因此必须使用与当前播放 cid 对应的分集时长。
+ *
+ * @param info 视频信息（包含 pages 数组）
+ * @param cid 当前播放分集的 cid（可能是 info.cid 或 page 参数指定的 cid）
+ */
+function getCurrentPageDuration(info: BilibiliVideoInfo, cid?: number): number {
+  if (info.pages && info.pages.length > 0) {
+    const targetCid = cid ?? info.cid;
+    const currentPage = info.pages.find((p) => p.cid === targetCid);
+    if (currentPage) {
+      return currentPage.duration;
+    }
+    // 找不到对应 cid 时回退到第一 P 的时长
+    return info.pages[0].duration;
+  }
+  // 单 P 视频直接使用 info.duration
+  return info.duration;
+}
+
+/**
  * 在 DASH 所有 CDN 均不可达时降级为 MP4 直链。
+ *
+ * 返回 MP4 实际使用的 currentQn（B站 可能降级到比请求更低的清晰度），
+ * 便于上层收窄 acceptQuality 并准确展示当前清晰度。
  */
 async function fallbackToMp4(
   bvid: string,
@@ -137,7 +228,7 @@ async function fallbackToMp4(
   cookie: string | undefined,
   qn: number | undefined,
   isVip: boolean,
-): Promise<{ videoUrl: string } | null> {
+): Promise<{ videoUrl: string; currentQn?: number } | null> {
   const mp4PlayUrl = await getPlayUrl(bvid, cid, cookie, {
     qn,
     fnval: 1,
@@ -147,7 +238,9 @@ async function fallbackToMp4(
     const mp4Url = await findReachableMediaUrl({
       baseUrl: mp4PlayUrl.durl[0].url,
     });
-    if (mp4Url) return { videoUrl: mp4Url };
+    if (mp4Url) {
+      return { videoUrl: mp4Url, currentQn: mp4PlayUrl.currentQn };
+    }
   }
   return null;
 }
@@ -158,7 +251,7 @@ async function fallbackToMp4(
 export async function resolveBilibiliVideo(
   opts: ResolveOptions,
 ): Promise<ResolveResult> {
-  const { url, cookie, qn, codec, onProgress } = opts;
+  const { url, cookie, qn, codec, onProgress, preferMp4, page } = opts;
 
   const bvid = extractBvid(url);
   if (!bvid) {
@@ -179,19 +272,51 @@ export async function resolveBilibiliVideo(
     })(),
   ]);
 
+  // 确定当前播放的分集 cid：
+  // - page 参数指定时使用 info.pages[page-1].cid
+  // - 未指定时使用 info.cid（视频默认 cid，通常是第一 P）
+  // 多 P 视频每个分集有独立的 cid 和 m4s 文件，必须用对应 cid 请求 playurl
+  let effectiveCid = info.cid;
+  let currentPage = 1;
+  if (page && page > 0 && info.pages && info.pages.length > 0) {
+    const pageIndex = Math.min(page - 1, info.pages.length - 1);
+    const targetPage = info.pages[pageIndex];
+    if (targetPage && targetPage.cid) {
+      effectiveCid = targetPage.cid;
+      currentPage = targetPage.page;
+    }
+  } else if (info.pages && info.pages.length > 0) {
+    // 未指定 page 时，根据 info.cid 找到对应的 page 序号
+    const matchedPage = info.pages.find((p) => p.cid === info.cid);
+    if (matchedPage) {
+      currentPage = matchedPage.page;
+    }
+  }
+
+  // 构建返回给前端的分集列表（简化字段，只保留前端需要的）
+  const pagesInfo: ResolvePageInfo[] | undefined =
+    info.pages && info.pages.length > 0
+      ? info.pages.map((p) => ({
+          page: p.page,
+          cid: p.cid,
+          part: p.part,
+          duration: p.duration,
+        }))
+      : undefined;
+
   // 根据会员状态和登录态确定默认清晰度
   // 未登录 B站 时默认 480P（B站对未登录用户限制为 480P 及以下）
   const hasCookie = !!cookie;
   const defaultQn = getDefaultQn(isVip, hasCookie);
   const requestedQn = qn ?? defaultQn;
 
-  // 播放地址
+  // 播放地址（使用 effectiveCid 对应的分集 cid 请求 playurl）
   emit('playurl', '正在获取播放地址...');
   let playUrl: BilibiliPlayUrlResult | null;
   try {
     playUrl = await getPlayUrl(
       info.bvid,
-      info.cid,
+      effectiveCid,
       cookie,
       { qn: requestedQn, codec, isVip },
     );
@@ -206,7 +331,7 @@ export async function resolveBilibiliVideo(
         emit('playurl', `当前清晰度无权限，降级到 ${fallbackQn === 32 ? '480P' : '360P'}...`);
         playUrl = await getPlayUrl(
           info.bvid,
-          info.cid,
+          effectiveCid,
           cookie,
           { qn: fallbackQn, codec, isVip },
         );
@@ -231,7 +356,7 @@ export async function resolveBilibiliVideo(
   if (effectiveQn && effectiveQn !== playUrl.currentQn) {
     emit('quality', '正在匹配可用清晰度...');
     try {
-      const refetched = await getPlayUrl(info.bvid, info.cid, cookie, {
+      const refetched = await getPlayUrl(info.bvid, effectiveCid, cookie, {
         qn: effectiveQn,
         codec,
         isVip,
@@ -252,6 +377,32 @@ export async function resolveBilibiliVideo(
 
   emit('finish', '解析完成，正在加载播放器...');
 
+  // preferMp4 优先路径：请求 MP4 单流（fnval=1），浏览器原生播放无需 MSE
+  // MP4 通常仅支持低清晰度（360P/480P/720P），失败时回退 DASH
+  if (preferMp4) {
+    emit('cdn', '正在获取 MP4 直链（流畅模式）...');
+    const mp4 = await fallbackToMp4(info.bvid, effectiveCid, cookie, effectiveQn, isVip);
+    if (mp4) {
+      // MP4 模式收窄清晰度列表：B站 MP4 直链最高仅支持 720P，
+      // 不应展示 1080P/4K 等 DASH 专属选项，避免前端误导用户
+      const mp4AcceptQuality = narrowAcceptQualityForMp4(acceptQuality);
+      return {
+        title: info.title,
+        duration: getCurrentPageDuration(info, effectiveCid),
+        cid: effectiveCid,
+        videoUrl: mp4.videoUrl,
+        format: 'mp4',
+        loggedIn: !!cookie,
+        vipStatus: isVip ? 1 : 0,
+        currentQn: mp4.currentQn ?? playUrl.currentQn,
+        acceptQuality: mp4AcceptQuality,
+        pages: pagesInfo,
+        currentPage,
+      };
+    }
+    emit('fallback', 'MP4 直链不可用，回退到 DASH 格式...');
+  }
+
   // DASH 路径：选择可达视频/音频 URL
   if (playUrl.format === 'dash' && playUrl.bestVideo) {
     emit('cdn', '正在选择可用 CDN...');
@@ -271,18 +422,22 @@ export async function resolveBilibiliVideo(
 
     if (!videoUrl) {
       emit('fallback', 'DASH 地址不可用，尝试 MP4 直链...');
-      const mp4 = await fallbackToMp4(info.bvid, info.cid, cookie, effectiveQn, isVip);
+      const mp4 = await fallbackToMp4(info.bvid, effectiveCid, cookie, effectiveQn, isVip);
       if (mp4) {
+        // DASH 降级 MP4 时同样收窄清晰度列表
+        const mp4AcceptQuality = narrowAcceptQualityForMp4(acceptQuality);
         return {
           title: info.title,
-          duration: info.duration,
-          cid: info.cid,
+          duration: getCurrentPageDuration(info, effectiveCid),
+          cid: effectiveCid,
           videoUrl: mp4.videoUrl,
           format: 'mp4',
           loggedIn: !!cookie,
           vipStatus: isVip ? 1 : 0,
-          currentQn: playUrl.currentQn,
-          acceptQuality,
+          currentQn: mp4.currentQn ?? playUrl.currentQn,
+          acceptQuality: mp4AcceptQuality,
+          pages: pagesInfo,
+          currentPage,
         };
       }
       throw new ResolveError(
@@ -293,8 +448,8 @@ export async function resolveBilibiliVideo(
 
     return {
       title: info.title,
-      duration: info.duration,
-      cid: info.cid,
+      duration: getCurrentPageDuration(info, effectiveCid),
+      cid: effectiveCid,
       videoUrl,
       audioUrl: audioUrl ?? undefined,
       videoCodec: playUrl.bestVideo.codecs,
@@ -304,10 +459,12 @@ export async function resolveBilibiliVideo(
       vipStatus: isVip ? 1 : 0,
       currentQn: playUrl.currentQn,
       acceptQuality,
+      pages: pagesInfo,
+      currentPage,
     };
   }
 
-  // MP4 直链路径
+  // MP4 直链路径（B站 在请求 DASH 时仍返回 MP4 的边缘场景）
   if (playUrl.format === 'mp4' && playUrl.durl?.length) {
     emit('cdn', '正在选择可用 CDN...');
     const mp4Url = await findReachableMediaUrl({
@@ -319,16 +476,20 @@ export async function resolveBilibiliVideo(
         'CDN_UNREACHABLE',
       );
     }
+    // 收窄清晰度列表到 MP4 支持范围
+    const mp4AcceptQuality = narrowAcceptQualityForMp4(acceptQuality);
     return {
       title: info.title,
-      duration: info.duration,
-      cid: info.cid,
+      duration: getCurrentPageDuration(info, effectiveCid),
+      cid: effectiveCid,
       videoUrl: mp4Url,
       format: 'mp4',
       loggedIn: !!cookie,
       vipStatus: isVip ? 1 : 0,
       currentQn: playUrl.currentQn,
-      acceptQuality,
+      acceptQuality: mp4AcceptQuality,
+      pages: pagesInfo,
+      currentPage,
     };
   }
 

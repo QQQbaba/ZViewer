@@ -57,8 +57,23 @@ export interface MovieDto {
   cid?: number | null;
   /** B站当前清晰度 qn */
   currentQn?: number | null;
-  /** B站可用清晰度列表（JSON 字符串） */
-  acceptQuality?: string | null;
+  /**
+   * B站可用清晰度列表。
+   * DB 中存储为 JSON 字符串，serializeMovie 时解析为数组返回给前端。
+   * 前端 QualityOption = { id: number; label: string; resolution?: string }。
+   */
+  acceptQuality?: { id: number; label: string; resolution?: string }[] | null;
+  /**
+   * B站多 P 视频的分集列表。
+   * DB 中存储为 JSON 字符串，serializeMovie 时解析为数组返回给前端。
+   * 单 P 视频为 null。前端用于显示分P选择器。
+   */
+  pages?: { page: number; cid: number; part: string; duration: number }[] | null;
+  /**
+   * 当前播放的分集序号（从 1 开始）。
+   * 默认 1（第一 P），用户切换分P后更新。
+   */
+  currentPage?: number | null;
   /** WebDAV/FTP 服务器 URL */
   serverUrl?: string | null;
   /** WebDAV/FTP 路径 */

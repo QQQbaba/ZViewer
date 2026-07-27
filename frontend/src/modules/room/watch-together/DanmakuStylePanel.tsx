@@ -80,7 +80,7 @@ export function DanmakuStylePanel({
       {/* 随屏幕缩放 */}
       <div className="flex items-center justify-between">
         <span
-          className="text-sm font-medium"
+          className="text-xs font-medium"
           style={{ color: 'var(--md-sys-color-on-surface)' }}
         >
           随屏幕缩放
@@ -235,14 +235,14 @@ export function DanmakuAdvancedSettings({
         onChange={(v) => setAdvancedStyle({ shadowBlur: v })}
       />
       <Slider
-        label="密度"
+        label="显示区域"
         size="sm"
-        value={style.advanced.density}
-        min={0.1}
-        max={2}
+        value={style.displayArea}
+        min={0.25}
+        max={1}
         step={0.05}
         valueFormatter={(v) => `${Math.round(v * 100)}%`}
-        onChange={(v) => setAdvancedStyle({ density: v })}
+        onChange={(v) => setStyle({ displayArea: v })}
       />
     </div>
   )

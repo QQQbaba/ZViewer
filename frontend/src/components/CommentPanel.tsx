@@ -149,7 +149,7 @@ export function CommentPanel({
   const handleSendComment = () => handleSend(sendAsDanmaku)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
       {!commentsOnly && (
         <SegmentedToggle
           options={[
@@ -161,7 +161,7 @@ export function CommentPanel({
           onChange={(v) => setRightPanelTab(v as typeof rightPanelTab)}
         />
       )}
-      <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
         {commentsOnly || rightPanelTab === 'comments' ? (
           <div className="flex h-full min-h-0 flex-col gap-3">
             <div
@@ -186,7 +186,7 @@ export function CommentPanel({
                   <div
                     key={comment.id}
                     className={cn(
-                      'zen-comment-enter rounded-[var(--md-sys-shape-corner)] border p-3 transition-all hover:shadow-sm hover:-translate-y-0.5',
+                      'zen-comment-enter rounded-[var(--md-sys-shape-corner)] border p-2 transition-all hover:shadow-sm hover:-translate-y-0.5',
                       comment.isDanmaku
                         ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]'
                         : 'border-transparent bg-[var(--glass-bg)] hover:border-[var(--md-sys-color-outline-variant)]'
@@ -197,51 +197,51 @@ export function CommentPanel({
                       } as React.CSSProperties
                     }
                   >
-                    <div className="flex items-start gap-2">
+                    <div className="flex items-start gap-1.5">
                       <Avatar
                         size="sm"
                         fallback={
-                          <span className="text-[10px] font-medium">
+                          <span className="text-[9px] font-medium">
                             {getInitials(comment.username)}
                           </span>
                         }
                       />
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-1">
                             <Text
-                              className="text-xs font-medium"
+                              className="text-[11px] font-medium leading-tight"
                               style={{ color: 'var(--md-sys-color-primary)' }}
                             >
                               {comment.username}
                             </Text>
                             {comment.isDanmaku && (
                               <span
-                                className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                                className="inline-flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[9px] font-medium leading-none"
                                 style={{
                                   backgroundColor:
                                     'var(--md-sys-color-primary)',
                                   color: 'var(--md-sys-color-on-primary)',
                                 }}
                               >
-                                <MessageSquareQuote className="h-3 w-3" />
+                                <MessageSquareQuote className="h-2.5 w-2.5" />
                                 弹幕
                               </span>
                             )}
                           </div>
-                          <Text type="secondary" className="text-[10px]">
+                          <Text type="secondary" className="text-[9px] leading-none">
                             {formatTime(comment.createdAt)}
                           </Text>
                         </div>
-                        <Text className="mt-1 break-words text-sm">
+                        <Text className="mt-0.5 break-words text-xs leading-snug">
                           {comment.content}
                         </Text>
-                        {!comment.isDanmaku && (
+                        {!comment.isDanmaku && sendAsDanmaku && (
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="mt-2 h-6 px-2 text-xs"
-                            icon={<MessageSquareQuote className="h-3 w-3" />}
+                            className="mt-1 h-5 px-1.5 text-[10px]"
+                            icon={<MessageSquareQuote className="h-2.5 w-2.5" />}
                             onClick={() => {
                               socket?.emit(
                                 'send-danmaku',
