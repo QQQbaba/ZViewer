@@ -313,12 +313,15 @@ deps_installed() {
   # npm workspaces：根目录 node_modules 存在 + 关键依赖存在
   # 检查后端运行时关键依赖（reflect-metadata / better-sqlite3 / typeorm 等），
   # 避免部分安装失败时误判为"已就绪"导致启动后 MODULE_NOT_FOUND。
+  # 同时检查 typescript（devDependency），避免 NODE_ENV=production 环境下
+  # npm 跳过 devDependencies 导致 tsc 缺失、构建报 code 127。
   [[ -d "$ROOT_DIR/node_modules" ]] || return 1
   [[ -d "$ROOT_DIR/node_modules/express" ]] || return 1
   [[ -d "$ROOT_DIR/node_modules/vite" ]] || return 1
   [[ -d "$ROOT_DIR/node_modules/reflect-metadata" ]] || return 1
   [[ -d "$ROOT_DIR/node_modules/typeorm" ]] || return 1
   [[ -d "$ROOT_DIR/node_modules/better-sqlite3" ]] || return 1
+  [[ -d "$ROOT_DIR/node_modules/typescript" ]] || return 1
   return 0
 }
 
@@ -326,10 +329,12 @@ install_deps() {
   # npm workspaces：仅在根目录安装一次，子目录自动 hoist
   # 优先 npm ci（要求 package-lock.json，可重现依赖树，更快更稳定）
   # 失败则回退到 npm install（兼容 lock 文件缺失或损坏的情况）
+  # 显式 unset NODE_ENV，避免生产环境 NODE_ENV=production 导致 npm 跳过
+  # devDependencies（typescript / vite 等），构建时 tsc not found（code 127）。
   echo "  [$ROOT_DIR] 安装依赖（npm workspaces）..."
-  (cd "$ROOT_DIR" && npm ci --no-audit --no-fund --prefer-offline) || {
+  (cd "$ROOT_DIR" && env -u NODE_ENV npm ci --no-audit --no-fund --prefer-offline --include=dev) || {
     echo "  npm ci 失败，回退到 npm install ..." >&2
-    (cd "$ROOT_DIR" && npm install --no-audit --no-fund) || {
+    (cd "$ROOT_DIR" && env -u NODE_ENV npm install --no-audit --no-fund --include=dev) || {
       echo "" >&2
       echo "  ============================================" >&2
       echo "  依赖安装失败！" >&2
@@ -351,6 +356,7 @@ install_deps() {
     [[ ! -d "$ROOT_DIR/node_modules/typeorm" ]] && missing+=("typeorm")
     [[ ! -d "$ROOT_DIR/node_modules/better-sqlite3" ]] && missing+=("better-sqlite3")
     [[ ! -d "$ROOT_DIR/node_modules/express" ]] && missing+=("express")
+    [[ ! -d "$ROOT_DIR/node_modules/typescript" ]] && missing+=("typescript")
     echo "" >&2
     echo "  ============================================" >&2
     echo "  依赖安装后验证失败，缺失模块: ${missing[*]}" >&2
