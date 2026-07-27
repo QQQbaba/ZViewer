@@ -40,7 +40,14 @@ export { resetVideoElement, waitForMetadata } from './utils'
 
 // 服务（供高级用例直接调用）
 export { createAudioSync } from './services/audio-sync'
-export { isBilibiliMediaUrl, buildProxyUrl } from './services/url-proxy'
+export {
+  isBilibiliMediaUrl,
+  buildProxyUrl,
+  resolveProxyUrl,
+  needsProxy,
+  isLocalUrl,
+  isRelativeUrl,
+} from './services/url-proxy'
 export {
   appendBuffer,
   isQuotaExceededError,

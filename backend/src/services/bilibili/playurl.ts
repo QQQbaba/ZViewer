@@ -74,6 +74,14 @@ export interface GetPlayUrlOptions {
   isVip?: boolean;
   /** 强制 fnval（仅 MP4 降级用 fnval=1，正常解析不传由 computeFnval 计算）。 */
   fnval?: number;
+  /**
+   * 请求平台标识。
+   * - 'html5'：使用 B站 HTML5 播放器接口，返回的 MP4 直链无防盗链，
+   *   浏览器可直接播放无需代理（SYNCTV 默认方案，服务器零流量）。
+   *   参考：synctv/vendors/vendors/bilibili/movie.go GetVideoURL
+   * - undefined：默认接口，DASH m4s 流有防盗链，需服务器代理注入 Referer。
+   */
+  platform?: 'html5';
 }
 
 export class NoPermissionError extends Error {
@@ -285,6 +293,10 @@ function normalizePlayUrlData(
 
 /**
  * 使用 WBI 签名调用 /x/player/wbi/playurl 获取播放地址。
+ *
+ * 当 options.platform='html5' 时附加 platform=html5 参数，B站 会返回
+ * 专为 HTML5 播放器设计的 MP4 直链（无防盗链），浏览器可直接播放无需代理。
+ * 参考：synctv/vendors/vendors/bilibili/movie.go GetVideoURL (platform=html5&high_quality=1)
  */
 async function getPlayUrlWbi(
   bvid: string,
@@ -296,18 +308,21 @@ async function getPlayUrlWbi(
   const effectiveQn = options?.qn ?? DEFAULT_QN;
   const effectiveFnval = options?.fnval ?? computeFnval(isVip, effectiveQn);
   const { imgKey, subKey } = await getWbiKeys(cookie);
-  const signed = signParams(
-    {
-      bvid,
-      cid: String(cid),
-      qn: String(effectiveQn),
-      fnver: '0',
-      fnval: String(effectiveFnval),
-      fourk: String(DEFAULT_FOURK),
-    },
-    imgKey,
-    subKey,
-  );
+  const signBase: Record<string, string> = {
+    bvid,
+    cid: String(cid),
+    qn: String(effectiveQn),
+    fnver: '0',
+    fnval: String(effectiveFnval),
+    fourk: String(DEFAULT_FOURK),
+  };
+  // platform=html5：B站 HTML5 播放器接口，返回无防盗链 MP4 直链
+  // 与 high_quality=1 配合，SYNCTV 默认方案
+  if (options?.platform === 'html5') {
+    signBase.platform = 'html5';
+    signBase.high_quality = '1';
+  }
+  const signed = signParams(signBase, imgKey, subKey);
   const query = buildQueryString(signed);
 
   const res = await bilibiliFetch<RawPlayUrlData>(
@@ -321,6 +336,8 @@ async function getPlayUrlWbi(
 
 /**
  * 使用未签名接口 /x/player/playurl 作为降级方案。
+ *
+ * 同样支持 platform=html5 参数（与 WBI 接口行为一致）。
  */
 async function getPlayUrlLegacy(
   bvid: string,
@@ -339,6 +356,10 @@ async function getPlayUrlLegacy(
     fnval: String(effectiveFnval),
     fourk: String(DEFAULT_FOURK),
   });
+  if (options?.platform === 'html5') {
+    params.set('platform', 'html5');
+    params.set('high_quality', '1');
+  }
 
   const res = await bilibiliFetch<RawPlayUrlData>(
     `https://api.bilibili.com/x/player/playurl?${params.toString()}`,

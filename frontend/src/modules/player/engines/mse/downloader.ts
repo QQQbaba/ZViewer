@@ -13,7 +13,7 @@
  * 刷新页面后会重新下载 init/sidx，但播放过程中的实时缓冲仍由 MSE 管理。
  */
 import { apiFetch } from '@/lib/api'
-import { isBilibiliMediaUrl, buildProxyUrl } from '../../services/url-proxy'
+import { resolveProxyUrl } from '../../services/url-proxy'
 import { HEAD_SIZE, MAX_FETCH_RETRIES } from './types'
 import type { DownloadOptions } from './types'
 
@@ -53,9 +53,9 @@ export interface DownloadResult {
   startByte: number
 }
 
-/** B站 CDN URL 统一走后端代理（防盗链 + CORS），其余直连。 */
+/** 统一代理策略：MSE 用于 DASH m4s 合并播放，始终走代理（有防盗链 + 无 CORS）。 */
 function resolveTargetUrl(url: string): string {
-  return isBilibiliMediaUrl(url) ? buildProxyUrl(url) : url
+  return resolveProxyUrl(url, undefined, 'dash')
 }
 
 /**
