@@ -60,6 +60,15 @@ export interface WatchTogetherState {
   isPreview?: boolean
   /** 预览源的显示标题 */
   previewTitle?: string
+  /**
+   * 是否启用缓冲模式（仅 B站 DASH 源有效）。
+   *
+   * 启用后所有用户先从 B站 CDN 完整缓存 m4s 流到 IndexedDB，
+   * 缓存完成后用 blob URL 播放，避免播放过程中 URL 过期或网络波动卡顿。
+   * - 房主端：缓存完成后才广播 isPlaying=true
+   * - 观众端：收到状态后独立缓存，缓存期间不应用 isPlaying，完成后跳转房主 currentTime
+   */
+  bufferMode?: boolean
 }
 
 /** 房主发出的控制动作 */

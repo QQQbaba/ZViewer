@@ -62,3 +62,68 @@ export interface SystemDirBrowseResult {
   /** 是否为系统根（Windows 盘符列表 / Unix 根目录）。 */
   isRoot: boolean
 }
+
+// ============ B站视频下载 ============
+
+/** B站下载进度行（NDJSON 流式响应）。 */
+export interface BilibiliDownloadProgress {
+  status: 'parsing' | 'downloading' | 'merging' | 'done' | 'error'
+  /** parsing 阶段的步骤标识 */
+  step?: string
+  /** downloading 阶段的子阶段：video/audio */
+  phase?: 'video' | 'audio'
+  /** 进度说明文本 */
+  message?: string
+  /** downloading 阶段已接收字节数 */
+  received?: number
+  /** downloading 阶段总字节数（未知时为 0） */
+  total?: number
+  /** downloading/merging 阶段百分比 0-100 */
+  percent?: number
+  /** done 阶段的文件信息 */
+  file?: { name: string; path: string; size: number }
+  /** error 阶段的错误码 */
+  code?: string
+}
+
+/** B站下载完成后的文件信息。 */
+export interface BilibiliDownloadedFile {
+  name: string
+  path: string
+  size: number
+}
+
+/** B站下载进度回调。 */
+export interface BilibiliDownloadCallbacks {
+  /** 解析阶段进度（step + message） */
+  onParsing?: (step: string, message: string) => void
+  /** 下载阶段进度（phase + received/total/percent） */
+  onDownloading?: (
+    phase: 'video' | 'audio',
+    received: number,
+    total: number,
+    percent: number
+  ) => void
+  /** 合并阶段进度（percent + message） */
+  onMerging?: (percent: number, message: string) => void
+}
+
+// ============ FFmpeg 状态 ============
+
+/** FFmpeg 检测结果 */
+export interface FfmpegStatus {
+  available: boolean
+  source: 'builtin' | 'system' | null
+  path: string | null
+  version: string | null
+  error?: string
+}
+
+/** FFmpeg 安装进度行（NDJSON 流式响应） */
+export interface FfmpegInstallProgress {
+  status: 'downloading' | 'extracting' | 'done' | 'error'
+  received?: number
+  total?: number
+  percent?: number
+  message: string
+}

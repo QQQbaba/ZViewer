@@ -10,7 +10,6 @@ export type {
   BilibiliQrData,
   BilibiliUserInfo,
   ResolveProgressLine,
-  BilibiliCodec,
   BilibiliParseOptions,
 } from '@/modules/bilibili/types'
 export {

@@ -1075,7 +1075,7 @@ export default function AdminPage() {
                 </Title>
                 <div className="mb-6">
                   <Switch
-                    label="启用 Beta 功能（Kazumi / AniSubs 番剧源）"
+                    label="启用 Beta 功能（Kazumi / AniSubs 番剧源 / B站视频下载）"
                     checked={settings.betaFeaturesEnabled}
                     onChange={(e) =>
                       setSettings((prev) => ({
@@ -1085,7 +1085,7 @@ export default function AdminPage() {
                     }
                   />
                   <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                    关闭时，房间内的 Kazumi 与 AniSubs 番剧添加入口及其相关设置将被隐藏。
+                    关闭时，房间内的 Kazumi 与 AniSubs 番剧添加入口、个人中心的 B站视频下载按钮及其相关设置将被隐藏。
                   </p>
                 </div>
 

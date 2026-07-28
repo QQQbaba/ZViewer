@@ -6,6 +6,7 @@ import {
   useRoomStore,
   type WatchTogetherState,
   type MovieDto,
+  type Movie,
   mapDtoToMovie,
 } from '@/store/roomStore'
 import { type QualityOption } from './resolveSource'
@@ -24,8 +25,15 @@ import { type MediaFormat } from '@/lib/mediaFormat'
 import {
   resolveMovieSource,
   resolveBilibiliOnline,
+  getEffectivePreferMp4,
   type ResolvedMovieSource,
 } from './movie-source-resolver'
+import {
+  fetchBlobsForBufferMode,
+  DownloadError,
+  UrlExpiredError,
+  DownloadAbortedError,
+} from '@/modules/player/services/buffer-mode'
 
 // 格式化跳转时间用于提示信息（mm:ss 或 h:mm:ss）
 function formatSeekTime(seconds: number): string {
@@ -103,6 +111,8 @@ export function useWatchTogether({
     pendingPreviewPlay,
     setPendingPreviewPlay,
     pendingReloadBilibili,
+    pendingViewerSourceReload,
+    setBufferProgress,
   } = useRoomStore(
     useShallow((s) => ({
       watchTogether: s.watchTogether,
@@ -117,6 +127,8 @@ export function useWatchTogether({
       pendingPreviewPlay: s.pendingPreviewPlay,
       setPendingPreviewPlay: s.setPendingPreviewPlay,
       pendingReloadBilibili: s.pendingReloadBilibili,
+      pendingViewerSourceReload: s.pendingViewerSourceReload,
+      setBufferProgress: s.setBufferProgress,
     }))
   )
   const isHostRef = useRef(isHost)
@@ -134,6 +146,11 @@ export function useWatchTogether({
   // B站 视频解析进度：用于在播放器上显示后台解析过程
   const [isResolving, setIsResolving] = useState(false)
 
+  /** 下载取消器：切换影片时主动取消未完成下载 */
+  const downloadAbortRef = useRef<AbortController | null>(null)
+  /** 同步当前缓冲模式 key，供观众端 attach 后清理标记 */
+  const bufferedKeyRef = useRef<string | null>(null)
+
   // reloadBilibili 并发重入保护：手动点击重载与 stalled/error 自动重载可能重叠，
   // 若上一次解析尚未结束又发起新请求，会导致 suppressEventsRef 状态错乱
   // （先结束的 finally 把 suppressEventsRef 重置为 false，但后结束的仍在解析中）
@@ -145,12 +162,13 @@ export function useWatchTogether({
   }, [isHost])
 
   // 1. 视频源管理：applySourceToVideo / cleanupMedia / restoredRef / seekTo / reloadVideo
-  const { applySourceToVideo, cleanupMedia, seekTo, reloadVideo } = useVideoSource({
-    videoRef,
-    suppressEventsRef,
-    watchTogether,
-    isHostRef,
-  })
+  const { applySourceToVideo, cleanupMedia, seekTo, reloadVideo } =
+    useVideoSource({
+      videoRef,
+      suppressEventsRef,
+      watchTogether,
+      isHostRef,
+    })
 
   // 2. 房主同步编排（组合广播+状态请求+心跳+事件绑定，内部按 isHostRef 判断）
   const { broadcastState, sendControl, forceSync } = useHostSync({
@@ -191,9 +209,66 @@ export function useWatchTogether({
     isHostRef,
   })
 
+  /**
+   * 缓冲模式：从 B站 CDN 下载完整 m4s 流到 IndexedDB，缓存命中时直接复用。
+   *
+   * 提升到组件作用域以便 useBilibiliQuality（清晰度切换）与 loadMovie（影片加载）
+   * 共用同一实现。实际逻辑委托给 buffer-mode service，此处仅负责：
+   * - 创建 AbortController 供切换影片时取消
+   * - 进度回调更新 roomStore.bufferProgress（房主/观众共享 UI）
+   * - 错误分类提示
+   *
+   * @param state 当前播放状态（含 sourceUrl/audioUrl/cid/currentQn）
+   * @param movie 影片元数据（用于 bvid 与 title）
+   */
+  const fetchBlobsForBufferModeLocal = useCallback(
+    async (
+      state: WatchTogetherState,
+      movie: Movie
+    ): Promise<{ videoBlob: Blob; audioBlob: Blob }> => {
+      const controller = new AbortController()
+      downloadAbortRef.current = controller
+
+      try {
+        setBufferProgress({
+          downloaded: 0,
+          total: 1,
+          title: movie.title || '当前视频',
+        })
+
+        const result = await fetchBlobsForBufferMode({
+          state,
+          bvid: movie.url,
+          title: movie.title,
+          onProgress: (p) => setBufferProgress(p),
+          signal: controller.signal,
+        })
+        bufferedKeyRef.current = result.cacheKey
+        return { videoBlob: result.videoBlob, audioBlob: result.audioBlob }
+      } catch (err) {
+        if (err instanceof DownloadAbortedError) {
+          console.log('[useWatchTogether] 缓冲下载已取消')
+        } else if (err instanceof UrlExpiredError) {
+          message.error('B站 URL 已过期，请重新解析视频')
+        } else if (err instanceof DownloadError) {
+          message.error(`缓冲下载失败: ${err.message}`)
+        } else {
+          console.error('[useWatchTogether] 缓冲下载失败:', err)
+          message.error('缓冲下载失败，请重试')
+        }
+        throw err
+      } finally {
+        setBufferProgress(null)
+        downloadAbortRef.current = null
+      }
+    },
+    [setBufferProgress]
+  )
+
   // B站 清晰度切换统一 Hook：封装 currentQuality/availableQualities/isSwitchingQuality
   // 状态及房主/观众/列表触发的切换逻辑。
   // 协议精简（v2）：不再传 socket/roomId，清晰度切换通过 broadcastState 推送完整 state 同步。
+  // 缓冲模式扩展（v3）：注入 fetchBlobsForBufferModeLocal，清晰度切换时下载新清晰度的 m4s。
   const quality = useBilibiliQuality({
     videoRef,
     isHostRef,
@@ -202,6 +277,7 @@ export function useWatchTogether({
     setWatchTogether,
     broadcastState,
     setIsResolving,
+    fetchBlobsForBufferMode: fetchBlobsForBufferModeLocal,
   })
 
   // 监听影片列表与当前播放影片的同步事件
@@ -350,95 +426,124 @@ export function useWatchTogether({
   )
 
   // 房主：重新解析当前 B站 视频（用于解析偏好变更后即时生效）
-  const reloadBilibili = useCallback(async (options?: { preferMp4?: boolean }) => {
-    // 并发重入保护：上一次解析仍在进行中（含超时未返回的挂起场景）时直接跳过，
-    // 避免多个解析请求并发导致 suppressEventsRef / isResolving 状态错乱。
-    if (isReloadingBilibiliRef.current) {
-      console.log('[useWatchTogether] reloadBilibili 已在进行中，跳过本次请求')
-      return
-    }
-    isReloadingBilibiliRef.current = true
-
-    const video = videoRef.current
-    if (!video || !isHostRef.current) {
-      isReloadingBilibiliRef.current = false
-      return
-    }
-
-    const state = useRoomStore.getState().watchTogether
-    if (state.sourceType !== 'bilibili') {
-      isReloadingBilibiliRef.current = false
-      return
-    }
-
-    const storeState = useRoomStore.getState()
-    const movie = storeState.movies.find(
-      (m) => m.id === storeState.currentMovieId
-    )
-    if (!movie?.url) {
-      isReloadingBilibiliRef.current = false
-      return
-    }
-
-    setIsResolving(true)
-    suppressEventsRef.current = true
-
-    const preserveTime = video.currentTime
-    const shouldPlay = !video.paused
-
-    try {
-      // 未显式传入 options 时，从 localStorage 读取播放模式偏好
-      // （BilibiliParseSettings 中切换播放模式触发 triggerReloadBilibili 走此路径）
-      const resolvedOptions =
-        options ?? { preferMp4: getBilibiliParseOptions().preferMp4 }
-      const resolved = await resolveBilibiliOnline(movie, undefined, resolvedOptions)
-
-      const newState: WatchTogetherState = {
-        ...state,
-        sourceUrl: resolved.sourceUrl,
-        audioUrl: resolved.audioUrl,
-        videoCodec: resolved.videoCodec,
-        audioCodec: resolved.audioCodec,
-        format: resolved.format,
-        currentQn: resolved.currentQn ?? quality.currentQuality ?? movie.currentQn,
-        acceptQuality: resolved.acceptQuality,
+  const reloadBilibili = useCallback(
+    async (options?: { preferMp4?: boolean }) => {
+      // 并发重入保护：上一次解析仍在进行中（含超时未返回的挂起场景）时直接跳过，
+      // 避免多个解析请求并发导致 suppressEventsRef / isResolving 状态错乱。
+      if (isReloadingBilibiliRef.current) {
+        console.log(
+          '[useWatchTogether] reloadBilibili 已在进行中，跳过本次请求'
+        )
+        return
       }
-      setWatchTogether(newState)
+      isReloadingBilibiliRef.current = true
 
-      // 传入 preserveTime 作为 startTime：MsePlayer.attach 会从该时间对应的字节偏移
-      // 开始 Range 下载，而非从文件头 0 字节顺序下载。否则大跨度跳转后重载会
-      // 从头加载到目标位置才播放（用户看到的"加载跳转之前的部分"现象）。
-      await applySourceToVideo(video, newState, preserveTime)
-      video.currentTime = preserveTime
-      if (shouldPlay) {
-        void safePlay(video)
+      const video = videoRef.current
+      if (!video || !isHostRef.current) {
+        isReloadingBilibiliRef.current = false
+        return
       }
 
-      quality.setCurrentQuality(newState.currentQn ?? null)
-      quality.setAvailableQualities(newState.acceptQuality ?? [])
+      const state = useRoomStore.getState().watchTogether
+      if (state.sourceType !== 'bilibili') {
+        isReloadingBilibiliRef.current = false
+        return
+      }
 
-      broadcastState(newState)
-    } catch (err) {
-      console.error('[useWatchTogether] 重新解析 B站 视频失败:', err)
-      message.error(err instanceof Error ? err.message : '重新解析失败')
+      const storeState = useRoomStore.getState()
+      const movie = storeState.movies.find(
+        (m) => m.id === storeState.currentMovieId
+      )
+      if (!movie?.url) {
+        isReloadingBilibiliRef.current = false
+        return
+      }
+
+      setIsResolving(true)
+      suppressEventsRef.current = true
+
+      const preserveTime = video.currentTime
+      const shouldPlay = !video.paused
+
       try {
-        await applySourceToVideo(video, state, preserveTime)
-        if (preserveTime > 0) {
-          video.currentTime = preserveTime
+        // 未显式传入 options 时，从 localStorage 读取该影片的播放模式偏好
+        // （BilibiliParseSettings 中切换播放模式触发 triggerReloadBilibili 走此路径）
+        // CLI 未连接时 getEffectivePreferMp4 会强制返回 true（MP4 降级）。
+        const resolvedOptions = options ?? {
+          preferMp4: getEffectivePreferMp4(movie.id),
         }
+        const resolved = await resolveBilibiliOnline(
+          movie,
+          undefined,
+          resolvedOptions
+        )
+
+        const newState: WatchTogetherState = {
+          ...state,
+          sourceUrl: resolved.sourceUrl,
+          audioUrl: resolved.audioUrl,
+          videoCodec: resolved.videoCodec,
+          audioCodec: resolved.audioCodec,
+          format: resolved.format,
+          currentQn:
+            resolved.currentQn ?? quality.currentQuality ?? movie.currentQn,
+          acceptQuality: resolved.acceptQuality,
+          // 重新评估 bufferMode：根据当前用户偏好与新源格式
+          // （DASH + bufferMode=true 才启用；MP4 模式强制 false）
+          bufferMode:
+            resolved.format === 'dash' &&
+            getBilibiliParseOptions(movie.id).bufferMode === true,
+        }
+        setWatchTogether(newState)
+
+        // 缓冲模式：重新解析后 cacheKey 变化（cid/qn 可能不同），需要重新下载 blobs
+        let blobs: { videoBlob: Blob; audioBlob: Blob } | undefined
+        if (newState.bufferMode) {
+          try {
+            blobs = await fetchBlobsForBufferModeLocal(newState, movie)
+          } catch {
+            // 缓冲失败已通过 message.error 提示，保持 bufferMode=true 不降级
+            // 用户需手动重试（重载或切清晰度），避免自动回退到流式播放与用户意图相悖
+            return
+          }
+        }
+
+        // 传入 preserveTime 作为 startTime：MsePlayer.attach 会从该时间对应的字节偏移
+        // 开始 Range 下载，而非从文件头 0 字节顺序下载。否则大跨度跳转后重载会
+        // 从头加载到目标位置才播放（用户看到的"加载跳转之前的部分"现象）。
+        await applySourceToVideo(video, newState, preserveTime, blobs)
+        video.currentTime = preserveTime
         if (shouldPlay) {
           void safePlay(video)
         }
-      } catch {
-        // 忽略恢复失败
+
+        quality.setCurrentQuality(newState.currentQn ?? null)
+        quality.setAvailableQualities(newState.acceptQuality ?? [])
+
+        broadcastState(newState)
+      } catch (err) {
+        console.error('[useWatchTogether] 重新解析 B站 视频失败:', err)
+        message.error(err instanceof Error ? err.message : '重新解析失败')
+        try {
+          await applySourceToVideo(video, state, preserveTime)
+          if (preserveTime > 0) {
+            video.currentTime = preserveTime
+          }
+          if (shouldPlay) {
+            void safePlay(video)
+          }
+        } catch {
+          // 忽略恢复失败
+        }
+      } finally {
+        suppressEventsRef.current = false
+        quality.setIsSwitchingQuality(false)
+        setIsResolving(false)
+        isReloadingBilibiliRef.current = false
       }
-    } finally {
-      suppressEventsRef.current = false
-      quality.setIsSwitchingQuality(false)
-      setIsResolving(false)
-      isReloadingBilibiliRef.current = false
-    }
-  }, [videoRef, quality, applySourceToVideo, setWatchTogether, broadcastState])
+    },
+    [videoRef, quality, applySourceToVideo, setWatchTogether, broadcastState]
+  )
 
   // 响应 BilibiliParseSettings 中 codec / CDN 偏好变更触发的重新解析请求。
   // 计数器模式：每次 triggerReloadBilibili() 都会递增 pendingReloadBilibili，
@@ -452,6 +557,29 @@ export function useWatchTogether({
     // reloadBilibili 是 useCallback，依赖已固定；pendingReloadBilibili 是触发信号
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingReloadBilibili])
+
+  // 观众：切换 CLI 等仅影响本客户端代理的设置后，重新 attach 当前源以生效。
+  useEffect(() => {
+    if (pendingViewerSourceReload === 0) return
+    const run = async () => {
+      if (isHostRef.current) return
+      const video = videoRef.current
+      if (!video) return
+      const state = useRoomStore.getState().watchTogether
+      if (!state.sourceUrl) return
+      suppressEventsRef.current = true
+      try {
+        await applySourceToVideo(video, state, video.currentTime)
+      } catch (err) {
+        console.error('[useWatchTogether] 观众重新 attach 源失败:', err)
+      } finally {
+        suppressEventsRef.current = false
+      }
+    }
+    void run()
+    // applySourceToVideo 是 useCallback，依赖已固定；pendingViewerSourceReload 是触发信号
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingViewerSourceReload])
 
   // 观众：清晰度切换通过 watch-together-state.currentQn 同步。
   // 旧版使用独立的 quality-change 事件，但后端无转发 handler 导致功能失效；
@@ -522,12 +650,13 @@ export function useWatchTogether({
     suppressEventsRef.current = true
     lastLoadedMovieRef.current = { id: movie.id, url: movie.url }
 
-    /** 带解析进度 UI 的在线解析（B站），读取 localStorage 中的播放模式偏好 */
+    /** 带解析进度 UI 的在线解析（B站），读取 localStorage 中该影片的播放模式偏好 */
     const resolveOnline = async (): Promise<ResolvedMovieSource> => {
       setIsResolving(true)
       try {
-        const preferMp4 = getBilibiliParseOptions().preferMp4
-        return await resolveBilibiliOnline(movie, undefined, { preferMp4 })
+        return await resolveBilibiliOnline(movie, undefined, {
+          preferMp4: getEffectivePreferMp4(movie.id),
+        })
       } finally {
         setIsResolving(false)
       }
@@ -571,9 +700,7 @@ export function useWatchTogether({
             })
       } catch (err) {
         console.error('[useWatchTogether] 解析视频源失败:', err)
-        message.error(
-          err instanceof Error ? err.message : '视频源解析失败'
-        )
+        message.error(err instanceof Error ? err.message : '视频源解析失败')
         resetForRetry()
         return
       }
@@ -608,14 +735,23 @@ export function useWatchTogether({
         duration: r.duration,
         currentQn: r.currentQn,
         acceptQuality: r.acceptQuality,
+        // 缓冲模式：仅 B站 DASH 源启用，根据该影片的用户偏好决定
+        bufferMode:
+          sourceType === 'bilibili' &&
+          r.format === 'dash' &&
+          getBilibiliParseOptions(movie.id).bufferMode === true,
       })
 
       // 4. attach 并恢复进度 / 自动播放 / 广播
-      const applyAndRecover = async (state: WatchTogetherState) => {
+      const applyAndRecover = async (
+        state: WatchTogetherState,
+        blobs?: { videoBlob: Blob; audioBlob: Blob }
+      ) => {
         // 恢复进度时传入 recoveryTime 作为 startTime，MsePlayer 从该时间对应的
         // 字节偏移开始下载，而非从文件头顺序下载到 recoveryTime 才播放。
-        const startTime = isRecovery && recoveryTime > 0 ? recoveryTime : undefined
-        await applySourceToVideo(video, state, startTime)
+        const startTime =
+          isRecovery && recoveryTime > 0 ? recoveryTime : undefined
+        await applySourceToVideo(video, state, startTime, blobs)
         if (isRecovery && recoveryTime > 0) {
           // 恢复进度：seek 到目标时间并强制暂停
           try {
@@ -643,10 +779,28 @@ export function useWatchTogether({
         }
       }
 
+      /**
+       * 缓冲模式：从 B站 CDN 下载完整 m4s 流到 IndexedDB，缓存命中时直接复用。
+       *
+       * 实际逻辑委托给组件作用域的 fetchBlobsForBufferModeLocal（已提升），
+       * 此处直接复用，避免与 useBilibiliQuality 的清晰度切换路径实现重复。
+       */
       const newState = buildNewState(resolved)
       setWatchTogether(newState)
 
-      void applyAndRecover(newState).catch(async (err: unknown) => {
+      // 缓冲模式：在 attach 前先下载完整 m4s 流到 IndexedDB
+      let blobs: { videoBlob: Blob; audioBlob: Blob } | undefined
+      if (newState.bufferMode) {
+        try {
+          blobs = await fetchBlobsForBufferModeLocal(newState, movie)
+        } catch {
+          // 缓冲失败已通过 message.error 提示，重置状态允许用户重试
+          resetForRetry()
+          return
+        }
+      }
+
+      void applyAndRecover(newState, blobs).catch(async (err: unknown) => {
         // MSE attach 失败时必须释放 suppressEventsRef，否则房主端
         // play/pause/seek/timeupdate 事件全部被吞，broadcastState 永不调用，
         // 导致观众端永久黑屏。
@@ -656,9 +810,7 @@ export function useWatchTogether({
         // 回退到重新解析 B站 获取最新 URL，attach 后再次 applyAndRecover。
         // 非 B站 源或非 recovery 路径不回退（错误大概率不会自愈）。
         if (resolved.reusedRecoveryUrl) {
-          console.log(
-            '[useWatchTogether] 复用旧 B站 URL 失败，回退到重新解析'
-          )
+          console.log('[useWatchTogether] 复用旧 B站 URL 失败，回退到重新解析')
           try {
             const reResolved = await resolveOnline()
             if (reResolved.acceptQuality?.length) {
@@ -670,14 +822,27 @@ export function useWatchTogether({
 
             const reResolvedState = buildNewState(reResolved)
             setWatchTogether(reResolvedState)
-            await applyAndRecover(reResolvedState)
+
+            // 缓冲模式重新解析时也需要重新下载 m4s
+            let reBlobs: { videoBlob: Blob; audioBlob: Blob } | undefined
+            if (reResolvedState.bufferMode) {
+              try {
+                reBlobs = await fetchBlobsForBufferModeLocal(
+                  reResolvedState,
+                  movie
+                )
+              } catch {
+                resetForRetry()
+                return
+              }
+            }
+
+            await applyAndRecover(reResolvedState, reBlobs)
             return
           } catch (retryErr) {
             console.error('[useWatchTogether] 回退重新解析失败:', retryErr)
             message.error(
-              retryErr instanceof Error
-                ? retryErr.message
-                : 'B站视频解析失败'
+              retryErr instanceof Error ? retryErr.message : 'B站视频解析失败'
             )
           }
           resetForRetry()

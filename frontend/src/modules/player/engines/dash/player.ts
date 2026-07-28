@@ -26,6 +26,7 @@ import type { MediaPlayerClass } from 'dashjs'
 import type { PlayerController, SeekResult } from '../../types'
 import { resolveProxyUrl } from '../../services/url-proxy'
 import { findAllSidxInBuffer, findMoovRange } from './mp4-box-parser'
+import { useP2PStatsStore } from '../../services/p2p-stats-store'
 
 /** DashPlayer 构造参数 */
 export interface DashPlayerOptions {
@@ -43,6 +44,30 @@ export interface DashPlayerOptions {
    * 用于 MPD mediaPresentationDuration，dash.js 据此设置 video.duration。
    */
   duration?: number
+  /**
+   * 视频流 Blob（缓冲模式专用）。
+   *
+   * 传入时 DashPlayer 直接生成 blob URL 加载，跳过服务器代理：
+   * - 不调用 preloadInitSegment（用本地 Blob slice 解析 sidx）
+   * - MPD 中 BaseURL 使用 blob: URL 而非代理 URL
+   * - 播放期间零网络流量，URL 过期不影响播放
+   */
+  videoBlob?: Blob
+  /**
+   * 音频流 Blob（缓冲模式专用）。
+   * 传入时与 videoBlob 同等处理，生成独立 blob URL。
+   */
+  audioBlob?: Blob
+  /**
+   * 是否启用 P2P 传输（基于 SwarmCloud）。
+   *
+   * 启用后 attach 阶段会创建 P2pEngineDash 实例包装 dash.js，房间内其他启用 P2P
+   * 的客户端通过 WebRTC DataChannel 共享 m4s 分片，减少服务器代理流量。
+   *
+   * 仅在流模式生效（isBufferMode=true 时忽略，因视频已完整缓存到本地 Blob）。
+   * 各客户端独立启用，SwarmCloud tracker 通过 channelId（取自 videoUrl）匹配 peer。
+   */
+  p2pEnabled?: boolean
 }
 
 type PlayerState = 'idle' | 'attaching' | 'attached' | 'seeking' | 'disposed'
@@ -86,13 +111,33 @@ export class DashPlayer implements PlayerController {
   private readonly videoCodec?: string
   private readonly audioCodec?: string
   private readonly duration?: number
+  /** 缓冲模式：本地 Blob 数据（已从 IndexedDB 读取） */
+  private readonly videoBlob?: Blob
+  private readonly audioBlob?: Blob
+  /** P2P 传输开关（仅在流模式生效，缓冲模式忽略） */
+  private readonly p2pEnabled: boolean
 
   private dashPlayer: MediaPlayerClass | null = null
   private mpdBlobUrl: string | null = null
+  /** 缓冲模式：从 Blob 生成的 video/audio blob URL，cleanup 时统一 revoke */
+  private videoBlobUrl: string | null = null
+  private audioBlobUrl: string | null = null
   private state: PlayerState = 'idle'
   private initInfo: DashPlayerInitInfo = {}
   /** 最近一次 dash.js 错误事件（用于 seek 失败诊断） */
-  private lastDashError: { code?: string; message?: string; raw?: unknown } | null = null
+  private lastDashError: {
+    code?: string
+    message?: string
+    raw?: unknown
+  } | null = null
+  /**
+   * SwarmCloud P2P 引擎实例（可选）。
+   *
+   * 仅在 p2pEnabled=true 且非缓冲模式时创建。包装 dash.js player，
+   * 通过 WebRTC DataChannel 与房间内其他客户端共享 m4s 分片。
+   * 生命周期与 dash.js 实例一致：attach 时创建，cleanup 时销毁。
+   */
+  private p2pEngine: { destroy: () => void } | null = null
 
   constructor(options: DashPlayerOptions) {
     this.video = options.video
@@ -101,6 +146,14 @@ export class DashPlayer implements PlayerController {
     this.videoCodec = options.videoCodec
     this.audioCodec = options.audioCodec
     this.duration = options.duration
+    this.videoBlob = options.videoBlob
+    this.audioBlob = options.audioBlob
+    this.p2pEnabled = options.p2pEnabled === true
+  }
+
+  /** 是否启用缓冲模式（传入 Blob 数据时为 true） */
+  private get isBufferMode(): boolean {
+    return !!(this.videoBlob && this.audioBlob)
   }
 
   // ── 公开 API ──────────────────────────────────────
@@ -125,15 +178,22 @@ export class DashPlayer implements PlayerController {
     this.state = 'attaching'
 
     console.log(
-      `[DashPlayer] attach 开始: startTime=${startTime?.toFixed(1) ?? '无'}, videoUrl=${this.videoUrl.substring(0, 80)}...`
+      `[DashPlayer] attach 开始: mode=${this.isBufferMode ? 'buffer' : 'stream'}, ` +
+        `startTime=${startTime?.toFixed(1) ?? '无'}, ` +
+        `videoUrl=${this.videoUrl.substring(0, 80)}...`
     )
 
     try {
-      // 1. 预下载视频 m4s 的头部，解析 sidx 和 moov 位置
+      // 1. 预下载/读取视频 m4s 头部，解析 sidx 和 moov 位置
       //    dash.js 需要 sidx 来实现 seek（计算目标时间对应的字节偏移）。
       //    没有 sidx 时，dash.js 无法 seek（只知道顺序下载，不知道跳转位置）。
-      const videoInitInfo = await this.preloadInitSegment(this.videoUrl)
-      this.initInfo = videoInitInfo
+      if (this.isBufferMode && this.videoBlob) {
+        // 缓冲模式：从本地 Blob slice 读取头部，零网络请求
+        this.initInfo = await this.parseInitFromBlob(this.videoBlob)
+      } else {
+        // 流模式：通过服务器代理预下载头部
+        this.initInfo = await this.preloadInitSegment(this.videoUrl)
+      }
 
       // 2. 生成 MPD manifest（含 SegmentBase/indexRange，如果解析到 sidx）
       const mpd = this.generateMpd()
@@ -150,14 +210,18 @@ export class DashPlayer implements PlayerController {
       //    - 禁用 ABR 自动切换（B站 DASH 只有一个 Representation，ABR 无意义）
       //    - 启用 fastSwitch（seek 后快速恢复播放）
       //    - 配置缓冲策略（与 MSE 引擎 TARGET_BUFFER_AHEAD 对齐）
+      //    缓冲模式：扩大缓冲至整个视频，dash.js 会从 Blob 读取全部数据
+      const bufferAhead = this.isBufferMode
+        ? Math.max(this.duration ?? 600, 600)
+        : 30
       player.updateSettings({
         streaming: {
           buffer: {
             fastSwitchEnabled: true,
-            bufferTimeAtTopQuality: 30,
-            bufferTimeAtTopQualityLongForm: 60,
-            bufferToKeep: 30,
-            bufferPruningInterval: 10,
+            bufferTimeAtTopQuality: bufferAhead,
+            bufferTimeAtTopQualityLongForm: bufferAhead,
+            bufferToKeep: bufferAhead,
+            bufferPruningInterval: 60,
           },
           gaps: {
             enableSeekFix: true,
@@ -174,7 +238,8 @@ export class DashPlayer implements PlayerController {
       // 5. 让 dash.js 所有 XHR 请求携带凭证（cookie）
       //    B站 CDN URL 经后端 /api/stream/proxy 代理，该接口要求登录态。
       //    dash.js 默认 XHR 不带 credentials，会导致 401 拒绝。
-      //    需要对所有请求类型（MPD/fragment/init/xlink）都启用 withCredentials。
+      //    缓冲模式：BaseURL 是 blob: URL，dash.js 不会发起跨域请求，
+      //    credentials 设置不影响 Blob URL 加载，但为保持一致仍启用。
       player.setXHRWithCredentialsForType('MPD', true)
       player.setXHRWithCredentialsForType('MediaSegment', true)
       player.setXHRWithCredentialsForType('InitializationSegment', true)
@@ -203,6 +268,14 @@ export class DashPlayer implements PlayerController {
         console.warn('[DashPlayer] dash.js ERROR 事件:', e.error ?? event)
       })
 
+      // 6.2 P2P 引擎集成（仅在流模式 + p2pEnabled 时启用）
+      //     缓冲模式下视频已完整缓存到本地 Blob，P2P 无意义且会浪费 WebRTC 资源。
+      //     P2pEngineDash 通过替换 dash.js 的 segment loader 实现 P2P 优先下载，
+      //     失败自动回退到 HTTP（dash.js 原生 loader）。
+      if (this.p2pEnabled && !this.isBufferMode) {
+        await this.setupP2P(player)
+      }
+
       // 7. 等待 metadata 加载（video.readyState >= 1）
       await this.waitForMetadata()
 
@@ -212,6 +285,100 @@ export class DashPlayer implements PlayerController {
       this.cleanup()
       throw err
     }
+  }
+
+  /**
+   * 缓冲模式：从本地 Blob 解析 m4s 头部。
+   *
+   * 与 preloadInitSegment 相比：
+   * - 无需网络请求，从 Blob slice 读取前 5MB
+   * - 解析 sidx/moov 后立即释放切片，内存占用低
+   * - 不会因网络问题失败
+   */
+  private async parseInitFromBlob(blob: Blob): Promise<DashPlayerInitInfo> {
+    const info: DashPlayerInitInfo = {}
+    info.totalSize = blob.size
+
+    // 切片前 5MB 解析 sidx/moov（足够覆盖多 sidx 结构）
+    const sliceSize = Math.min(SIDX_SCAN_BYTES, blob.size)
+    const slice = blob.slice(0, sliceSize)
+    const buffer = await slice.arrayBuffer()
+
+    // 解析 moov 范围
+    const moovRange = findMoovRange(buffer)
+    if (moovRange) {
+      info.moovRange = moovRange
+      const moovEnd = parseInt(moovRange.split('-')[1], 10)
+      info.initRange = `0-${moovEnd}`
+      info.initEnd = moovEnd + 1
+    }
+
+    // 解析所有 sidx box
+    const allSidx = findAllSidxInBuffer(buffer)
+    if (allSidx.length > 0) {
+      const firstSidx = allSidx[0]
+      info.sidxRange = firstSidx.range
+      info.sidxCount = allSidx.length
+
+      const sidx = firstSidx.info
+      if (sidx && sidx.references.length > 0) {
+        const totalDuration =
+          sidx.references.reduce((sum, r) => sum + r.subsegmentDuration, 0) /
+          sidx.timescale
+        info.sidxCoverage = totalDuration
+
+        const segments: DashSegmentInfo[] = []
+        let currentTime = sidx.earliestPresentationTime / sidx.timescale
+        const sidxEnd = parseInt(firstSidx.range.split('-')[1], 10)
+        let byteOffset = sidxEnd + 1 + sidx.firstOffset
+
+        for (const ref of sidx.references) {
+          segments.push({
+            startTime: currentTime,
+            duration: ref.subsegmentDuration / sidx.timescale,
+            byteOffset,
+            byteSize: ref.referencedSize,
+          })
+          currentTime += ref.subsegmentDuration / sidx.timescale
+          byteOffset += ref.referencedSize
+        }
+        info.segments = segments
+
+        console.log(
+          `[DashPlayer] 缓冲模式 sidx 解析:\n` +
+            `  sidx 数量: ${allSidx.length}\n` +
+            `  references: ${sidx.references.length}\n` +
+            `  累积时长: ${totalDuration.toFixed(1)}s (duration: ${this.duration ?? '未知'}s)\n` +
+            `  segments 数量: ${segments.length}\n` +
+            `  文件总大小: ${(blob.size / 1024 / 1024).toFixed(1)}MB`
+        )
+
+        // sidx 覆盖不足时使用线性估算扩展
+        if (this.duration && totalDuration < this.duration - 1) {
+          console.warn(
+            `[DashPlayer] sidx 覆盖不足 (${totalDuration.toFixed(1)}s < ${this.duration}s)`
+          )
+          if (
+            info.segments &&
+            info.sidxCoverage &&
+            info.sidxCoverage < this.duration - 1
+          ) {
+            info.segments = this.extendSegmentsWithLinearEstimation(
+              info.segments,
+              info.totalSize,
+              this.duration
+            )
+            info.sidxCoverage = this.duration
+          }
+        }
+      }
+    } else {
+      console.warn(
+        '[DashPlayer] 缓冲模式：未找到 sidx box，seek 可能无法正常工作'
+      )
+    }
+
+    return info
   }
 
   /**
@@ -277,9 +444,20 @@ export class DashPlayer implements PlayerController {
     }
   }
 
-  /** 清理所有资源：销毁 dash.js 实例 + revoke MPD Blob URL */
+  /** 清理所有资源：销毁 dash.js 实例 + revoke 所有 Blob URL */
   cleanup(): void {
     this.state = 'disposed'
+    // 先销毁 P2P 引擎：避免在 dash.js 销毁后还触发 P2P 回调导致异常
+    if (this.p2pEngine) {
+      try {
+        this.p2pEngine.destroy()
+      } catch {
+        /* ignore */
+      }
+      this.p2pEngine = null
+      // 重置统计 store 并标记引擎不活跃
+      useP2PStatsStore.getState().reset()
+    }
     if (this.dashPlayer) {
       try {
         this.dashPlayer.destroy()
@@ -291,6 +469,87 @@ export class DashPlayer implements PlayerController {
     if (this.mpdBlobUrl) {
       URL.revokeObjectURL(this.mpdBlobUrl)
       this.mpdBlobUrl = null
+    }
+    // 缓冲模式：释放 video/audio blob URL
+    if (this.videoBlobUrl) {
+      URL.revokeObjectURL(this.videoBlobUrl)
+      this.videoBlobUrl = null
+    }
+    if (this.audioBlobUrl) {
+      URL.revokeObjectURL(this.audioBlobUrl)
+      this.audioBlobUrl = null
+    }
+  }
+
+  /**
+   * 创建 SwarmCloud P2P 引擎并包装 dash.js 实例。
+   *
+   * 实现要点：
+   * - 动态 import @swarmcloud/dashjs：避免在禁用 P2P 时加载 WebRTC 相关代码
+   * - channelId 使用 videoUrl：所有播放同一视频的客户端 channelId 一致，
+   *   SwarmCloud tracker 据此匹配 peer（房主广播的 videoUrl 在所有客户端相同）
+   * - 信令地址使用 SwarmCloud 公共服务（main + backup 双通道容灾）
+   * - trackerZone 设为 CN（中国大陆节点，与项目主要用户群匹配）
+   * - stats 回调写入 zustand store，UI 通过订阅 store 显示实时统计
+   *
+   * 失败处理：
+   * - 浏览器不支持 WebRTC（isSupported()=false）：跳过 P2P，dash.js 自动走 HTTP
+   * - 动态 import 失败（网络问题）：警告并跳过，不影响正常播放
+   * - P2P 连接失败：SwarmCloud 内部自动回退到 HTTP，无需上层处理
+   */
+  private async setupP2P(player: MediaPlayerClass): Promise<void> {
+    try {
+      const P2pEngineDashModule = await import('@swarmcloud/dashjs')
+      const P2pEngineDash = P2pEngineDashModule.default
+      const { TrackerZone, LogLevel } = P2pEngineDashModule
+
+      if (!P2pEngineDash.isSupported()) {
+        console.warn(
+          '[DashPlayer] P2P 不被当前浏览器支持（需 WebRTC + MSE），回退到 HTTP'
+        )
+        return
+      }
+
+      // 重置统计 store，标记引擎即将激活
+      const statsStore = useP2PStatsStore.getState()
+      statsStore.reset()
+      statsStore.setEngineActive(true)
+
+      const engine = new P2pEngineDash(player, {
+        p2pEnabled: true,
+        trackerZone: TrackerZone.CN,
+        logLevel: LogLevel.Warn,
+        signalConfig: {
+          main: 'wss://gz.swarmcloud.net',
+          backup: 'wss://signal.cdnbye.com',
+        },
+        // channelId 取自 videoUrl：房主广播的 videoUrl 在所有客户端相同，
+        // SwarmCloud tracker 据此将播放同一视频的客户端分到同一 swarm
+        channelId: this.videoUrl,
+      })
+
+      engine.on('stats', (stats: unknown) => {
+        const s = stats as {
+          totalHTTPDownloaded: number
+          totalP2PDownloaded: number
+          totalP2PUploaded: number
+          p2pDownloadSpeed: number
+        }
+        useP2PStatsStore.getState().updateStats({
+          totalHTTPDownloaded: s.totalHTTPDownloaded || 0,
+          totalP2PDownloaded: s.totalP2PDownloaded || 0,
+          totalP2PUploaded: s.totalP2PUploaded || 0,
+          p2pDownloadSpeed: s.p2pDownloadSpeed || 0,
+        })
+      })
+
+      this.p2pEngine = engine
+      console.log(
+        `[DashPlayer] P2P 引擎已启用: channelId=${this.videoUrl.substring(0, 80)}...`
+      )
+    } catch (err) {
+      console.warn('[DashPlayer] P2P 引擎初始化失败，回退到 HTTP:', err)
+      useP2PStatsStore.getState().reset()
     }
   }
 
@@ -368,10 +627,8 @@ export class DashPlayer implements PlayerController {
         const sidx = firstSidx.info
         if (sidx && sidx.references.length > 0) {
           const totalDuration =
-            sidx.references.reduce(
-              (sum, r) => sum + r.subsegmentDuration,
-              0
-            ) / sidx.timescale
+            sidx.references.reduce((sum, r) => sum + r.subsegmentDuration, 0) /
+            sidx.timescale
           info.sidxCoverage = totalDuration
 
           // 构建 segments 列表
@@ -408,10 +665,7 @@ export class DashPlayer implements PlayerController {
               `  文件总大小: ${info.totalSize ?? '未知'} bytes`
           )
 
-          if (
-            this.duration &&
-            totalDuration < this.duration - 1
-          ) {
+          if (this.duration && totalDuration < this.duration - 1) {
             console.warn(
               `[DashPlayer] sidx 覆盖不足 (${totalDuration.toFixed(1)}s < ${this.duration}s)`
             )
@@ -473,9 +727,7 @@ export class DashPlayer implements PlayerController {
       })
 
       if (!response.ok && response.status !== 206) {
-        console.warn(
-          `[DashPlayer] 二次扫描失败: status=${response.status}`
-        )
+        console.warn(`[DashPlayer] 二次扫描失败: status=${response.status}`)
         return
       }
 
@@ -493,10 +745,8 @@ export class DashPlayer implements PlayerController {
         const sidx = allSidx[i].info
         if (sidx && sidx.references.length > 0) {
           const duration =
-            sidx.references.reduce(
-              (sum, r) => sum + r.subsegmentDuration,
-              0
-            ) / sidx.timescale
+            sidx.references.reduce((sum, r) => sum + r.subsegmentDuration, 0) /
+            sidx.timescale
           totalCoverage += duration
           console.log(
             `[DashPlayer]   sidx[${i}]: range=${allSidx[i].range}, references=${sidx.references.length}, 时长=${duration.toFixed(1)}s`
@@ -659,8 +909,19 @@ export class DashPlayer implements PlayerController {
     const initEnd = this.initInfo.initEnd
 
     // 统一代理策略：DASH m4s 流始终走代理（有防盗链 + 无 CORS）
-    const videoUrl = resolveProxyUrl(this.videoUrl, undefined, 'dash')
-    const audioUrl = resolveProxyUrl(this.audioUrl, undefined, 'dash')
+    // 缓冲模式：使用本地 Blob URL，零网络请求，URL 过期不影响播放
+    let videoUrl: string
+    let audioUrl: string
+    if (this.isBufferMode && this.videoBlob && this.audioBlob) {
+      // 生成 blob URL（cleanup 时统一 revoke）
+      this.videoBlobUrl = URL.createObjectURL(this.videoBlob)
+      this.audioBlobUrl = URL.createObjectURL(this.audioBlob)
+      videoUrl = this.videoBlobUrl
+      audioUrl = this.audioBlobUrl
+    } else {
+      videoUrl = resolveProxyUrl(this.videoUrl, undefined, 'dash')
+      audioUrl = resolveProxyUrl(this.audioUrl, undefined, 'dash')
+    }
 
     let videoSegmentInfo = ''
 

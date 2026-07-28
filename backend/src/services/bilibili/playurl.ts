@@ -62,6 +62,8 @@ interface RawPlayUrlData {
     video?: RawDashMedia[];
     audio?: RawDashMedia[];
   };
+  /** B站服务端实际返回的清晰度（可能因账号权限降级，与请求的 qn 不同） */
+  quality?: number;
   accept_quality?: number[];
   accept_description?: RawAcceptDescription[];
 }
@@ -216,12 +218,17 @@ function buildAcceptQuality(
 
 function normalizePlayUrlData(
   data?: RawPlayUrlData,
-  currentQn?: number,
+  requestedQn?: number,
   codec?: string,
 ): BilibiliPlayUrlResult | null {
   if (!data) return null;
 
-  const qn = currentQn ?? DEFAULT_QN;
+  // 关键修复：使用 B站 实际返回的 quality 字段，而非请求的 qn。
+  // 原因：B站服务端会根据账号权限/平台限制进行降级（如非会员请求 1080P，
+  // platform=html5 时返回 720P），若仍按请求值展示会导致前端显示与实际流不一致。
+  // 例如：请求 qn=80(1080P)，但 B站降级返回 data.quality=64(720P) + 720P 的 MP4 URL，
+  // 此时 video.videoWidth/Height=1280x720，必须用 data.quality=64 才能正确显示。
+  const qn = data.quality ?? requestedQn ?? DEFAULT_QN;
   const acceptQuality = buildAcceptQuality(
     data.accept_quality,
     data.accept_description,
@@ -233,7 +240,8 @@ function normalizePlayUrlData(
     // 用于定位"切换清晰度后实际分辨率未变化"的问题。
     // B站 DASH 流中 dash.video[].id 即清晰度 qn（80=1080P, 32=480P, 16=360P）。
     console.log(
-      '[bilibili-playurl] 请求 qn=%d, B站返回 %d 条视频轨道:',
+      '[bilibili-playurl] 请求 qn=%d, B站实际返回 quality=%d, %d 条视频轨道:',
+      requestedQn,
       qn,
       data.dash.video.length,
       data.dash.video.map((t) => ({
@@ -257,7 +265,7 @@ function normalizePlayUrlData(
       data.dash.audio?.map(normalizeDashMedia),
     );
     console.log(
-      '[bilibili-playurl] 选定 bestVideo: id=%d bandwidth=%d codecs=%s (期望 qn=%d, 过滤后 %d 条匹配轨道)',
+      '[bilibili-playurl] 选定 bestVideo: id=%d bandwidth=%d codecs=%s (实际 qn=%d, 过滤后 %d 条匹配轨道)',
       video[0]?.id,
       video[0]?.bandwidth,
       video[0]?.codecs,
@@ -276,6 +284,11 @@ function normalizePlayUrlData(
   }
 
   if (data.durl?.length) {
+    console.log(
+      '[bilibili-playurl] MP4 直链: 请求 qn=%d, B站实际返回 quality=%d',
+      requestedQn,
+      qn,
+    );
     return {
       format: 'mp4',
       durl: data.durl.map((d) => ({
@@ -317,10 +330,14 @@ async function getPlayUrlWbi(
     fourk: String(DEFAULT_FOURK),
   };
   // platform=html5：B站 HTML5 播放器接口，返回无防盗链 MP4 直链
-  // 与 high_quality=1 配合，SYNCTV 默认方案
+  // - high_quality=1：与 platform=html5 配合请求高画质
+  // - try_look=1：B站官方参数，允许未登录用户拉到 720P/1080P 清晰度
+  // 实测：B站对 MP4 格式有硬性限制，非会员/会员账号最高只能拿到 720P(qn=64)，
+  // 1080P+ 画质仅 DASH 格式支持。try_look=1 保留以最大化未登录用户的可用清晰度。
   if (options?.platform === 'html5') {
     signBase.platform = 'html5';
     signBase.high_quality = '1';
+    signBase.try_look = '1';
   }
   const signed = signParams(signBase, imgKey, subKey);
   const query = buildQueryString(signed);
@@ -359,6 +376,7 @@ async function getPlayUrlLegacy(
   if (options?.platform === 'html5') {
     params.set('platform', 'html5');
     params.set('high_quality', '1');
+    params.set('try_look', '1');
   }
 
   const res = await bilibiliFetch<RawPlayUrlData>(

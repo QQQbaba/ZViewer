@@ -325,6 +325,27 @@ deps_installed() {
   return 0
 }
 
+# 检测 FFmpeg 是否可用（可选依赖，用于 B站视频下载 DASH 模式合并 m4s 流）
+# 未安装时仅影响高画质下载（1080P+/4K/HDR/杜比视界/8K），不影响其他功能
+check_ffmpeg() {
+  if [[ -x "$ROOT_DIR/bin/ffmpeg" ]] || command -v ffmpeg >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+print_ffmpeg_hint() {
+  if ! check_ffmpeg; then
+    echo ""
+    echo "  [提示] 未检测到 FFmpeg"
+    echo "  B站视频下载仅支持 MP4 模式（最高 1080P）"
+    echo "  如需下载 4K/HDR/杜比视界/8K 等高画质，请："
+    echo "    - 在「个人中心 → 下载 B站视频」面板中点击「下载 FFmpeg」自动安装"
+    echo "    - 或手动安装：apt install ffmpeg / yum install ffmpeg / brew install ffmpeg"
+    echo ""
+  fi
+}
+
 install_deps() {
   # npm workspaces：仅在根目录安装一次，子目录自动 hoist
   # 优先 npm ci（要求 package-lock.json，可重现依赖树，更快更稳定）
@@ -745,6 +766,9 @@ EOF
   echo "    $rtmp_port      - RTMP 推流端口（使用 OBS 推流时必须放行）"
   echo "    $http_flv_port   - HTTP-FLV 拉流端口（未配置反向代理时需放行）"
   echo ""
+
+  # FFmpeg 可选依赖提示
+  print_ffmpeg_hint
 
   echo "  PID 文件：$PIDS_FILE"
   echo "  日志目录：$LOG_DIR"

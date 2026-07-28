@@ -186,6 +186,11 @@ interface RoomState {
    */
   pendingReloadBilibili: number
   /**
+   * 观众端待处理的源重载计数器（由 BilibiliParseSettings 触发，useWatchTogether 消费）。
+   * 观众切换 CLI 等仅影响本客户端的代理设置后，需要重新 attach 当前源以生效。
+   */
+  pendingViewerSourceReload: number
+  /**
    * MSE 流重新加载（seek 到未缓冲区域）状态。
    * - isReloading=true 期间进度条显示 reloadTargetTime 而非 video.currentTime（避免归零）
    * - 同时在播放器上展示加载动画
@@ -193,6 +198,21 @@ interface RoomState {
    */
   isReloading: boolean
   reloadTargetTime: number | null
+  /**
+   * 缓冲模式下载进度（房主/观众共享）。
+   * - 非空时表示正在下载 m4s 流到 IndexedDB
+   * - 完成或失败后置为 null
+   * 由 useWatchTogether（房主）和 useViewerStateSync（观众）共同写入，
+   * UI 从此读取以显示缓冲进度覆盖层。
+   */
+  bufferProgress: {
+    downloaded: number
+    total: number
+    title: string
+  } | null
+  setBufferProgress: (
+    progress: { downloaded: number; total: number; title: string } | null
+  ) => void
   /**
    * 房主端「自动通过申请」开关。
    * 开启后，seek / 暂停 / 继续播放 申请自动通过，无需手动确认。
@@ -245,6 +265,8 @@ interface RoomState {
   setPendingPreviewPlay: (value: PreviewPlayRequest | null) => void
   /** 触发一次 B站 重新解析（计数器递增） */
   triggerReloadBilibili: () => void
+  /** 触发观众端重新 attach 当前源（计数器递增） */
+  triggerViewerSourceReload: () => void
   reset: () => void
   // REST API
   fetchMovies: (roomId: string) => Promise<void>
@@ -331,8 +353,14 @@ const defaultState = {
   pendingQualityChange: null,
   pendingPreviewPlay: null,
   pendingReloadBilibili: 0,
+  pendingViewerSourceReload: 0,
   isReloading: false,
   reloadTargetTime: null,
+  bufferProgress: null as {
+    downloaded: number
+    total: number
+    title: string
+  } | null,
   autoApproveRequests: true,
   streamStatus: 'unknown' as StreamStatus,
   streamKey: null,
@@ -428,8 +456,13 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     set((state) => ({
       pendingReloadBilibili: state.pendingReloadBilibili + 1,
     })),
+  triggerViewerSourceReload: () =>
+    set((state) => ({
+      pendingViewerSourceReload: state.pendingViewerSourceReload + 1,
+    })),
   setReloadingState: (isReloading, targetTime) =>
     set({ isReloading, reloadTargetTime: targetTime }),
+  setBufferProgress: (progress) => set({ bufferProgress: progress }),
   toggleAutoApproveRequests: () =>
     set((state) => ({ autoApproveRequests: !state.autoApproveRequests })),
   setActiveRoomId: (id) => set({ activeRoomId: id }),

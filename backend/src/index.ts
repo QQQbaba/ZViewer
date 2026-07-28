@@ -32,6 +32,7 @@ import webdavRoutes from './routes/webdav';
 import ftpRoutes from './routes/ftp';
 import updaterRoutes from './routes/updater';
 import clientLogsRoutes from './routes/client-logs';
+import cliRoutes from './routes/cli';
 import { createRoomsRouter } from './routes/rooms';
 import { verifyAccessToken } from './middleware/auth';
 // 屏幕共享子模块保持原有注册方式（内部自管理 io.on('connection')）
@@ -65,6 +66,7 @@ import {
   playbackBroadcasterService,
 } from './modules/playback-memory';
 import { CommentHandler } from './modules/comment';
+import { CliHandler } from './modules/cli';
 import { nmsService, StreamPushHandler, streamPushRouter } from './modules/stream-push';
 import { ensureUploadsRoot } from './services/server-files/pathResolver';
 import {
@@ -236,6 +238,8 @@ async function bootstrap() {
   app.use('/api/stream/kazumi', kazumiRoutes);
   app.use('/api/server-files', serverFilesRoutes);
   app.use('/api/stream', streamRoutes);
+  // CLI 本地代理端点：供 zcontrol-cli 使用，使用用户自己的 Cookie 解析高画质
+  app.use('/api/cli', cliRoutes);
   app.use('/api/openlist', openlistRoutes);
   app.use('/api/webdav', webdavRoutes);
   app.use('/api/ftp', ftpRoutes);
@@ -269,6 +273,14 @@ async function bootstrap() {
   void cleanupInactiveRooms(io);
 
   io.use((socket, next) => {
+    // CLI 代理（zcontrol-cli）使用独立连接语义：无需浏览器用户的 access_token，
+    // 只需在 cli-register 中提供 roomId 即可加入房间。此处按 agent 标识放行，
+    // 后续 CliHandler 会校验 roomId 与 proxyUrl。
+    if (socket.handshake.auth.agent === 'zcontrol-cli') {
+      socket.data.isCliAgent = true;
+      return next();
+    }
+
     // 优先从 handshake.headers.cookie 读取 access_token（httpOnly cookie）
     // 兼容旧 auth.token / query.token 字段以支持过渡期客户端
     const cookieHeader = socket.handshake.headers.cookie;
@@ -334,6 +346,7 @@ async function bootstrap() {
     .add(new TrackSyncHandler())
     .add(new SeekApprovalHandler())
     .add(new CommentHandler())
+    .add(new CliHandler())
     .add(new StreamPushHandler());
 
   // 挂载新模块的 REST 路由

@@ -14,7 +14,6 @@
  * 对外 props 契约与重构前完全一致（RoomPage / WatchPage 无需改动）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import Artplayer from 'artplayer'
 import type { MediaFormat } from '@/lib/mediaFormat'
 import {
@@ -80,6 +79,7 @@ export function WatchTogetherPanel({
 }: WatchTogetherPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
   const [ready, setReady] = useState<{
     art: Artplayer
     video: HTMLVideoElement
@@ -196,13 +196,13 @@ export function WatchTogetherPanel({
     if (!isHost) {
       disposeGuards = installViewerGuards(art, {
         onVideoDblClick: () => {
-          // 对 video 元素本身全屏，避免 $container 全屏导致 DASH 模式合成层重建黑屏
-          const v = art.video
-          if (!v) return
+          // 对 .zart-stage 容器全屏，让控制栏/弹幕层等 UI 在全屏下可见可操作
+          const stage = stageRef.current
+          if (!stage) return
           if (document.fullscreenElement) {
             void document.exitFullscreen()
           } else {
-            void v.requestFullscreen()
+            void stage.requestFullscreen()
           }
         },
       })
@@ -227,6 +227,7 @@ export function WatchTogetherPanel({
 
   const stage = (
     <div
+      ref={stageRef}
       className={cn(
         'zart-stage',
         !isHost && 'zart-viewer',
@@ -236,7 +237,7 @@ export function WatchTogetherPanel({
         isWebFullscreen ? { width: '100dvw', height: '100dvh' } : undefined
       }
     >
-      <div ref={containerRef} className="h-full w-full" />
+      <div ref={containerRef} className="zart-video-container h-full w-full" />
       {ready && (
         <WatchTogetherCore
           roomId={roomId}
@@ -244,12 +245,15 @@ export function WatchTogetherPanel({
           art={ready.art}
           video={ready.video}
           videoRef={videoRef}
+          stageRef={stageRef}
           slots={ready.slots}
+          isWebFullscreen={isWebFullscreen}
+          onToggleWebFullscreen={controlledToggleWebFullscreen}
           initialPlayback={initialPlayback}
         />
       )}
     </div>
   )
 
-  return isWebFullscreen ? createPortal(stage, document.body) : stage
+  return stage
 }

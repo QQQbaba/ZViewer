@@ -13,6 +13,7 @@ import {
   Crown,
   Camera,
   Trash2,
+  Download,
 } from 'lucide-react'
 import { PageBackButton } from '@/components/PageBackButton'
 import { Button } from '@/components/ui/Button'
@@ -25,6 +26,7 @@ import { Tag } from '@/components/ui/Tag'
 import { Title, Text, Paragraph } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
 import { useAuthStore, type User as AuthUser } from '@/store/authStore'
+import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import {
   getBilibiliQrCode,
   pollBilibiliQrCode,
@@ -35,6 +37,7 @@ import {
 } from '@/modules/room/watch-together/resolveSource'
 import MountManager from '@/modules/mounts/MountManager'
 import ServerFileManager from '@/modules/server-files/ServerFileManager'
+import { BilibiliDownloadModal } from '@/modules/server-files/BilibiliDownloadModal'
 import { apiFetch, API_URL } from '@/lib/api'
 
 /** 构建头像完整 URL（后端返回相对路径，前端拼接 API_URL） */
@@ -56,6 +59,7 @@ function buildAvatarUrl(
 export default function ProfilePage() {
   const navigate = useNavigate()
   const { user, setUser } = useAuthStore()
+  const { betaFeaturesEnabled } = useSystemSettingsStore()
 
   useEffect(() => {
     if (user?.role === 'guest') {
@@ -74,6 +78,9 @@ export default function ProfilePage() {
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isPollingRef = useRef(false)
   const qrRetryCountRef = useRef(0)
+
+  // B站视频下载 Popup（root 限定，位于「刷新绑定状态」旁）
+  const [biliDownloadOpen, setBiliDownloadOpen] = useState(false)
 
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -548,7 +555,17 @@ export default function ProfilePage() {
         )}
 
         {!bilibiliLoading && bilibiliUser && (
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex justify-end gap-2">
+            {betaFeaturesEnabled && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Download className="h-4 w-4" />}
+                onClick={() => setBiliDownloadOpen(true)}
+              >
+                下载 B站视频
+              </Button>
+            )}
             <Button
               variant="secondary"
               size="sm"
@@ -560,6 +577,14 @@ export default function ProfilePage() {
           </div>
         )}
       </Card>
+
+      {/* B站视频下载 Popup（root 限定，Beta 功能） */}
+      {user?.role === 'root' && betaFeaturesEnabled && (
+        <BilibiliDownloadModal
+          open={biliDownloadOpen}
+          onClose={() => setBiliDownloadOpen(false)}
+        />
+      )}
 
       <Modal
         open={qrModalOpen}

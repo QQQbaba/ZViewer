@@ -97,6 +97,10 @@ export class PlaybackState {
   @Column({ type: 'varchar', length: 200, nullable: true })
   previewTitle!: string | null;
 
+  /** 是否启用缓冲模式（B站 DASH 源：先完整缓存到 IndexedDB 再播放） */
+  @Column({ type: 'boolean', default: false })
+  bufferMode!: boolean;
+
   /** 当前播放的影片 ID（用于房主刷新后匹配是否同一部影片） */
   @Column({ type: 'int', nullable: true })
   currentMovieId!: number | null;

@@ -52,6 +52,9 @@ export function buildStateFromVideo(
     headers: storeState.headers,
     isPreview: storeState.isPreview,
     previewTitle: storeState.previewTitle,
+    // 透传缓冲模式标记：房主 forceSync / 响应观众 REQUEST_STATE 时必须保留，
+    // 否则观众端收到无 bufferMode 的 state 会回退到 URL 播放，破坏缓冲模式一致性
+    bufferMode: storeState.bufferMode,
   }
 }
 
@@ -120,6 +123,9 @@ export function isStateEqual(
   if (a.isPreview !== b.isPreview || a.previewTitle !== b.previewTitle) {
     return false
   }
+
+  // 缓冲模式标记变化时需要广播（影响观众端是否触发缓存下载）
+  if (a.bufferMode !== b.bufferMode) return false
 
   return true
 }

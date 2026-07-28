@@ -21,7 +21,10 @@ import { SOCKET_EVENT } from '@/modules/sync-playback/constants'
 import { safePlay } from '@/modules/sync-playback/safePlay'
 import { shouldSeekToHost } from '@/modules/sync-playback/services'
 import type { ServerHeartbeatPayload } from '../types'
-import { isVideoSourceExpired } from '../services/url-expiry'
+import {
+  isBilibiliUrlExpired,
+  isVideoSourceExpired,
+} from '../services/url-expiry'
 
 export interface UseServerHeartbeatOptions {
   isHostRef: MutableRefObject<boolean>
@@ -46,6 +49,8 @@ export function useServerHeartbeat({
   const hostLeftNotifiedRef = useRef(false)
   // URL 过期状态标记
   const urlExpiredRef = useRef(false)
+  // 已处理的 video error 签名，避免同一个 error 重复触发过期提示
+  const lastErrorSignatureRef = useRef<string | null>(null)
   // 缓存最新的 watchTogether 供 callback 读取
   const watchTogetherRef = useRef(watchTogether)
   watchTogetherRef.current = watchTogether
@@ -53,6 +58,11 @@ export function useServerHeartbeat({
   // 处理服务器心跳：更新本地状态
   const handleServerHeartbeat = useCallback(
     (payload: ServerHeartbeatPayload) => {
+      // 缓冲下载期间跳过：useViewerStateSync/usePlaybackStateRequest 在下载时
+      // 设置 suppressEventsRef=true，若此处提前释放会破坏下载期间的抑制标记，
+      // 导致旧源触发的 video 事件回环。下载完成后下一帧心跳会自然应用最新状态。
+      if (suppressEventsRef.current) return
+
       const state = payload.state
       suppressEventsRef.current = true
       setWatchTogether(state)
@@ -69,8 +79,12 @@ export function useServerHeartbeat({
         return
       }
 
-      // 检测 URL 过期
-      if (isVideoSourceExpired(state.sourceUrl, video.error, video)) {
+      // 缓冲模式下视频从 blob URL 播放，state.sourceUrl（B站 CDN URL）的 deadline
+      // 过期不影响实际播放，忽略 deadline 检测。
+      // 此处仅通过 URL deadline 做严格过期判断；video.error 的兜底检测在 error
+      // 事件监听中处理，避免 MSE/DASH 切换或 transient error 导致误报。
+      const isBufferMode = state.bufferMode === true
+      if (!isBufferMode && isBilibiliUrlExpired(state.sourceUrl)) {
         urlExpiredRef.current = true
         if (!video.paused) video.pause()
         message.warning('视频源已过期，等待房主重连')
@@ -147,9 +161,11 @@ export function useServerHeartbeat({
     }
   }, [socket, isHostRef])
 
-  // 切换视频源后重置过期标记，避免房主添加新视频或观众进入房间时被旧状态误拦截
+  // 切换视频源后重置过期标记与 error 签名，避免房主添加新视频或观众进入房间时
+  // 被旧状态误拦截。
   useEffect(() => {
     urlExpiredRef.current = false
+    lastErrorSignatureRef.current = null
   }, [watchTogether.sourceUrl])
 
   // 监听 video error 事件（URL 过期兜底检测）
@@ -159,8 +175,21 @@ export function useServerHeartbeat({
 
     const handleError = () => {
       if (urlExpiredRef.current) return
+      // attach / reload / seek 等操作期间 suppressEventsRef 为 true，此时产生的
+      // transient error（如 resetVideoElement、切换 DASH/MP4 引擎）不应被判定为
+      // URL 过期，避免误报。
+      if (suppressEventsRef.current) return
+
+      const error = video.error
+      if (!error) return
+
+      // 同一个 error 不重复处理（MSE/DASH 切换或重试时可能触发相同 error）
+      const signature = `${error.code}-${error.message ?? ''}-${video.currentSrc}`
+      if (lastErrorSignatureRef.current === signature) return
+      lastErrorSignatureRef.current = signature
+
       const currentState = watchTogetherRef.current
-      if (isVideoSourceExpired(currentState.sourceUrl, video.error, video)) {
+      if (isVideoSourceExpired(currentState.sourceUrl, error, video)) {
         urlExpiredRef.current = true
         if (!video.paused) video.pause()
         message.warning('视频源已过期，等待房主重连')

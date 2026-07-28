@@ -1,4 +1,5 @@
 import { bilibiliFetch } from './client';
+import { getWbiKeys, signParams } from './wbi';
 
 export interface BangumiEpisode {
   bvid: string;
@@ -24,6 +25,15 @@ interface BangumiSeasonResult {
   episodes?: unknown[];
   main_section?: { episodes?: unknown[] };
   section?: { episodes?: unknown[] }[];
+}
+
+/** 将参数对象转为 URL 查询字符串（已编码）。 */
+function buildQueryString(params: Record<string, string>): string {
+  return Object.entries(params)
+    .map(
+      ([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`,
+    )
+    .join('&');
 }
 
 function normalizeImageUrl(url: string): string {
@@ -91,20 +101,44 @@ export async function getBangumiEpisodes(
   };
 }
 
+/**
+ * 使用 WBI 签名调用 /x/web-interface/wbi/search/type 按关键词搜索番剧。
+ *
+ * 注意：B站 搜索接口（包括 media_bangumi 类型）现已强制要求 WBI 签名，
+ * 未签名请求会返回 HTML 错误页面（带 <!DOCTYPE）而非 JSON，
+ * 导致前端 JSON.parse 抛出 "Unexpected token '<'" 错误。
+ * 因此必须使用 wbi/search/type 端点 + signParams 签名，与 searchVideos 保持一致。
+ *
+ * 返回最多 10 条结果，每条包含 seasonId、标题、封面、描述。
+ * episodes 字段为空数组，需后续调用 getBangumiEpisodes(seasonId) 获取分集列表。
+ */
 export async function searchBangumi(
   keyword: string,
   cookie?: string,
 ): Promise<BangumiSeasonInfo[]> {
-  const res = await bilibiliFetch<{
-    result?: { pages?: number; numResults?: number; result?: unknown[] };
-  }>(
-    `https://api.bilibili.com/x/web-interface/search/type?keyword=${encodeURIComponent(
+  const { imgKey, subKey } = await getWbiKeys(cookie);
+  const signed = signParams(
+    {
       keyword,
-    )}&search_type=media_bangumi`,
+      search_type: 'media_bangumi',
+      page: '1',
+      page_size: '20',
+    },
+    imgKey,
+    subKey,
+  );
+  const query = buildQueryString(signed);
+
+  const res = await bilibiliFetch<{
+    result?: unknown[];
+    numResults?: number;
+  }>(
+    `https://api.bilibili.com/x/web-interface/wbi/search/type?${query}`,
     { cookie },
   );
 
-  const list = res.data?.result?.result;
+  // B站搜索 API 返回的数据结构：data.result 是数组（不是 data.result.result）
+  const list = res.data?.result;
   if (!Array.isArray(list)) {
     return [];
   }

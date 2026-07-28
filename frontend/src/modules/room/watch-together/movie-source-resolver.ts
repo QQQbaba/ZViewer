@@ -12,6 +12,9 @@
 import type { Movie } from '@/store/roomStore'
 import type { MediaFormat } from '@/lib/mediaFormat'
 import { resolveBilibiliWithOptions } from '@/modules/bilibili/bilibiliApi'
+import { extractBvid, resolveBilibiliViaCli } from '@/modules/bilibili/cliApi'
+import { useCliAgentStore } from '@/store/cliAgentStore'
+import { getBilibiliParseOptions } from '@/modules/bilibili/parseOptions'
 import type { QualityOption } from './resolveSource'
 
 /** 房主刷新恢复时由后端返回的最近一次播放状态（源相关子集） */
@@ -64,20 +67,42 @@ export interface ResolveMovieSourceOptions {
 }
 
 /**
- * 在线解析 B站 视频 playurl。
- * 独立导出供「复用旧 URL 失败后的回退重新解析」复用。
+ * 获取当前可用的 CLI 代理 URL。
+ * 仅当本地健康检查通过且房间内至少有一个代理时返回有效地址。
  */
-export async function resolveBilibiliOnline(
-  movie: Movie,
-  onProgress?: (step: string, message: string) => void,
-  options?: { preferMp4?: boolean }
-): Promise<ResolvedMovieSource> {
-  const resolved = await resolveBilibiliWithOptions(
-    movie.url,
-    movie.currentQn,
-    onProgress,
-    options
-  )
+export function getActiveCliProxyUrl(): string | null {
+  const { localOnline, agents } = useCliAgentStore.getState()
+  if (!localOnline || agents.length === 0) return null
+  return agents[0].proxyUrl
+}
+
+/**
+ * 获取影片实际生效的 MP4 偏好。
+ *
+ * 当用户启用 CLI 高画质代理但本地 CLI 未连接时，强制降级为 MP4 模式，
+ * 避免 DASH 高画质地址因无大会员 Cookie 而无法播放；CLI 连接成功后
+ * 恢复为用户原本的 DASH/MP4 选择。
+ */
+export function getEffectivePreferMp4(movieId: number): boolean {
+  const { preferMp4, cliEnabled } = getBilibiliParseOptions(movieId)
+  if (cliEnabled && !getActiveCliProxyUrl()) return true
+  return preferMp4
+}
+
+function mapResolvedSourceToMovieSource(
+  resolved: {
+    videoUrl: string
+    audioUrl?: string
+    format?: MediaFormat
+    videoCodec?: string
+    audioCodec?: string
+    cid?: number
+    duration?: number
+    currentQn?: number
+    acceptQuality?: QualityOption[]
+  },
+  movie: Movie
+): ResolvedMovieSource {
   if (!resolved.videoUrl) {
     throw new Error('未获取到对应清晰度的播放地址')
   }
@@ -94,6 +119,47 @@ export async function resolveBilibiliOnline(
     headers: undefined,
     reusedRecoveryUrl: false,
   }
+}
+
+/**
+ * 在线解析 B站 视频 playurl。
+ * 独立导出供「复用旧 URL 失败后的回退重新解析」复用。
+ *
+ * 若该影片启用了 CLI 代理且本地 CLI 在线，则通过 CLI 使用用户自己的 Cookie
+ * 解析高画质地址；否则回退到服务端解析。
+ */
+export async function resolveBilibiliOnline(
+  movie: Movie,
+  onProgress?: (step: string, message: string) => void,
+  options?: { preferMp4?: boolean }
+): Promise<ResolvedMovieSource> {
+  const parsePrefs = getBilibiliParseOptions(movie.id)
+  const proxyUrl = parsePrefs.cliEnabled ? getActiveCliProxyUrl() : null
+  // CLI 未连接时强制使用 MP4 模式；调用方显式传入的 preferMp4 优先级最高
+  const effectivePreferMp4 =
+    options?.preferMp4 ?? getEffectivePreferMp4(movie.id)
+
+  if (proxyUrl) {
+    const bvid = extractBvid(movie.url)
+    if (bvid && movie.cid) {
+      const resolved = await resolveBilibiliViaCli(
+        proxyUrl,
+        bvid,
+        movie.cid,
+        movie.currentQn,
+        effectivePreferMp4
+      )
+      return mapResolvedSourceToMovieSource(resolved, movie)
+    }
+  }
+
+  const resolved = await resolveBilibiliWithOptions(
+    movie.url,
+    movie.currentQn,
+    onProgress,
+    { preferMp4: effectivePreferMp4 }
+  )
+  return mapResolvedSourceToMovieSource(resolved, movie)
 }
 
 /**
