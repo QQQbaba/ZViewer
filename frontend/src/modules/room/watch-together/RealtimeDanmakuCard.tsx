@@ -396,21 +396,21 @@ export function RealtimeDanmakuCard() {
       if (track && item) {
         addDeletedLog({ trackId, trackLabel: track.label, item })
       }
+      // removeTrackItem 内部会自动触发 refreshSignal，播放器弹幕层会立即清屏重载
       removeTrackItem(trackId, itemId)
       message.success('已删除该弹幕（本地生效）')
-      triggerDanmakuRefresh()
     },
-    [tracks, addDeletedLog, removeTrackItem, triggerDanmakuRefresh]
+    [tracks, addDeletedLog, removeTrackItem]
   )
 
   const handleRestore = useCallback(
     (trackId: string, item: DanmakuItem) => {
+      // restoreTrackItem 内部会自动触发 refreshSignal
       restoreTrackItem(trackId, item)
       removeDeletedLog(trackId, item.id)
       message.success('已恢复该弹幕')
-      triggerDanmakuRefresh()
     },
-    [restoreTrackItem, removeDeletedLog, triggerDanmakuRefresh]
+    [restoreTrackItem, removeDeletedLog]
   )
 
   const renderEmpty = (minHeight?: string) => (

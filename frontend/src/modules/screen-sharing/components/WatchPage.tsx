@@ -140,6 +140,7 @@ function WatchPage() {
   const [annotationWidth, setAnnotationWidth] = useState(3)
   const [showAnnotationToolbar, setShowAnnotationToolbar] = useState(false)
   const annotationRef = useRef<{ clear: () => void }>(null)
+  const [isWebFullscreen, setIsWebFullscreen] = useState(false)
 
   // video ref（使用回调 ref 触发 videoVersion 变化，驱动 resolution 监听 effect 重新订阅）
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -341,7 +342,12 @@ function WatchPage() {
         roomId={roomId ?? ''}
         isHost={false}
         mainContent={
-          <WatchTogetherPanel roomId={roomId ?? ''} isHost={false} />
+          <WatchTogetherPanel
+            roomId={roomId ?? ''}
+            isHost={false}
+            isWebFullscreen={isWebFullscreen}
+            onToggleWebFullscreen={() => setIsWebFullscreen((prev) => !prev)}
+          />
         }
         rightPanel={
           <CommentPanel
@@ -356,6 +362,8 @@ function WatchPage() {
             <MovieListPanel isHost={false} />
           </>
         }
+        controlLabels={['房间状态', '影片列表']}
+        webFullscreen={isWebFullscreen}
       />
     )
   }

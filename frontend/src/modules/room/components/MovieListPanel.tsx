@@ -1,12 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import {
-  Play,
-  Trash2,
-  Film,
-  Monitor,
-  ListVideo,
-  Maximize,
-} from 'lucide-react'
+import { Play, Trash2, Film, Monitor, ListVideo, Maximize } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Text, Paragraph } from '@/components/ui/Typography'
@@ -21,7 +14,8 @@ import {
   filterQualitiesByVip,
   getBilibiliUserInfo,
 } from '@/modules/bilibili/bilibiliApi'
-import { useBilibiliParsePreferences } from '@/modules/bilibili/parseOptions'
+import { BilibiliParseSettings } from './BilibiliParseSettings'
+import { getEffectivePreferMp4 } from '@/modules/room/watch-together/movie-source-resolver'
 import { cn } from '@/lib/utils'
 
 interface MovieListPanelProps {
@@ -54,10 +48,6 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
   const [qualityLoadingId, setQualityLoadingId] = useState<number | null>(null)
   const [pageLoadingId, setPageLoadingId] = useState<number | null>(null)
   const [bilibiliVip, setBilibiliVip] = useState(false)
-  // 播放模式偏好通过 hook 跨组件同步：BilibiliParseSettings 已移至 MoviePushPanel，
-  // 此处仅读取 preferMp4 用于禁用影片列表的分辨率 Select
-  // （B站 MP4 直链通常仅支持 480P/720P，DASH 才支持 1080P/4K，无需也不能切换）
-  const { preferMp4 } = useBilibiliParsePreferences()
   const isScreenShare = mode === 'screen-share'
 
   // 弹窗显示完整影片列表
@@ -127,10 +117,16 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
 
     setQualityLoadingId(movie.id)
     try {
-      // 透传当前播放模式偏好，避免 MP4 模式下切换清晰度时被改回 DASH
-      const resolved = await resolveBilibiliWithOptions(movie.url, qn, undefined, {
-        preferMp4,
-      })
+      // 读取该影片独立的播放模式偏好，避免 MP4 模式下切换清晰度时被改回 DASH
+      // CLI 未连接时强制 MP4 降级。
+      const resolved = await resolveBilibiliWithOptions(
+        movie.url,
+        qn,
+        undefined,
+        {
+          preferMp4: getEffectivePreferMp4(movie.id),
+        }
+      )
       await updateMovie(roomId, movie.id, {
         audioUrl: resolved.audioUrl,
         format: resolved.format,
@@ -165,13 +161,14 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
 
     setPageLoadingId(movie.id)
     try {
-      // 透传当前播放模式偏好和清晰度，保持切换分P 后清晰度一致
+      // 读取该影片独立的播放模式偏好，保持切换分P 后清晰度一致
+      // CLI 未连接时强制 MP4 降级。
       const resolved = await resolveBilibiliWithOptions(
         movie.url,
         movie.currentQn,
         undefined,
         {
-          preferMp4,
+          preferMp4: getEffectivePreferMp4(movie.id),
           page,
         }
       )
@@ -309,12 +306,11 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
                           style={{
                             backgroundColor:
                               'color-mix(in srgb, var(--md-sys-color-tertiary-container) calc(var(--glass-strength) * 100%), transparent)',
-                            color:
-                              'var(--md-sys-color-on-tertiary-container)',
+                            color: 'var(--md-sys-color-on-tertiary-container)',
                           }}
                         >
-                          <ListVideo className="h-2.5 w-2.5" />
-                          P{movie.currentPage ?? 1}/{movie.pages.length}
+                          <ListVideo className="h-2.5 w-2.5" />P
+                          {movie.currentPage ?? 1}/{movie.pages.length}
                         </Tag>
                       )}
                     </div>
@@ -322,27 +318,12 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
                       movie.sourceType === 'bilibili' &&
                       movie.acceptQuality &&
                       movie.acceptQuality.length > 0 && (
-                        <Select
-                          className="mt-1.5"
-                          size="sm"
-                          value={String(
-                            movie.currentQn ?? movie.acceptQuality[0]?.id
-                          )}
-                          options={filterQualitiesByVip(
-                            movie.acceptQuality,
-                            bilibiliVip
-                          ).map((q) => ({
-                            label: q.resolution
-                              ? `${q.label} · ${q.resolution}`
-                              : q.label,
-                            value: String(q.id),
-                          }))}
-                          disabled={
-                            !isHost ||
-                            isScreenShare ||
-                            qualityLoadingId === movie.id ||
-                            preferMp4
-                          }
+                        <BilibiliQualitySelect
+                          movie={movie}
+                          isHost={isHost}
+                          isScreenShare={isScreenShare}
+                          qualityLoadingId={qualityLoadingId}
+                          bilibiliVip={bilibiliVip}
                           onChange={(value) =>
                             handleQualityChange(movie, value)
                           }
@@ -365,9 +346,7 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
                             isScreenShare ||
                             pageLoadingId === movie.id
                           }
-                          onChange={(value) =>
-                            handlePageChange(movie, value)
-                          }
+                          onChange={(value) => handlePageChange(movie, value)}
                         />
                       )}
                   </div>
@@ -407,6 +386,14 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
                     />
                   )}
                 </div>
+                {/* B站解析设置：每个 B站 影片独享一份配置；房主可操作，观众可查看并独立开启 CLI 代理 */}
+                {movie.sourceType === 'bilibili' && !isScreenShare && (
+                  <BilibiliParseSettings
+                    movieId={movie.id}
+                    roomId={roomId}
+                    isHost={isHost}
+                  />
+                )}
               </div>
             )
           })}
@@ -468,5 +455,54 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
         </div>
       </Modal>
     </div>
+  )
+}
+
+/**
+ * B站清晰度选择器（响应式）。
+ *
+ * 每个影片的解析偏好（preferMp4）独立存储在 localStorage 中。
+ * 使用 useBilibiliParsePreferences 订阅配置变化，确保在 BilibiliParseSettings
+ * 中切换 MP4/DASH 模式时，当前影片的清晰度选择器能立即禁用/启用。
+ */
+interface BilibiliQualitySelectProps {
+  movie: Movie
+  isHost: boolean
+  isScreenShare: boolean
+  qualityLoadingId: number | null
+  bilibiliVip: boolean
+  onChange: (value: string) => void
+}
+
+function BilibiliQualitySelect({
+  movie,
+  isHost,
+  isScreenShare,
+  qualityLoadingId,
+  bilibiliVip,
+  onChange,
+}: BilibiliQualitySelectProps) {
+  // 使用生效的播放模式：CLI 未连接时强制 MP4，清晰度选择随之禁用
+  const effectivePreferMp4 = getEffectivePreferMp4(movie.id)
+
+  return (
+    <Select
+      className="mt-1.5"
+      size="sm"
+      value={String(movie.currentQn ?? movie.acceptQuality[0]?.id)}
+      options={filterQualitiesByVip(movie.acceptQuality, bilibiliVip).map(
+        (q) => ({
+          label: q.resolution ? `${q.label} · ${q.resolution}` : q.label,
+          value: String(q.id),
+        })
+      )}
+      disabled={
+        !isHost ||
+        isScreenShare ||
+        qualityLoadingId === movie.id ||
+        effectivePreferMp4
+      }
+      onChange={onChange}
+    />
   )
 }

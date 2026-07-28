@@ -249,6 +249,8 @@ export const useDanmakuStore = create<DanmakuState>()(
               ? { ...t, items: t.items.filter((item) => item.id !== itemId) }
               : t
           ),
+          // 同步触发刷新信号，确保播放器弹幕层在删除后立即清屏重载
+          refreshSignal: state.refreshSignal + 1,
         }))
       },
 
@@ -261,6 +263,8 @@ export const useDanmakuStore = create<DanmakuState>()(
             next.sort((a, b) => a.time - b.time)
             return { ...t, items: next }
           }),
+          // 同步触发刷新信号，确保恢复的弹幕立即生效
+          refreshSignal: state.refreshSignal + 1,
         }))
       },
 

@@ -79,16 +79,17 @@ export function Modal({
       />
       <div
         className={cn(
-          'glass-strong relative z-10 w-full max-w-md rounded-[var(--md-sys-shape-corner)] p-6 shadow-lg',
+          'glass-strong relative z-10 flex w-full max-w-md flex-col overflow-hidden rounded-[var(--md-sys-shape-corner)] p-6 shadow-lg',
           exiting ? 'zen-modal-content-exit' : 'zen-modal-content-enter',
           className
         )}
         style={{
+          maxHeight: 'calc(100vh - 2rem)',
           boxShadow:
             '0 8px 24px -8px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent)',
         }}
       >
-        <div className="flex items-start justify-between">
+        <div className="flex shrink-0 items-start justify-between">
           {title ? (
             <h3 className="text-lg font-semibold text-[var(--md-sys-color-on-surface)]">
               {title}
@@ -103,11 +104,11 @@ export function Modal({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="mt-4 text-sm text-[var(--md-sys-color-on-surface-variant)]">
+        <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden text-sm text-[var(--md-sys-color-on-surface-variant)]">
           {children}
         </div>
         {footer && (
-          <div className="mt-6 flex items-center justify-end gap-3">
+          <div className="mt-6 flex shrink-0 items-center justify-end gap-3">
             {footer}
           </div>
         )}

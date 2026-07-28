@@ -1,5 +1,4 @@
 import { apiFetch, API_URL } from '@/lib/api'
-import { getBilibiliParseOptions } from './parseOptions'
 import type {
   BilibiliQrData,
   BilibiliUserInfo,
@@ -203,14 +202,11 @@ export async function resolveBilibili(
   url: string,
   qn?: number,
   onProgress?: (step: string, message: string) => void,
-  options?: { codec?: string; preferMp4?: boolean; page?: number }
+  options?: { preferMp4?: boolean; page?: number }
 ): Promise<ResolvedSource> {
   let fetchUrl = `${API_URL}/api/stream/resolve-bilibili?url=${encodeURIComponent(url)}`
   if (qn != null && Number.isFinite(qn)) {
     fetchUrl += `&qn=${qn}`
-  }
-  if (options?.codec && options.codec !== 'auto') {
-    fetchUrl += `&codec=${encodeURIComponent(options.codec)}`
   }
   if (options?.preferMp4) {
     fetchUrl += `&preferMp4=true`
@@ -251,8 +247,11 @@ export async function resolveBilibili(
 }
 
 /**
- * 使用用户本地持久化的 B站 解析偏好（编码）解析 B站 视频。
+ * 使用用户本地持久化的 B站 解析偏好解析 B站 视频。
  * 该函数将偏好读取与 `resolveBilibili` 调用合并，避免调用方重复注入参数。
+ *
+ * 编码格式由后端自动适配，无需前端传入。
+ * preferMp4 等播放模式偏好由调用方从 parseOptions 读取后显式传入。
  */
 export async function resolveBilibiliWithOptions(
   url: string,
@@ -260,9 +259,7 @@ export async function resolveBilibiliWithOptions(
   onProgress?: (step: string, message: string) => void,
   extraOptions?: { preferMp4?: boolean; page?: number }
 ): Promise<ResolvedSource> {
-  const options = getBilibiliParseOptions()
   return resolveBilibili(url, qn, onProgress, {
-    codec: options.codec,
     preferMp4: extraOptions?.preferMp4,
     page: extraOptions?.page,
   })

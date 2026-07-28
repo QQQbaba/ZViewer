@@ -14,10 +14,17 @@ import { useEffect, useRef } from 'react'
 import type { RefObject, MutableRefObject } from 'react'
 import { useSocket } from '@/hooks/useSocket'
 import { message } from '@/components/ui/message'
+import { useRoomStore } from '@/store/roomStore'
 import type { WatchTogetherState } from '@/modules/sync-playback/types'
 import { SOCKET_EVENT } from '@/modules/sync-playback/constants'
 import { safePlay } from '@/modules/sync-playback/safePlay'
 import type { RequestStateAckData } from '../types'
+import {
+  fetchBlobsForBufferMode,
+  DownloadError,
+  UrlExpiredError,
+  DownloadAbortedError,
+} from '@/modules/player/services/buffer-mode'
 
 export interface UsePlaybackStateRequestOptions {
   roomId: string
@@ -28,8 +35,15 @@ export interface UsePlaybackStateRequestOptions {
   applySourceToVideo: (
     video: HTMLVideoElement,
     state: WatchTogetherState,
-    startTime?: number
+    startTime?: number,
+    blobs?: { videoBlob: Blob; audioBlob: Blob }
   ) => Promise<void>
+  /**
+   * 已应用 sourceUrl 的共享 ref（由 useViewerSync 提升，与 useViewerStateSync 共享）。
+   * attach 完成后写入此 ref，避免后续 useViewerStateSync 收到同 sourceUrl 的 state 时
+   * 误判为 source 变化，重复触发 applySourceToVideo 覆盖已缓冲的 blob 源。
+   */
+  lastAppliedSourceUrlRef: MutableRefObject<string | null>
 }
 
 export type UsePlaybackStateRequestReturn = void
@@ -41,6 +55,7 @@ export function usePlaybackStateRequest({
   suppressEventsRef,
   setWatchTogether,
   applySourceToVideo,
+  lastAppliedSourceUrlRef,
 }: UsePlaybackStateRequestOptions): UsePlaybackStateRequestReturn {
   const { socket } = useSocket()
   const requestedRef = useRef(false)
@@ -71,36 +86,80 @@ export function usePlaybackStateRequest({
         suppressEventsRef.current = true
         setWatchTogether(state)
 
-        void applySourceToVideo(video, state)
-          .then(() => {
-            const currentVideo = videoRef.current
-            if (!currentVideo) return
+        /** 缓冲模式：先下载 m4s 到 IndexedDB 再 attach */
+        const fetchBlobsIfNeeded = async (): Promise<
+          { videoBlob: Blob; audioBlob: Blob } | undefined
+        > => {
+          if (!state.bufferMode) return undefined
+          const setBufferProgress = useRoomStore.getState().setBufferProgress
+          setBufferProgress({
+            downloaded: 0,
+            total: 1,
+            title: state.previewTitle || '当前视频',
+          })
+          try {
+            const result = await fetchBlobsForBufferMode({
+              state,
+              title: state.previewTitle,
+              onProgress: (p) => setBufferProgress(p),
+            })
+            return { videoBlob: result.videoBlob, audioBlob: result.audioBlob }
+          } catch (err) {
+            if (err instanceof DownloadAbortedError) {
+              console.log('[usePlaybackStateRequest] 缓冲下载已取消')
+            } else if (err instanceof UrlExpiredError) {
+              message.error('B站 URL 已过期，请等待房主重新解析')
+            } else if (err instanceof DownloadError) {
+              message.error(`缓冲下载失败: ${err.message}`)
+            } else {
+              console.error('[usePlaybackStateRequest] 缓冲下载失败:', err)
+              message.error('缓冲下载失败，请等待房主重新广播')
+            }
+            return null // 区分 undefined（不需要缓冲）和 null（缓冲失败）
+          } finally {
+            useRoomStore.getState().setBufferProgress(null)
+          }
+        }
 
-            // 设置进度
-            if (state.currentTime > 0) {
-              try {
-                currentVideo.currentTime = state.currentTime
-              } catch {
-                // ignore
-              }
-            }
-            // 设置倍速
-            if (currentVideo.playbackRate !== state.playbackRate) {
-              currentVideo.playbackRate = state.playbackRate
-            }
-            // 播放/暂停
-            if (state.isPlaying && currentVideo.paused) {
-              void safePlay(currentVideo)
-            } else if (!state.isPlaying && !currentVideo.paused) {
-              currentVideo.pause()
-            }
+        void (async () => {
+          const blobs = await fetchBlobsIfNeeded()
+          if (blobs === null) {
+            // 缓冲失败：不应用源，等待房主重新广播
             suppressEventsRef.current = false
-          })
-          .catch((err: unknown) => {
-            console.error('[usePlaybackStateRequest] 恢复状态失败:', err)
-            suppressEventsRef.current = false
-            message.error(err instanceof Error ? err.message : '状态恢复失败')
-          })
+            return
+          }
+          await applySourceToVideo(video, state, undefined, blobs ?? undefined)
+          const currentVideo = videoRef.current
+          if (!currentVideo) return
+
+          // 标记 sourceUrl 已应用，避免后续 useViewerStateSync 收到同 sourceUrl 的 state
+          // 时误判为 source 变化，重复触发 applySourceToVideo 覆盖已缓冲的 blob 源
+          lastAppliedSourceUrlRef.current = state.sourceUrl
+
+          // 设置进度
+          if (state.currentTime > 0) {
+            try {
+              currentVideo.currentTime = state.currentTime
+            } catch {
+              // ignore
+            }
+          }
+          // 设置倍速
+          if (currentVideo.playbackRate !== state.playbackRate) {
+            currentVideo.playbackRate = state.playbackRate
+          }
+          // 播放/暂停
+          if (state.isPlaying && currentVideo.paused) {
+            void safePlay(currentVideo)
+          } else if (!state.isPlaying && !currentVideo.paused) {
+            currentVideo.pause()
+          }
+          suppressEventsRef.current = false
+        })().catch((err: unknown) => {
+          console.error('[usePlaybackStateRequest] 恢复状态失败:', err)
+          suppressEventsRef.current = false
+          message.error(err instanceof Error ? err.message : '状态恢复失败')
+        })
       }
     )
   }, [
@@ -111,5 +170,6 @@ export function usePlaybackStateRequest({
     suppressEventsRef,
     setWatchTogether,
     applySourceToVideo,
+    lastAppliedSourceUrlRef,
   ])
 }

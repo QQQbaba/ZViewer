@@ -291,6 +291,11 @@ function RoomPage() {
           }
           peerConnection={hostPeerConnection}
           controls={controls}
+          controlLabels={
+            mode === 'screen-share'
+              ? ['房间状态']
+              : ['房间状态', '影片列表', '添加影片']
+          }
           webFullscreen={isWebFullscreen}
         />
         {voiceChatPanel}

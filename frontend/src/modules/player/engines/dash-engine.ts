@@ -48,6 +48,11 @@ export const dashEngine: PlayerEngine = {
         videoCodec: source.videoCodec,
         audioCodec: source.audioCodec,
         duration: source.duration,
+        // 缓冲模式：从 IndexedDB 读取的 Blob 数据，传入后 dash.js 用 blob URL 加载
+        videoBlob: source.videoBlob,
+        audioBlob: source.audioBlob,
+        // P2P 传输：仅在流模式启用，DashPlayer 内部会检查 isBufferMode
+        p2pEnabled: source.p2pEnabled,
       })
       try {
         const blobUrl = await dashPlayer.attach(source.startTime)
@@ -72,6 +77,9 @@ export const dashEngine: PlayerEngine = {
       videoCodec: source.videoCodec,
       audioCodec: source.audioCodec,
       duration: source.duration,
+      videoBlob: source.videoBlob,
+      audioBlob: source.audioBlob,
+      p2pEnabled: source.p2pEnabled,
     })
     try {
       const blobUrl = await dashPlayer.attach(source.startTime)
@@ -84,7 +92,10 @@ export const dashEngine: PlayerEngine = {
       }
     } catch (err) {
       dashPlayer.cleanup()
-      console.warn('[dash-engine] dash.js 加载失败，降级为 direct + audio-sync:', err)
+      console.warn(
+        '[dash-engine] dash.js 加载失败，降级为 direct + audio-sync:',
+        err
+      )
       resetVideoElement(video)
       video.src = source.url
       video.load()

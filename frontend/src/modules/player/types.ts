@@ -88,6 +88,30 @@ export interface PlayerSource {
    * 此处用后端权威值覆盖，确保 video.duration 反映真实视频时长。
    */
   duration?: number
+  /**
+   * 视频流 Blob（缓冲模式专用，仅 DASH 引擎使用）。
+   *
+   * 传入时 dash.js 用本地 blob URL 加载，跳过服务器代理：
+   * - 零网络流量，URL 过期不影响播放
+   * - seek 直接从内存读取，无延迟
+   * - 与 audioBlob 必须同时传入或同时缺失
+   */
+  videoBlob?: Blob
+  /**
+   * 音频流 Blob（缓冲模式专用，仅 DASH 引擎使用）。
+   * 与 videoBlob 配对使用。
+   */
+  audioBlob?: Blob
+  /**
+   * 是否启用 P2P 传输（仅 DASH 引擎使用）。
+   *
+   * 启用后 DashPlayer 会创建 P2pEngineDash 实例，通过 SwarmCloud 信令服务
+   * 与房间内其他客户端建立 WebRTC DataChannel，共享已下载的 m4s 分片。
+   *
+   * 仅在 DASH 流模式生效（bufferMode=true 时不启用 P2P，因视频已完整缓存到本地）。
+   * 各客户端独立启用，无需房主协调，SwarmCloud tracker 自动发现房间内 peer。
+   */
+  p2pEnabled?: boolean
 }
 
 /**

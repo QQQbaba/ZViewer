@@ -13,10 +13,15 @@
  * - 房主离线时：服务器每 2s 广播 server-heartbeat，观众继续播放
  * - 观众加入时：优先从服务器获取推算后的状态（不依赖房主响应）
  *
+ * 共享 lastAppliedSourceUrlRef：usePlaybackStateRequest 完成 attach 后写入此 ref，
+ * 避免后续 useViewerStateSync 收到同 sourceUrl 的 state 时误判为 source 变化，
+ * 重复触发 applySourceToVideo 覆盖已缓冲的 blob 源（破坏缓冲模式一致性）。
+ *
  * 调用方（useWatchTogether）只需调用一次 useViewerSync 即可启用所有观众同步逻辑。
  *
  * 该 hook 无返回值：观众端不需要主动调用同步 API，所有逻辑通过副作用执行。
  */
+import { useRef } from 'react'
 import type { RefObject, MutableRefObject } from 'react'
 import type { WatchTogetherState } from '../types'
 import type { SeekToResult } from '../services'
@@ -35,7 +40,8 @@ export interface UseViewerSyncOptions {
   applySourceToVideo: (
     video: HTMLVideoElement,
     state: WatchTogetherState,
-    startTime?: number
+    startTime?: number,
+    blobs?: { videoBlob: Blob; audioBlob: Blob }
   ) => Promise<void>
   /** 当前播放状态（用于服务器心跳的 URL 过期检测） */
   watchTogether: WatchTogetherState
@@ -58,6 +64,10 @@ export function useViewerSync({
   seekTo,
   reloadVideo,
 }: UseViewerSyncOptions): UseViewerSyncReturn {
+  // 共享 ref：usePlaybackStateRequest attach 完成后写入，useViewerStateSync 读取
+  // 避免 useViewerStateSync 在 usePlaybackStateRequest 完成后误判 source 变化
+  const lastAppliedSourceUrlRef = useRef<string | null>(null)
+
   // 1. 接收房主实时状态（房主在线时）
   useViewerStateSync({
     roomId,
@@ -68,6 +78,7 @@ export function useViewerSync({
     applySourceToVideo,
     seekTo,
     reloadVideo,
+    lastAppliedSourceUrlRef,
   })
 
   // 2. 订阅房主心跳（房主在线时，每 5s 校正进度漂移）
@@ -85,6 +96,7 @@ export function useViewerSync({
     suppressEventsRef,
     setWatchTogether,
     applySourceToVideo,
+    lastAppliedSourceUrlRef,
   })
 
   // 4. 订阅服务器心跳（房主离线时服务器接管广播，观众继续播放）

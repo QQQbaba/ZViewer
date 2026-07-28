@@ -39,12 +39,16 @@ export interface ResolveProgress {
 }
 
 /**
- * B站 MP4 直链（fnval=1）支持的最高清晰度 qn。
+ * B站 MP4 直链（fnval=1 + platform=html5 + high_quality=1）支持的最高清晰度 qn。
  *
- * B站 MP4 单流格式通常仅支持 360P/480P/720P，1080P 及以上需要 DASH。
- * 在 preferMp4 路径下收窄 acceptQuality，避免前端展示无法实际播放的高清晰度选项。
+ * 根据 B站 官方 API 文档（SocialSisterYi/bilibili-API-collect）:
+ * - platform=html5 + high_quality=1 时,MP4 格式最高支持 1080P(qn=80)
+ * - 1080P+(qn=112) / 1080P60(qn=116) / 4K(qn=120) / HDR(qn=125) / 杜比视界(qn=126) / 8K(qn=127)
+ *   全部仅 DASH 格式支持,MP4 无法获取
+ * 参考: synctv/vendors/vendors/bilibili/movie.go GetVideoURL 默认请求 Q1080PP(112),
+ *       B站 会自动降级返回 1080P(80)
  */
-const MP4_MAX_QN = 64; // 720P
+const MP4_MAX_QN = 80; // 1080P
 
 /**
  * 收窄清晰度列表到 MP4 支持的范围（qn ≤ MP4_MAX_QN）。
@@ -77,10 +81,11 @@ export interface ResolveOptions {
   /** 解析进度回调，用于 NDJSON 流式输出。 */
   onProgress?: (msg: ResolveProgress) => void;
   /**
-   * 优先 MP4 单流格式（fnval=1）。
+   * 优先 MP4 单流格式（fnval=1 + platform=html5）。
    * - true：先请求 MP4 直链，浏览器原生 video.src 播放，无需 MSE，seek 流畅
    * - false/undefined：默认 DASH 路径（分离 m4s，需 MSE 双轨合并）
-   * MP4 通常仅支持低清晰度（360P/480P/720P），失败时自动回退 DASH。
+   * MP4 模式最高支持 1080P(qn=80),1080P+/4K/HDR 等高画质仍需 DASH。
+   * 失败时自动回退 DASH。
    */
   preferMp4?: boolean;
   /**
@@ -90,6 +95,15 @@ export interface ResolveOptions {
    * 多 P 视频每个分集有独立的 cid 和 m4s 文件，必须用对应 cid 请求 playurl。
    */
   page?: number;
+  /**
+   * 跳过 CDN 健康检查（HEAD 探测）。
+   * - false/undefined（默认）：播放场景需要选择可达 URL，做 HEAD 探测
+   * - true：下载场景直接返回 baseUrl，下载失败时由调用方重试 backupUrl
+   *
+   * 下载场景无需 HEAD 探测，因为 downloadToFile 本身就是连接验证；
+   * 跳过可省去 3.5s 超时等待，显著提升解析速度。
+   */
+  skipCdnCheck?: boolean;
 }
 
 /** 分集信息（前端用于展示分P列表和切换） */
@@ -223,6 +237,11 @@ function getCurrentPageDuration(info: BilibiliVideoInfo, cid?: number): number {
  * 浏览器可直接播放无需代理（SYNCTV 默认方案，服务器零流量）。
  * 参考：synctv/vendors/vendors/bilibili/movie.go GetVideoURL
  *
+ * B站对 MP4 格式的清晰度限制：
+ * - 非会员/会员账号请求 MP4(fnval=1) 时,B站服务端统一限制为 720P(qn=64)
+ * - 1080P+/4K/HDR 等高画质仅 DASH 格式支持,MP4 无法获取
+ * - 这是 B站服务端硬性限制,无法通过参数绕过
+ *
  * 返回 MP4 实际使用的 currentQn（B站 可能降级到比请求更低的清晰度），
  * 便于上层收窄 acceptQuality 并准确展示当前清晰度。
  */
@@ -232,6 +251,7 @@ async function fallbackToMp4(
   cookie: string | undefined,
   qn: number | undefined,
   isVip: boolean,
+  skipCdnCheck: boolean = false,
 ): Promise<{ videoUrl: string; currentQn?: number } | null> {
   const mp4PlayUrl = await getPlayUrl(bvid, cid, cookie, {
     qn,
@@ -241,6 +261,10 @@ async function fallbackToMp4(
     platform: 'html5',
   });
   if (mp4PlayUrl?.format === 'mp4' && mp4PlayUrl.durl?.[0]?.url) {
+    // skipCdnCheck=true 时直接使用 baseUrl，避免 HEAD 探测延迟（下载场景）
+    if (skipCdnCheck) {
+      return { videoUrl: mp4PlayUrl.durl[0].url, currentQn: mp4PlayUrl.currentQn };
+    }
     const mp4Url = await findReachableMediaUrl({
       baseUrl: mp4PlayUrl.durl[0].url,
     });
@@ -257,7 +281,7 @@ async function fallbackToMp4(
 export async function resolveBilibiliVideo(
   opts: ResolveOptions,
 ): Promise<ResolveResult> {
-  const { url, cookie, qn, codec, onProgress, preferMp4, page } = opts;
+  const { url, cookie, qn, codec, onProgress, preferMp4, page, skipCdnCheck } = opts;
 
   const bvid = extractBvid(url);
   if (!bvid) {
@@ -383,14 +407,14 @@ export async function resolveBilibiliVideo(
 
   emit('finish', '解析完成，正在加载播放器...');
 
-  // preferMp4 优先路径：请求 MP4 单流（fnval=1），浏览器原生播放无需 MSE
-  // MP4 通常仅支持低清晰度（360P/480P/720P），失败时回退 DASH
+  // preferMp4 优先路径：请求 MP4 单流（fnval=1 + platform=html5），浏览器原生播放无需 MSE
+  // MP4 模式最高支持 1080P(qn=80),失败时回退 DASH
   if (preferMp4) {
-    emit('cdn', '正在获取 MP4 直链（流畅模式）...');
-    const mp4 = await fallbackToMp4(info.bvid, effectiveCid, cookie, effectiveQn, isVip);
+    emit('cdn', '正在获取 MP4 直链（直连模式）...');
+    const mp4 = await fallbackToMp4(info.bvid, effectiveCid, cookie, effectiveQn, isVip, skipCdnCheck);
     if (mp4) {
-      // MP4 模式收窄清晰度列表：B站 MP4 直链最高仅支持 720P，
-      // 不应展示 1080P/4K 等 DASH 专属选项，避免前端误导用户
+      // MP4 模式收窄清晰度列表：B站 MP4 直链最高支持 1080P(qn=80),
+      // 不应展示 1080P+/4K/HDR 等 DASH 专属选项,避免前端误导用户
       const mp4AcceptQuality = narrowAcceptQualityForMp4(acceptQuality);
       return {
         title: info.title,
@@ -413,22 +437,31 @@ export async function resolveBilibiliVideo(
   if (playUrl.format === 'dash' && playUrl.bestVideo) {
     emit('cdn', '正在选择可用 CDN...');
 
-    const [videoUrl, audioUrl] = await Promise.all([
-      findReachableMediaUrl({
-        baseUrl: playUrl.bestVideo.baseUrl,
-        backupUrl: playUrl.bestVideo.backupUrl,
-      }),
-      playUrl.bestAudio
-        ? findReachableMediaUrl({
-            baseUrl: playUrl.bestAudio.baseUrl,
-            backupUrl: playUrl.bestAudio.backupUrl,
-          })
-        : Promise.resolve(null),
-    ]);
+    // skipCdnCheck=true 时直接使用 baseUrl，避免 HEAD 探测延迟（下载场景）
+    // 下载失败时由调用方重试 backupUrl
+    let videoUrl: string | null;
+    let audioUrl: string | null = null;
+    if (skipCdnCheck) {
+      videoUrl = playUrl.bestVideo.baseUrl;
+      audioUrl = playUrl.bestAudio?.baseUrl ?? null;
+    } else {
+      [videoUrl, audioUrl] = await Promise.all([
+        findReachableMediaUrl({
+          baseUrl: playUrl.bestVideo.baseUrl,
+          backupUrl: playUrl.bestVideo.backupUrl,
+        }),
+        playUrl.bestAudio
+          ? findReachableMediaUrl({
+              baseUrl: playUrl.bestAudio.baseUrl,
+              backupUrl: playUrl.bestAudio.backupUrl,
+            })
+          : Promise.resolve(null),
+      ]);
+    }
 
     if (!videoUrl) {
       emit('fallback', 'DASH 地址不可用，尝试 MP4 直链...');
-      const mp4 = await fallbackToMp4(info.bvid, effectiveCid, cookie, effectiveQn, isVip);
+      const mp4 = await fallbackToMp4(info.bvid, effectiveCid, cookie, effectiveQn, isVip, skipCdnCheck);
       if (mp4) {
         // DASH 降级 MP4 时同样收窄清晰度列表
         const mp4AcceptQuality = narrowAcceptQualityForMp4(acceptQuality);
@@ -473,9 +506,10 @@ export async function resolveBilibiliVideo(
   // MP4 直链路径（B站 在请求 DASH 时仍返回 MP4 的边缘场景）
   if (playUrl.format === 'mp4' && playUrl.durl?.length) {
     emit('cdn', '正在选择可用 CDN...');
-    const mp4Url = await findReachableMediaUrl({
-      baseUrl: playUrl.durl[0].url,
-    });
+    // skipCdnCheck=true 时直接使用 baseUrl（下载场景）
+    const mp4Url = skipCdnCheck
+      ? playUrl.durl[0].url
+      : await findReachableMediaUrl({ baseUrl: playUrl.durl[0].url });
     if (!mp4Url) {
       throw new ResolveError(
         '当前网络无法访问 B站 媒体服务器，请稍后重试',

@@ -35,6 +35,22 @@ import {
   basename,
   type RootRegistry,
 } from '../services/server-files/pathResolver';
+import {
+  resolveBilibiliVideo,
+  extractBvid,
+  normalizeResolveError,
+  type ResolveProgress,
+} from '../services/bilibili/resolver';
+import { VIP_ONLY_QNS } from '../services/bilibili/permission';
+import { getUserCookie } from '../routes/stream/helpers';
+import {
+  checkFfmpeg,
+  installFfmpeg,
+  mergeVideoAudio,
+  downloadToFile,
+  resolveFfmpegPath,
+  type InstallProgress,
+} from '../services/ffmpeg';
 
 const router = Router();
 
@@ -611,6 +627,311 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
         message: err instanceof Error ? err.message : '代理播放失败',
       });
     }
+  }
+});
+
+// ============ 9. 下载 B站 视频到服务器 ============
+
+/**
+ * GET /ffmpeg-status — 检测 FFmpeg 是否可用（内置或系统 PATH）。
+ *
+ * 返回：
+ *   { success, available, source, path, version, error? }
+ */
+router.get('/ffmpeg-status', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const status = await checkFfmpeg();
+    res.json({ success: true, ...status });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      available: false,
+      message: err instanceof Error ? err.message : '检测 FFmpeg 失败',
+    });
+  }
+});
+
+/**
+ * POST /ffmpeg-install — 在线下载并安装 FFmpeg 到项目 bin/ 目录。
+ *
+ * 采用 NDJSON 流式响应推送下载/解压进度：
+ *   { status: 'downloading', received, total, percent, message }
+ *   { status: 'extracting', message }
+ *   { status: 'done', message }
+ *   { status: 'error', message }
+ */
+router.post('/ffmpeg-install', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'close');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
+  const send = (payload: Record<string, unknown>): void => {
+    res.write(JSON.stringify(payload) + '\n');
+    const flushable = res as unknown as { flush?: () => void };
+    if (typeof flushable.flush === 'function') flushable.flush();
+  };
+
+  try {
+    await installFfmpeg((p: InstallProgress) => {
+      send({ status: p.stage, ...p });
+    });
+    send({ success: true, status: 'done', message: 'FFmpeg 安装完成' });
+    res.end();
+  } catch (err) {
+    send({
+      success: false,
+      status: 'error',
+      message: err instanceof Error ? err.message : '安装 FFmpeg 失败',
+    });
+    res.end();
+  }
+});
+
+/**
+ * POST /bilibili-download — 解析 B站 视频并下载到服务器指定目录。
+ *
+ * 采用 NDJSON 流式响应，实时推送解析、下载、合并进度：
+ *   { status: 'parsing', step, message }
+ *   { status: 'downloading', phase: 'video'|'audio', received, total, percent }
+ *   { status: 'merging', percent, message }
+ *   { status: 'done', file: { name, path, size } }
+ *   { status: 'error', message, code }
+ *
+ * 支持两种模式：
+ *   - mode='mp4'（默认）：MP4 单文件直链，最高 1080P，无需 FFmpeg
+ *   - mode='dash'：DASH 分离流（m4s），支持 4K/8K/HDR/杜比视界，
+ *                  需要服务器安装 FFmpeg 合并音视频流
+ */
+router.post('/bilibili-download', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const url = typeof req.body.url === 'string' ? req.body.url.trim() : '';
+  const targetDir = typeof req.body.targetDir === 'string' ? req.body.targetDir.trim() : '';
+  const filename = typeof req.body.filename === 'string' ? req.body.filename.trim() : '';
+  const qn =
+    typeof req.body.qn === 'number' && Number.isFinite(req.body.qn)
+      ? req.body.qn
+      : undefined;
+  const page =
+    typeof req.body.page === 'number' && Number.isFinite(req.body.page)
+      ? req.body.page
+      : undefined;
+  const mode = req.body.mode === 'dash' ? 'dash' : 'mp4';
+  const userId = req.user?.userId;
+
+  if (!url) {
+    res.status(400).json({ success: false, message: '缺少视频链接或 BV 号' });
+    return;
+  }
+  if (!extractBvid(url)) {
+    res.status(400).json({ success: false, message: '无法解析 B站 BV 号' });
+    return;
+  }
+  if (!targetDir) {
+    res.status(400).json({ success: false, message: '缺少目标目录' });
+    return;
+  }
+
+  // DASH 模式需要 FFmpeg
+  if (mode === 'dash') {
+    const ffmpegPath = resolveFfmpegPath();
+    if (!ffmpegPath) {
+      res.status(400).json({
+        success: false,
+        message: 'DASH 模式需要 FFmpeg，请先在下载面板中点击「下载 FFmpeg」',
+      });
+      return;
+    }
+  }
+
+  // NDJSON 流式响应
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'close');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
+  const send = (payload: Record<string, unknown>): void => {
+    res.write(JSON.stringify(payload) + '\n');
+    const flushable = res as unknown as { flush?: () => void };
+    if (typeof flushable.flush === 'function') flushable.flush();
+  };
+  const fail = (message: string, code?: string): void => {
+    send({ success: false, status: 'error', message, code });
+    res.end();
+  };
+
+  // 临时文件清理列表
+  const tempFiles: string[] = [];
+  const cleanupTemps = (): void => {
+    for (const f of tempFiles) {
+      try { fs.unlinkSync(f); } catch { /* ignore */ }
+    }
+  };
+
+  try {
+    // 1. 解析目标目录
+    const roots = await loadRootRegistry();
+    const { abs: dirAbs, root } = resolveSafePath(targetDir, roots);
+    if (root.readonly) {
+      fail('该根目录为只读');
+      return;
+    }
+    if (!fs.existsSync(dirAbs)) {
+      fs.mkdirSync(dirAbs, { recursive: true });
+    }
+
+    // 2. 获取用户 B站 Cookie
+    const cookie = (await getUserCookie(userId)) || undefined;
+
+    // 3. 解析 B站 视频（按模式选择 preferMp4，下载场景跳过 CDN 健康检查）
+    send({ status: 'parsing', step: 'resolve', message: '正在解析视频地址...' });
+    const result = await resolveBilibiliVideo({
+      url,
+      userId: userId !== undefined ? String(userId) : undefined,
+      cookie,
+      qn,
+      preferMp4: mode === 'mp4',
+      page,
+      // 下载场景跳过 CDN HEAD 健康检查（3.5s 超时），
+      // 下载本身即连接验证，失败时由 backupUrl 重试
+      skipCdnCheck: true,
+      onProgress: (msg: ResolveProgress) => {
+        send({ status: 'parsing', step: msg.step, message: msg.message });
+      },
+    });
+
+    if (!result.videoUrl) {
+      fail('解析失败：未获取到视频直链');
+      return;
+    }
+
+    // 3.5 VIP 权限校验：非大会员账号不允许下载 VIP 专属清晰度
+    // 后端 filterQualitiesByVip 已经过滤，这里作为强校验防止前端绕过
+    if (qn && VIP_ONLY_QNS.includes(qn) && result.vipStatus !== 1) {
+      fail(
+        '该清晰度需要大会员账号，请先在个人中心绑定大会员账号后重试，或选择 1080P 及以下清晰度',
+        'VIP_REQUIRED',
+      );
+      return;
+    }
+
+    // 4. 确定文件名
+    const title = (filename || result.title || `bilibili_${Date.now()}`).replace(/[\\/:*?"<>|]/g, '_');
+    const finalName = uniqueFilename(dirAbs, `${title}.mp4`);
+    const targetPath = path.join(dirAbs, finalName);
+
+    // 通用下载头（防盗链）
+    const downloadHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      Referer: 'https://www.bilibili.com',
+      Origin: 'https://www.bilibili.com',
+      ...(cookie ? { Cookie: cookie } : {}),
+    };
+
+    if (mode === 'mp4') {
+      // ===== MP4 模式：单文件直接下载 =====
+      send({ status: 'downloading', phase: 'video', message: '开始下载...', received: 0, total: 0, percent: 0 });
+
+      try {
+        await downloadToFile(result.videoUrl, targetPath, downloadHeaders, (received, total, percent) => {
+          send({ status: 'downloading', phase: 'video', received, total, percent });
+        });
+      } catch (err) {
+        try { fs.unlinkSync(targetPath); } catch { /* ignore */ }
+        fail(`下载失败：${err instanceof Error ? err.message : '写入文件失败'}`);
+        return;
+      }
+    } else {
+      // ===== DASH 模式：视频和音频 m4s 并行下载，再用 FFmpeg 合并 =====
+      const videoTmp = `${targetPath}.video.m4s`;
+      const audioTmp = `${targetPath}.audio.m4s`;
+      tempFiles.push(videoTmp, audioTmp);
+
+      // 并行下载视频流和音频流（两个独立 URL，无依赖关系）
+      // 优化：原串行下载改为并行，节省约 50% 下载时间
+      send({ status: 'downloading', phase: 'video', message: '开始下载视频流和音频流...', received: 0, total: 0, percent: 0 });
+
+      // 进度合并：视频流和音频流分别报告，前端按 phase 区分
+      const downloadVideo = async () => {
+        try {
+          await downloadToFile(result.videoUrl, videoTmp, downloadHeaders, (received, total, percent) => {
+            send({ status: 'downloading', phase: 'video', received, total, percent });
+          });
+          return true;
+        } catch (err) {
+          console.error('[server-files] 视频流下载失败:', err);
+          return false;
+        }
+      };
+
+      const downloadAudio = async (): Promise<boolean> => {
+        if (!result.audioUrl) return true;
+        try {
+          await downloadToFile(result.audioUrl, audioTmp, downloadHeaders, (received, total, percent) => {
+            send({ status: 'downloading', phase: 'audio', received, total, percent });
+          });
+          return true;
+        } catch (err) {
+          console.error('[server-files] 音频流下载失败:', err);
+          return false;
+        }
+      };
+
+      // 并行下载：Promise.all 同时拉取两个流
+      const [videoOk, audioOk] = await Promise.all([downloadVideo(), downloadAudio()]);
+
+      if (!videoOk) {
+        cleanupTemps();
+        fail('视频流下载失败，请检查网络连接或稍后重试');
+        return;
+      }
+      if (!audioOk && result.audioUrl) {
+        cleanupTemps();
+        fail('音频流下载失败，请检查网络连接或稍后重试');
+        return;
+      }
+
+      // 4.3 FFmpeg 合并
+      send({ status: 'merging', percent: 0, message: '正在合并音视频流...' });
+      try {
+        await mergeVideoAudio({
+          videoPath: videoTmp,
+          audioPath: result.audioUrl ? audioTmp : undefined,
+          outputPath: targetPath,
+          duration: result.duration > 0 ? result.duration : undefined,
+          onProgress: (percent, message) => {
+            send({ status: 'merging', percent, message });
+          },
+        });
+      } catch (err) {
+        cleanupTemps();
+        try { fs.unlinkSync(targetPath); } catch { /* ignore */ }
+        fail(`合并失败：${err instanceof Error ? err.message : 'FFmpeg 合并失败'}`);
+        return;
+      }
+
+      // 4.4 清理临时 m4s 文件
+      cleanupTemps();
+    }
+
+    // 5. 完成
+    const size = fs.statSync(targetPath).size;
+    send({
+      success: true,
+      status: 'done',
+      file: {
+        name: finalName,
+        path: toPrefixedPath(root, targetPath),
+        size,
+      },
+    });
+    res.end();
+  } catch (err) {
+    console.error('[server-files] bilibili-download error:', err);
+    cleanupTemps();
+    const normalized = normalizeResolveError(err);
+    fail(normalized.message, normalized.code);
   }
 });
 

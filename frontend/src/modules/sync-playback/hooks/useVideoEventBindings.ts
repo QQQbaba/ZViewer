@@ -3,6 +3,7 @@ import type { RefObject, MutableRefObject } from 'react'
 import { useRoomStore } from '@/store/roomStore'
 import type { WatchTogetherState, ControlAction } from '../types'
 import { SEEK_DEBOUNCE_MS } from '../constants'
+import { buildStateFromVideo } from '../services'
 
 export interface UseVideoEventBindingsOptions {
   isHostRef: MutableRefObject<boolean>
@@ -58,28 +59,16 @@ export function useVideoEventBindings({
     /**
      * 构建当前状态并广播（离散事件专用，forceBroadcast=true 跳过节流）。
      * updateStore=true 时同时更新 roomStore（用于 UI 同步）。
+     *
+     * 使用 buildStateFromVideo 构建完整 state，确保包含所有字段（bufferMode / headers /
+     * isPreview / previewTitle 等）。旧实现手写 state 时遗漏了这些字段，导致观众端收到
+     * bufferMode=undefined 的 state 后跳过缓冲下载，直接走 CDN URL 流式播放，
+     * 破坏缓冲模式一致性。
      */
     const updateAndBroadcast = (updateStore = true) => {
       if (suppressEventsRef.current) return
       const current = useRoomStore.getState().watchTogether
-      const state: WatchTogetherState = {
-        sourceUrl: current.sourceUrl,
-        sourceType: current.sourceType,
-        audioUrl: current.audioUrl,
-        format: current.format,
-        videoCodec: current.videoCodec,
-        audioCodec: current.audioCodec,
-        cid: current.cid,
-        isPlaying: !video.paused,
-        currentTime: video.currentTime,
-        playbackRate: video.playbackRate,
-        // duration 保持 store 权威值（后端解析的真实时长），禁止用 video.duration 覆盖。
-        // MSE seek / 缓冲片段期间 video.duration 可能暂时等于片段时长，覆盖后会导致
-        // 控制栏总时长错误并随广播污染观众端。
-        duration: current.duration,
-        currentQn: current.currentQn,
-        acceptQuality: current.acceptQuality,
-      }
+      const state = buildStateFromVideo(video, current)
       if (updateStore) {
         setWatchTogether(state)
       }

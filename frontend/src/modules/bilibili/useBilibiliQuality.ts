@@ -6,6 +6,9 @@ import { useRoomStore } from '@/store/roomStore'
 // 分P 切换支持：applyQualityChange 在有 preResolved 时跳过 format 检查
 import type { WatchTogetherState, Movie } from '@/store/roomStore'
 import { safePlay } from '@/modules/sync-playback/safePlay'
+import { getBilibiliParseOptions } from './parseOptions'
+import { extractBvid, resolveBilibiliViaCli } from './cliApi'
+import { getActiveCliProxyUrl } from '@/modules/room/watch-together/movie-source-resolver'
 
 function qualitiesEqual(a: QualityOption[], b: QualityOption[]): boolean {
   if (a.length !== b.length) return false
@@ -22,6 +25,10 @@ function qualitiesEqual(a: QualityOption[], b: QualityOption[]): boolean {
  * 协议精简（v2）：移除 socket/roomId 字段。清晰度切换通过 broadcastState(newState)
  * 推送完整状态（含 currentQn），观众端 useViewerStateSync 接收后由 syncFromState 自动更新 UI。
  * 旧版独立的 quality-change 事件已删除（后端从未实现转发 handler，功能实际失效）。
+ *
+ * 缓冲模式扩展（v3）：新增 fetchBlobsForBufferMode 回调，由 useWatchTogether 注入。
+ * 清晰度切换时若 newState.bufferMode=true，调用此回调下载新清晰度的 m4s 流到 IndexedDB。
+ * 不传时（如单元测试），缓冲模式自动降级为 URL 播放。
  */
 export interface BilibiliQualityContext {
   videoRef: RefObject<HTMLVideoElement>
@@ -30,11 +37,23 @@ export interface BilibiliQualityContext {
   applySourceToVideo: (
     video: HTMLVideoElement,
     state: WatchTogetherState,
-    startTime?: number
+    startTime?: number,
+    blobs?: { videoBlob: Blob; audioBlob: Blob }
   ) => Promise<void>
   setWatchTogether: (state: WatchTogetherState) => void
   broadcastState: (state: WatchTogetherState) => void
   setIsResolving: (v: boolean) => void
+  /**
+   * 缓冲模式下载回调（可选）：由 useWatchTogether 注入 fetchBlobsForBufferModeLocal。
+   * 返回 undefined 表示缓冲失败（已通过 message.error 提示），调用方应降级为 URL 播放。
+   *
+   * 接收 movie 参数：清晰度切换场景下，applyQualityChange 已持有 movie 参数，
+   * 由调用方直接传入避免在缓冲回调内查表。
+   */
+  fetchBlobsForBufferMode?: (
+    state: WatchTogetherState,
+    movie: Movie
+  ) => Promise<{ videoBlob: Blob; audioBlob: Blob }>
 }
 
 export interface ApplyQualityChangeOptions {
@@ -98,7 +117,23 @@ export function useBilibiliQuality(ctx: BilibiliQualityContext) {
         if (preResolved) {
           resolved = preResolved
         } else {
-          resolved = await resolveBilibiliWithOptions(movie.url, qn)
+          const parsePrefs = getBilibiliParseOptions(movie.id)
+          const proxyUrl = parsePrefs.cliEnabled ? getActiveCliProxyUrl() : null
+          if (proxyUrl) {
+            const bvid = extractBvid(movie.url)
+            if (bvid && movie.cid) {
+              resolved = await resolveBilibiliViaCli(
+                proxyUrl,
+                bvid,
+                movie.cid,
+                qn
+              )
+            } else {
+              throw new Error('无法提取 BV 号或 cid，无法使用 CLI 代理')
+            }
+          } else {
+            resolved = await resolveBilibiliWithOptions(movie.url, qn)
+          }
         }
 
         if (!resolved.videoUrl) {
@@ -118,10 +153,28 @@ export function useBilibiliQuality(ctx: BilibiliQualityContext) {
           acceptQuality: resolved.acceptQuality,
           isPlaying: shouldPlay,
           currentTime: preserveTime,
+          // 缓冲模式：清晰度切换后保持与用户偏好一致。仅 DASH 源启用。
+          // 若缓冲下载失败则降级为 URL 播放（下方 if 块内重置）。
+          bufferMode:
+            state.sourceType === 'bilibili' &&
+            resolved.format === 'dash' &&
+            getBilibiliParseOptions(movie.id).bufferMode === true,
+        }
+
+        // 缓冲模式：在 attach 前先下载新清晰度的 m4s 到 IndexedDB
+        let blobs: { videoBlob: Blob; audioBlob: Blob } | undefined
+        if (newState.bufferMode && ctx.fetchBlobsForBufferMode) {
+          try {
+            blobs = await ctx.fetchBlobsForBufferMode(newState, movie)
+          } catch {
+            // 缓冲失败已由回调内 message.error 提示，保持 bufferMode=true 不降级
+            // 直接中断切换流程，避免自动回退到流式播放与用户意图相悖
+            return
+          }
         }
 
         ctx.setWatchTogether(newState)
-        await ctx.applySourceToVideo(video, newState)
+        await ctx.applySourceToVideo(video, newState, undefined, blobs)
         video.currentTime = preserveTime
         if (shouldPlay) {
           void safePlay(video)
@@ -133,6 +186,7 @@ export function useBilibiliQuality(ctx: BilibiliQualityContext) {
         // 协议精简（v2）：清晰度切换仅通过 broadcastState 推送完整 state（含 currentQn）。
         // 旧版额外 emit 'quality-change' 事件，但后端从未实现转发 handler 导致功能失效。
         // 观众端 useViewerStateSync 接收 state 后由 quality.syncFromState 自动更新 UI。
+        // 缓冲模式扩展（v3）：广播的 state 含 bufferMode 字段，观众端会据此触发缓冲下载。
         if (broadcast && ctx.isHostRef.current) {
           ctx.broadcastState(newState)
         }

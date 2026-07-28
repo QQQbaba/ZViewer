@@ -14,13 +14,62 @@
 }
 
 .zart-stage .art-video-player {
-  width: 100%;
-  height: 100%;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 /* 与原播放器一致的 object-fit: contain（ArtPlayer 默认不设置，视频会拉伸铺满） */
 .zart-stage .art-video {
-  object-fit: contain;
+  object-fit: contain !important;
+}
+
+/* 全屏样式：对 .zart-stage 容器调用 requestFullscreen 后，
+   容器进入 top layer，整条 ArtPlayer 模板链需显式撑满屏幕，
+   否则 video 实际尺寸为 0，显示黑屏。
+   使用 !important 确保覆盖 ArtPlayer 动态注入的默认样式。 */
+.zart-stage:fullscreen,
+.zart-stage:-webkit-full-screen,
+.zart-stage:-moz-full-screen,
+.zart-stage:-ms-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  background-color: #000 !important;
+}
+/* 视频容器：非全屏时已通过 h-full w-full 填满 .zart-stage，
+   全屏时通过 absolute inset-0 强制撑满整个全屏容器。
+   使用 !important 防止被 ArtPlayer 或 Tailwind 的任意类覆盖。 */
+.zart-stage:fullscreen .zart-video-container,
+.zart-stage:-webkit-full-screen .zart-video-container,
+.zart-stage:-moz-full-screen .zart-video-container,
+.zart-stage:-ms-fullscreen .zart-video-container {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+/* 全屏下 ArtPlayer 容器与 video 强制撑满，避免黑屏。
+   不直接对 .zart-stage > * 设置 100% 宽高，以免绝对定位的
+   PlayerControlBar 等 UI 被拉伸覆盖整个屏幕。 */
+.zart-stage:fullscreen .art-video-player,
+.zart-stage:-webkit-full-screen .art-video-player,
+.zart-stage:-moz-full-screen .art-video-player,
+.zart-stage:-ms-fullscreen .art-video-player {
+  width: 100% !important;
+  height: 100% !important;
+}
+.zart-stage:fullscreen .art-video,
+.zart-stage:-webkit-full-screen .art-video,
+.zart-stage:-moz-full-screen .art-video,
+.zart-stage:-ms-fullscreen .art-video {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
 }
 
 /* 原生控制栏已完全由 PlayerControlBar 替代，强制隐藏避免与自定义栏重叠 */
@@ -31,10 +80,15 @@
 .zart-stage .art-controls-center,
 .zart-stage .art-progress,
 .zart-stage .art-volume,
-.zart-stage .art-fullscreen,
 .zart-stage .art-playAndPause,
 .zart-stage .art-setting,
 .zart-stage .art-playback-rate {
+  display: none !important;
+}
+/* 全屏按钮单独处理：ArtPlayer 会给 .art-video-player 容器也加上 art-fullscreen 类，
+   必须限定在控制栏内部，否则会误把整个播放器容器隐藏掉导致黑屏。 */
+.zart-stage .art-controls .art-fullscreen,
+.zart-stage .art-control.art-fullscreen {
   display: none !important;
 }
 

@@ -8,6 +8,12 @@ import { SOCKET_EVENT } from '../constants'
 import { safePlay } from '../safePlay'
 import { shouldSeekToHost, executeSeek } from '../services'
 import type { SeekToResult } from '../services'
+import {
+  fetchBlobsForBufferMode,
+  DownloadError,
+  UrlExpiredError,
+  DownloadAbortedError,
+} from '@/modules/player/services/buffer-mode'
 
 export interface UseViewerStateSyncOptions {
   roomId: string
@@ -18,12 +24,20 @@ export interface UseViewerStateSyncOptions {
   applySourceToVideo: (
     video: HTMLVideoElement,
     state: WatchTogetherState,
-    startTime?: number
+    startTime?: number,
+    blobs?: { videoBlob: Blob; audioBlob: Blob }
   ) => Promise<void>
   /** seek 到目标时间（MSE 流不重建 MediaSource，由 useVideoSource 提供） */
   seekTo: (video: HTMLVideoElement, targetTime: number) => Promise<SeekToResult>
   /** MSE seek 失败时调用（如 video.error），用 forceReload 重新加载 */
   reloadVideo: (video: HTMLVideoElement) => Promise<void>
+  /**
+   * 已应用 sourceUrl 的共享 ref（由 useViewerSync 提升，与 usePlaybackStateRequest 共享）。
+   * 观众首次加入时 usePlaybackStateRequest 完成 attach 后会写入此 ref，
+   * 避免后续 useViewerStateSync 收到同 sourceUrl 的 state 时误判为 source 变化，
+   * 重复触发 applySourceToVideo 覆盖已缓冲的 blob 源。
+   */
+  lastAppliedSourceUrlRef: MutableRefObject<string | null>
 }
 
 export type UseViewerStateSyncReturn = void
@@ -64,6 +78,7 @@ export function useViewerStateSync({
   applySourceToVideo,
   seekTo,
   reloadVideo,
+  lastAppliedSourceUrlRef,
 }: UseViewerStateSyncOptions): UseViewerStateSyncReturn {
   const { socket } = useSocket()
 
@@ -72,12 +87,12 @@ export function useViewerStateSync({
   const pendingStateRef = useRef<WatchTogetherState | null>(null)
   // seek 并发锁：防止 executeSeek 期间重复触发
   const isReloadingRef = useRef(false)
-  // 缓存上次应用的 sourceUrl，用于判断是否需要 applySourceToVideo
-  const lastAppliedSourceUrlRef = useRef<string | null>(null)
   // 缓存上次应用的 isPlaying，用于判断是否需要 play/pause
   const lastAppliedIsPlayingRef = useRef<boolean | null>(null)
   // 缓存上次应用的 playbackRate，用于判断是否需要设置 playbackRate
   const lastAppliedPlaybackRateRef = useRef<number | null>(null)
+  // 缓冲模式：下载取消器，新 source 到来时取消未完成下载避免竞态
+  const downloadAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (!socket || isHostRef.current) return
@@ -97,7 +112,60 @@ export function useViewerStateSync({
 
       // 1. sourceUrl 变化 → applySourceToVideo（含完整同步）
       if (isSourceChange) {
-        await applySourceToVideo(video, state)
+        // 缓冲模式：先下载完整 m4s 到 IndexedDB，再用 blob URL 播放
+        // 避免播放过程中 B站 URL 过期或网络波动导致卡顿
+        let blobs: { videoBlob: Blob; audioBlob: Blob } | undefined
+        if (state.bufferMode) {
+          // 取消上一个未完成的下载（切换影片时常见竞态）
+          if (downloadAbortRef.current) {
+            downloadAbortRef.current.abort()
+          }
+          const controller = new AbortController()
+          downloadAbortRef.current = controller
+
+          const setBufferProgress = useRoomStore.getState().setBufferProgress
+          setBufferProgress({
+            downloaded: 0,
+            total: 1,
+            title: state.previewTitle || '当前视频',
+          })
+
+          try {
+            const result = await fetchBlobsForBufferMode({
+              state,
+              title: state.previewTitle,
+              onProgress: (p) => setBufferProgress(p),
+              signal: controller.signal,
+            })
+            blobs = { videoBlob: result.videoBlob, audioBlob: result.audioBlob }
+          } catch (err) {
+            if (err instanceof DownloadAbortedError) {
+              console.log('[useViewerStateSync] 缓冲下载已取消')
+            } else if (err instanceof UrlExpiredError) {
+              message.error('B站 URL 已过期，请等待房主重新解析')
+            } else if (err instanceof DownloadError) {
+              message.error(`缓冲下载失败: ${err.message}`)
+            } else {
+              console.error('[useViewerStateSync] 缓冲下载失败:', err)
+              message.error('缓冲下载失败，请等待房主重新广播')
+            }
+            // 缓冲失败：不应用源（避免半成品导致黑屏），等待房主重新广播
+            // 但需要释放 suppressEventsRef 与 isApplyingRef，否则后续事件被吞
+            setBufferProgress(null)
+            downloadAbortRef.current = null
+            // 标记 sourceUrl 已处理（避免下次同 source 再触发），等房主重新广播
+            lastAppliedSourceUrlRef.current = state.sourceUrl
+            return
+          } finally {
+            if (downloadAbortRef.current === controller) {
+              downloadAbortRef.current = null
+            }
+          }
+          // 下载完成，清空进度覆盖层
+          useRoomStore.getState().setBufferProgress(null)
+        }
+
+        await applySourceToVideo(video, state, undefined, blobs)
         // applySourceToVideo 后视频元素可能已替换，重新获取
         const currentVideo = videoRef.current
         if (!currentVideo) return
@@ -160,8 +228,7 @@ export function useViewerStateSync({
       setWatchTogether(state)
 
       // 判断是否为 sourceUrl 变化
-      const isSourceChange =
-        lastAppliedSourceUrlRef.current !== state.sourceUrl
+      const isSourceChange = lastAppliedSourceUrlRef.current !== state.sourceUrl
 
       // 串行化 applySourceToVideo：若上一次 apply 还在进行中，
       // 仅缓存最新 state，等上一次完成后处理最新值。
@@ -269,6 +336,7 @@ export function useViewerStateSync({
     reloadVideo,
     suppressEventsRef,
     isHostRef,
+    lastAppliedSourceUrlRef,
   ])
 }
 
@@ -304,7 +372,10 @@ export function useViewerHeartbeat({
   useEffect(() => {
     if (!socket || isHostRef.current) return
 
-    const handleHeartbeat = (payload: { currentTime: number; isPlaying: boolean }) => {
+    const handleHeartbeat = (payload: {
+      currentTime: number
+      isPlaying: boolean
+    }) => {
       const video = videoRef.current
       if (!video) return
       if (suppressEventsRef.current) return

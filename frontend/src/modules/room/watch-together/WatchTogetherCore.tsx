@@ -57,7 +57,10 @@ interface WatchTogetherCoreProps {
   art: Artplayer
   video: HTMLVideoElement
   videoRef: React.RefObject<HTMLVideoElement | null>
+  stageRef: React.RefObject<HTMLDivElement | null>
   slots: ArtSlots
+  isWebFullscreen?: boolean
+  onToggleWebFullscreen?: () => void
   initialPlayback?: {
     currentTime: number
     isPlaying: boolean
@@ -84,12 +87,17 @@ export function WatchTogetherCore({
   art,
   video,
   videoRef,
+  stageRef,
   slots,
+  isWebFullscreen,
+  onToggleWebFullscreen,
   initialPlayback,
 }: WatchTogetherCoreProps) {
   const { socket } = useSocket()
   const setMode = useRoomStore((state) => state.setMode)
   const isReloading = useRoomStore((state) => state.isReloading)
+  // 缓冲模式下载进度（房主/观众共享，由 useWatchTogether/useViewerStateSync 写入）
+  const bufferProgress = useRoomStore((state) => state.bufferProgress)
   const {
     watchTogether,
     setWatchTogether,
@@ -143,6 +151,10 @@ export function WatchTogetherCore({
   const [danmakuEnabled, setDanmakuEnabled] = useState(true)
 
   const tracks = useDanmakuStore((state) => state.tracks)
+  const tracksRef = useRef(tracks)
+  useEffect(() => {
+    tracksRef.current = tracks
+  }, [tracks])
   const style = useDanmakuStore((state) => state.style)
   const blockKeywords = useDanmakuStore((state) => state.blockKeywords)
   const setDefaultTrack = useDanmakuStore((state) => state.setDefaultTrack)
@@ -160,7 +172,11 @@ export function WatchTogetherCore({
 
   useEffect(() => {
     const onFsChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement))
+      const active = Boolean(document.fullscreenElement)
+      setIsFullscreen(active)
+      // 容器全屏切换后触发全局 resize，帮助 ArtPlayer / 浏览器
+      // 重新计算 video 容器尺寸，避免某些浏览器下 MSE video 黑屏。
+      window.dispatchEvent(new Event('resize'))
     }
     document.addEventListener('fullscreenchange', onFsChange)
     return () => {
@@ -169,19 +185,20 @@ export function WatchTogetherCore({
   }, [])
 
   const handleToggleFullscreen = useCallback(() => {
-    // 直接对 video 元素调用 requestFullscreen，而非 art.template.$container。
-    // 原因：$container 的祖先链上有 Card（glass-card backdrop-filter + zen-card
-    // will-change: transform）造成持续合成层隔离。DASH 模式下 MSE video 在全屏
-    // 切换时合成层重建会丢失 GPU 解码缓冲区关联，导致全屏黑屏。
-    // 对 video 元素本身全屏（与 DirectWatchPage/WatchPage 保持一致）可让 video
-    // 成为 top layer 元素，避免合成层剥离。
-    if (!video) return
+    // 对 .zart-stage 容器全屏，而非 video 元素本身。
+    // 原因：对 video 全屏后，ArtPlayer 的控制栏、弹幕层、设置面板等 UI
+    // 都在 video 的祖先容器上，全屏后被 video 遮挡导致用户无法操作（卡死）。
+    // 对 .zart-stage 全屏后，容器内所有 UI 可见可操作。
+    // 全屏元素进入 top layer 后脱离祖先合成层，不受 Card 的
+    // backdrop-filter / will-change: transform 影响。
+    const stage = stageRef.current
+    if (!stage) return
     if (document.fullscreenElement) {
       void document.exitFullscreen()
     } else {
-      void video.requestFullscreen()
+      void stage.requestFullscreen()
     }
-  }, [video])
+  }, [stageRef])
 
   // 加载 B站 官方弹幕：缓存后通过 DanmakuLayer 时间轴弹幕接口加载
   useEffect(() => {
@@ -235,15 +252,25 @@ export function WatchTogetherCore({
     loadedTracksRef.current = current
   }, [tracks])
 
-  // 侧栏屏蔽 / 删除弹幕后刷新弹幕层：清屏并按当前时间重载
+  // 侧栏屏蔽 / 删除弹幕后刷新弹幕层：先以最新轨道数据重新加载引擎，
+  // 再清屏并按当前时间重载，避免 tracks 与 refreshSignal 效果时序不一致
+  // 导致被删除/恢复的弹幕仍被渲染。
   const refreshSignal = useDanmakuStore((state) => state.refreshSignal)
   useEffect(() => {
     const layer = danmakuLayerRef.current
     if (!layer) return
+    // 使用 ref 读取最新 tracks，确保清屏前引擎已应用删除/恢复后的数据
+    tracksRef.current.forEach((track) => {
+      if (track.hidden) return
+      layer.loadDanmakuTrack(track.trackId, track.items, track.offset)
+    })
     const current = videoRef.current?.currentTime ?? 0
     layer.clear()
     layer.seek(current)
-  }, [refreshSignal, videoRef])
+    // 立即按当前时间补发当前窗口内的弹幕，避免等待下一次 timeupdate，
+    // 让删除/恢复后的画面立刻呈现剩余弹幕。
+    layer.syncTime(current)
+  }, [refreshSignal, videoRef, tracksRef])
 
   // 实时弹幕接收（'danmaku' 事件）：上屏 + 记录到实时弹幕列表
   useEffect(() => {
@@ -812,8 +839,6 @@ export function WatchTogetherCore({
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
       if (e.key === 'f' || e.key === 'F') {
-        // 使用 handleToggleFullscreen（对 video 元素全屏），避免 $container 全屏导致
-        // DASH 模式合成层重建黑屏
         handleToggleFullscreen()
       } else if (e.key === 'm' || e.key === 'M') {
         video.muted = !video.muted
@@ -968,6 +993,61 @@ export function WatchTogetherCore({
           slots.panelRoot
         )}
 
+      {/* 缓冲模式：下载进度覆盖层。
+          显示已下载/总字节数 + 进度条，告知用户正在缓存 B站 m4s 流到本地。
+          房主与观众共用同一 UI（数据来自 roomStore.bufferProgress）。 */}
+      {bufferProgress &&
+        createPortal(
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/60 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-2">
+              <Spinner size={28} />
+              <Text className="text-sm font-medium text-white">
+                正在缓冲视频
+              </Text>
+              <Text className="text-xs text-white/60">
+                {bufferProgress.title}
+              </Text>
+            </div>
+            <div className="w-64 max-w-[80%]">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-white transition-[width] duration-300"
+                  style={{
+                    width: `${
+                      bufferProgress.total > 0
+                        ? Math.min(
+                            100,
+                            (bufferProgress.downloaded / bufferProgress.total) * 100,
+                          )
+                        : 0
+                    }%`,
+                  }}
+                />
+              </div>
+              <div className="mt-2 flex justify-between text-[10px] text-white/50">
+                <span>
+                  {(
+                    bufferProgress.downloaded /
+                    1024 /
+                    1024
+                  ).toFixed(1)}{' '}
+                  MB
+                </span>
+                <span>
+                  {bufferProgress.total > 0
+                    ? `${(
+                        bufferProgress.total /
+                        1024 /
+                        1024
+                      ).toFixed(1)} MB`
+                    : '未知大小'}
+                </span>
+              </div>
+            </div>
+          </div>,
+          slots.panelRoot
+        )}
+
       {/* 空源占位（覆盖整个播放器区域，与重构前行为一致：隐藏控制栏） */}
       {!watchTogether.sourceUrl &&
         createPortal(
@@ -1023,6 +1103,8 @@ export function WatchTogetherCore({
           isPlaying={isPlaying}
           isFullscreen={isFullscreen}
           onToggleFullscreen={handleToggleFullscreen}
+          isWebFullscreen={isWebFullscreen}
+          onToggleWebFullscreen={onToggleWebFullscreen}
           danmakuEnabled={danmakuEnabled}
           onToggleDanmaku={handleToggleDanmaku}
           onSendDanmaku={handleSendDanmaku}
