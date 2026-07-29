@@ -39,18 +39,13 @@ export function ReturnToRoomButton() {
 
   useEffect(() => {
     if (shouldShow) {
-      // 控制按钮入场/退场动画状态，受控组件标准模式。
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRender(true)
-
       setExiting(false)
     } else if (render) {
       // 播放退场动画后卸载
-
       setExiting(true)
       const timer = setTimeout(() => {
         setRender(false)
-
         setExiting(false)
       }, 280)
       return () => clearTimeout(timer)

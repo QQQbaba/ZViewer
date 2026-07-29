@@ -99,14 +99,17 @@ export function* iterBoxes(
  * @returns init segment 大小，或 null 如果未找到 moov
  */
 export function findInitSegmentSize(data: Uint8Array): number | null {
+  let initEnd = 0
   let foundFtyp = false
   for (const box of iterBoxes(data, 0)) {
     if (box.type === 'ftyp') {
+      initEnd = box.end
       foundFtyp = true
     } else if (box.type === 'moov') {
       // moov 前必须有 ftyp（init segment 起始于 ftyp）
       if (!foundFtyp) return null
-      return box.end
+      initEnd = box.end
+      return initEnd
     } else if (box.type === 'free' || box.type === 'skip') {
       // 跳过 padding box，继续寻找 moov（B站 m4s 在 ftyp 后有 free box）
       continue

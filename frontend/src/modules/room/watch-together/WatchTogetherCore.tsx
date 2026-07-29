@@ -882,8 +882,6 @@ export function WatchTogetherCore({
     })
   }
   if (seekRequest) {
-    // 通知项在渲染时组装，onOk/onCancel 为事件回调，不在渲染期执行。
-    // eslint-disable-next-line react-hooks/refs
     requestNotifications.push({
       id: 'seek',
       title: '跳转申请',
@@ -908,7 +906,6 @@ export function WatchTogetherCore({
     })
   }
   if (pauseRequest) {
-    // eslint-disable-next-line react-hooks/refs
     requestNotifications.push({
       id: 'pause',
       title: '暂停申请',
@@ -930,7 +927,6 @@ export function WatchTogetherCore({
     })
   }
   if (playRequest) {
-    // eslint-disable-next-line react-hooks/refs
     requestNotifications.push({
       id: 'play',
       title: '播放申请',

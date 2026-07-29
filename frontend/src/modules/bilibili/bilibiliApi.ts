@@ -242,7 +242,7 @@ export async function resolveBilibili(
     return mapResolvedBilibili(data)
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('解析 B站 视频超时，请稍后重试', { cause: err })
+      throw new Error('解析 B站 视频超时，请稍后重试')
     }
     throw err
   } finally {

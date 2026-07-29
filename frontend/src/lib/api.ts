@@ -43,9 +43,7 @@ const storedFlvBaseUrl = readStored(CUSTOM_FLV_BASE_URL_KEY)
 const storedRtmpPort = readStored(CUSTOM_RTMP_PORT_KEY)
 
 /** 当前生效的 REST API 地址（自定义 > 环境变量 > 当前页面 origin） */
-export let API_URL = normalizeUrl(
-  storedApiUrl || rawApiUrl || window.location.origin
-)
+export let API_URL = normalizeUrl(storedApiUrl || rawApiUrl || window.location.origin)
 
 /**
  * 当前生效的 socket.io 信令地址。

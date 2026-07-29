@@ -135,13 +135,10 @@ export default function ServerFileManager() {
   }, [])
 
   useEffect(() => {
-    // 组件挂载时加载根列表：标准数据获取模式。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadRoots()
   }, [loadRoots])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load('uploads:/')
   }, [load])
 

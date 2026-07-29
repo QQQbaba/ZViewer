@@ -91,8 +91,9 @@ export function Header() {
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false)
   const [serverModalOpen, setServerModalOpen] = useState(false)
   const [customApiUrl, setCustomApiUrlState] = useState(getCustomApiUrl())
-  const [customSocketUrl, setCustomSocketUrlState] =
-    useState(getCustomSocketUrl())
+  const [customSocketUrl, setCustomSocketUrlState] = useState(
+    getCustomSocketUrl()
+  )
   const [customFlvBaseUrl, setCustomFlvBaseUrlState] = useState(
     getCustomFlvBaseUrl()
   )
@@ -385,241 +386,240 @@ export function Header() {
                     onClose={() => setBackgroundModalOpen(false)}
                   />
                   <div className="h-full w-72 flex-shrink-0 p-4">
-                    {/* 深浅色切换 */}
-                    <button
-                      onClick={() => setDark(!isDark)}
-                      className="zen-dropdown-item w-full flex items-center justify-between p-3 rounded-[var(--md-sys-shape-corner)] text-left transition-all hover:bg-[var(--md-sys-color-surface-container-highest)] hover:translate-x-0.5"
-                      style={{ '--item-delay': '0ms' } as React.CSSProperties}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span
-                          className="w-10 h-10 rounded-lg flex items-center justify-center shadow-sm"
-                          style={{
-                            backgroundColor: 'var(--glass-bg)',
-                            border: '1px solid var(--md-sys-color-outline)',
-                          }}
-                        >
-                          {isDark ? (
-                            <Moon
-                              className="w-4 h-4"
-                              style={{
-                                color: 'var(--md-sys-color-on-surface)',
-                              }}
-                            />
-                          ) : (
-                            <Sun
-                              className="w-4 h-4"
-                              style={{ color: 'var(--md-sys-color-primary)' }}
-                            />
-                          )}
-                        </span>
-                        <div>
-                          <span className="font-medium text-sm text-[var(--md-sys-color-on-surface)]">
-                            {isDark ? '深色模式' : '浅色模式'}
-                          </span>
-                          <p className="text-xs mt-0.5 text-[var(--md-sys-color-on-surface-variant)]">
-                            点击切换明暗主题
-                          </p>
-                        </div>
-                      </div>
-                      <div
-                        className="w-9 h-5 rounded-full relative transition-colors"
+                  {/* 深浅色切换 */}
+                  <button
+                    onClick={() => setDark(!isDark)}
+                    className="zen-dropdown-item w-full flex items-center justify-between p-3 rounded-[var(--md-sys-shape-corner)] text-left transition-all hover:bg-[var(--md-sys-color-surface-container-highest)] hover:translate-x-0.5"
+                    style={{ '--item-delay': '0ms' } as React.CSSProperties}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="w-10 h-10 rounded-lg flex items-center justify-center shadow-sm"
                         style={{
-                          backgroundColor: isDark
-                            ? 'var(--md-sys-color-primary)'
-                            : 'var(--md-sys-color-outline-variant)',
+                          backgroundColor: 'var(--glass-bg)',
+                          border: '1px solid var(--md-sys-color-outline)',
                         }}
                       >
-                        <span
-                          className="absolute top-0.5 w-4 h-4 rounded-full transition-all"
-                          style={{
-                            backgroundColor: 'var(--md-sys-color-surface)',
-                            left: isDark ? '18px' : '2px',
-                          }}
-                        />
-                      </div>
-                    </button>
-
-                    <div
-                      className="h-px mx-1 my-3"
-                      style={{
-                        backgroundColor:
-                          'color-mix(in srgb, var(--md-sys-color-outline) 40%, transparent)',
-                      }}
-                    />
-
-                    {/* 种子色预设 */}
-                    <div
-                      className="zen-dropdown-item space-y-2"
-                      style={{ '--item-delay': '60ms' } as React.CSSProperties}
-                    >
-                      <span className="text-xs font-medium text-[var(--md-sys-color-on-surface-variant)] flex items-center gap-1.5">
-                        <Palette className="w-3.5 h-3.5" />
-                        主题色
+                        {isDark ? (
+                          <Moon
+                            className="w-4 h-4"
+                            style={{ color: 'var(--md-sys-color-on-surface)' }}
+                          />
+                        ) : (
+                          <Sun
+                            className="w-4 h-4"
+                            style={{ color: 'var(--md-sys-color-primary)' }}
+                          />
+                        )}
                       </span>
-                      <div className="grid grid-cols-4 gap-2">
-                        {PRESET_SEEDS.map((seed) => {
-                          const active = sourceColor === seed.color
-                          return (
-                            <button
-                              key={seed.id}
-                              onClick={() => setSourceColor(seed.color)}
-                              className={cn(
-                                'flex flex-col items-center gap-1 rounded-[var(--md-sys-shape-corner)] p-1.5 transition-all hover:bg-[var(--md-sys-color-surface-container-highest)]',
-                                active &&
-                                  'bg-[var(--md-sys-color-primary-container)]'
-                              )}
-                              title={seed.name}
-                            >
-                              <span
-                                className="w-6 h-6 rounded-full border"
-                                style={{
-                                  backgroundColor: seed.color,
-                                  borderColor: active
-                                    ? 'var(--md-sys-color-primary)'
-                                    : 'var(--md-sys-color-outline)',
-                                }}
-                              >
-                                {active && (
-                                  <Check
-                                    className="w-3.5 h-3.5 mx-auto mt-1"
-                                    style={{
-                                      color: 'var(--md-sys-color-on-primary)',
-                                    }}
-                                  />
-                                )}
-                              </span>
-                              <span className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                                {seed.name}
-                              </span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-
-                    <div
-                      className="h-px mx-1 my-3"
-                      style={{
-                        backgroundColor:
-                          'color-mix(in srgb, var(--md-sys-color-outline) 40%, transparent)',
-                      }}
-                    />
-
-                    {/* 圆角预设 */}
-                    <div
-                      className="zen-dropdown-item space-y-2"
-                      style={{ '--item-delay': '120ms' } as React.CSSProperties}
-                    >
-                      <span className="text-xs font-medium text-[var(--md-sys-color-on-surface-variant)] flex items-center gap-1.5">
-                        <SlidersHorizontal className="w-3.5 h-3.5" />
-                        圆角
-                      </span>
-                      <div className="grid grid-cols-4 gap-2">
-                        {RADIUS_PRESETS.map((preset) => {
-                          const active = radius === preset.value
-                          return (
-                            <button
-                              key={preset.value}
-                              onClick={() =>
-                                setRadius(preset.value as RadiusPreset)
-                              }
-                              className={cn(
-                                'flex flex-col items-center gap-1 rounded-[var(--md-sys-shape-corner)] p-1.5 text-xs transition-all hover:bg-[var(--md-sys-color-surface-container-highest)]',
-                                active &&
-                                  'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
-                              )}
-                            >
-                              <span
-                                className="h-5 w-8 border-2 border-[var(--md-sys-color-outline)] bg-[var(--glass-bg)]"
-                                style={{ borderRadius: `${preset.px}px` }}
-                              />
-                              <span>{preset.label}</span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-
-                    {/* 玻璃透明度 + 模糊度滑块 */}
-                    <div
-                      className="zen-dropdown-item space-y-2 mt-3"
-                      style={{ '--item-delay': '180ms' } as React.CSSProperties}
-                    >
-                      <Slider
-                        label="玻璃透明度"
-                        value={Math.round(glassStrength * 100)}
-                        min={0}
-                        max={100}
-                        step={1}
-                        valueFormatter={(v) => `${v}%`}
-                        onChange={(v) => setGlassStrength(v / 100)}
-                        disabled={reducedMotion}
-                      />
-                      <Slider
-                        label="卡片模糊度"
-                        value={glassBlur}
-                        min={0}
-                        max={40}
-                        step={1}
-                        valueFormatter={(v) => `${v}px`}
-                        onChange={(v) => setGlassBlur(v)}
-                        disabled={reducedMotion}
-                      />
-                      {reducedMotion && (
-                        <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                          精简动画已锁定玻璃效果
+                      <div>
+                        <span className="font-medium text-sm text-[var(--md-sys-color-on-surface)]">
+                          {isDark ? '深色模式' : '浅色模式'}
+                        </span>
+                        <p className="text-xs mt-0.5 text-[var(--md-sys-color-on-surface-variant)]">
+                          点击切换明暗主题
                         </p>
-                      )}
-                    </div>
-
-                    {/* 精简动画开关 */}
-                    <div
-                      className="zen-dropdown-item mt-3 flex items-center justify-between gap-2 px-3 py-2 rounded-[var(--md-sys-shape-corner)]"
-                      style={
-                        {
-                          border: '1px solid var(--md-sys-color-outline)',
-                          '--item-delay': '220ms',
-                        } as React.CSSProperties
-                      }
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Sparkles className="w-4 h-4 text-[var(--md-sys-color-primary)] shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-sm text-[var(--md-sys-color-on-surface)] truncate">
-                            精简动画
-                          </p>
-                          <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] truncate">
-                            关闭后启用华丽效果
-                          </p>
-                        </div>
                       </div>
-                      <Switch
-                        checked={reducedMotion}
-                        onChange={(e) => setReducedMotion(e.target.checked)}
+                    </div>
+                    <div
+                      className="w-9 h-5 rounded-full relative transition-colors"
+                      style={{
+                        backgroundColor: isDark
+                          ? 'var(--md-sys-color-primary)'
+                          : 'var(--md-sys-color-outline-variant)',
+                      }}
+                    >
+                      <span
+                        className="absolute top-0.5 w-4 h-4 rounded-full transition-all"
+                        style={{
+                          backgroundColor: 'var(--md-sys-color-surface)',
+                          left: isDark ? '18px' : '2px',
+                        }}
                       />
                     </div>
+                  </button>
 
-                    {/* 自定义背景入口 */}
-                    <button
-                      ref={backgroundBtnRef}
-                      onClick={() => setBackgroundModalOpen((v) => !v)}
-                      className={cn(
-                        'zen-dropdown-item mt-3 w-full flex items-center gap-2 px-3 py-2 rounded-[var(--md-sys-shape-corner)] text-sm transition-all hover:translate-x-0.5',
-                        backgroundModalOpen
-                          ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)] border-[var(--md-sys-color-primary)]'
-                          : 'text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                      )}
-                      style={
-                        {
-                          border: '1px solid var(--md-sys-color-outline)',
-                          '--item-delay': '260ms',
-                        } as React.CSSProperties
-                      }
-                    >
-                      <Image className="w-4 h-4 text-[var(--md-sys-color-primary)]" />
-                      <span className="flex-1 text-left">自定义背景</span>
-                    </button>
+                  <div
+                    className="h-px mx-1 my-3"
+                    style={{
+                      backgroundColor:
+                        'color-mix(in srgb, var(--md-sys-color-outline) 40%, transparent)',
+                    }}
+                  />
+
+                  {/* 种子色预设 */}
+                  <div
+                    className="zen-dropdown-item space-y-2"
+                    style={{ '--item-delay': '60ms' } as React.CSSProperties}
+                  >
+                    <span className="text-xs font-medium text-[var(--md-sys-color-on-surface-variant)] flex items-center gap-1.5">
+                      <Palette className="w-3.5 h-3.5" />
+                      主题色
+                    </span>
+                    <div className="grid grid-cols-4 gap-2">
+                      {PRESET_SEEDS.map((seed) => {
+                        const active = sourceColor === seed.color
+                        return (
+                          <button
+                            key={seed.id}
+                            onClick={() => setSourceColor(seed.color)}
+                            className={cn(
+                              'flex flex-col items-center gap-1 rounded-[var(--md-sys-shape-corner)] p-1.5 transition-all hover:bg-[var(--md-sys-color-surface-container-highest)]',
+                              active &&
+                                'bg-[var(--md-sys-color-primary-container)]'
+                            )}
+                            title={seed.name}
+                          >
+                            <span
+                              className="w-6 h-6 rounded-full border"
+                              style={{
+                                backgroundColor: seed.color,
+                                borderColor: active
+                                  ? 'var(--md-sys-color-primary)'
+                                  : 'var(--md-sys-color-outline)',
+                              }}
+                            >
+                              {active && (
+                                <Check
+                                  className="w-3.5 h-3.5 mx-auto mt-1"
+                                  style={{
+                                    color: 'var(--md-sys-color-on-primary)',
+                                  }}
+                                />
+                              )}
+                            </span>
+                            <span className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                              {seed.name}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div
+                    className="h-px mx-1 my-3"
+                    style={{
+                      backgroundColor:
+                        'color-mix(in srgb, var(--md-sys-color-outline) 40%, transparent)',
+                    }}
+                  />
+
+                  {/* 圆角预设 */}
+                  <div
+                    className="zen-dropdown-item space-y-2"
+                    style={{ '--item-delay': '120ms' } as React.CSSProperties}
+                  >
+                    <span className="text-xs font-medium text-[var(--md-sys-color-on-surface-variant)] flex items-center gap-1.5">
+                      <SlidersHorizontal className="w-3.5 h-3.5" />
+                      圆角
+                    </span>
+                    <div className="grid grid-cols-4 gap-2">
+                      {RADIUS_PRESETS.map((preset) => {
+                        const active = radius === preset.value
+                        return (
+                          <button
+                            key={preset.value}
+                            onClick={() =>
+                              setRadius(preset.value as RadiusPreset)
+                            }
+                            className={cn(
+                              'flex flex-col items-center gap-1 rounded-[var(--md-sys-shape-corner)] p-1.5 text-xs transition-all hover:bg-[var(--md-sys-color-surface-container-highest)]',
+                              active &&
+                                'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                            )}
+                          >
+                            <span
+                              className="h-5 w-8 border-2 border-[var(--md-sys-color-outline)] bg-[var(--glass-bg)]"
+                              style={{ borderRadius: `${preset.px}px` }}
+                            />
+                            <span>{preset.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 玻璃透明度 + 模糊度滑块 */}
+                  <div
+                    className="zen-dropdown-item space-y-2 mt-3"
+                    style={{ '--item-delay': '180ms' } as React.CSSProperties}
+                  >
+                    <Slider
+                      label="玻璃透明度"
+                      value={Math.round(glassStrength * 100)}
+                      min={0}
+                      max={100}
+                      step={1}
+                      valueFormatter={(v) => `${v}%`}
+                      onChange={(v) => setGlassStrength(v / 100)}
+                      disabled={reducedMotion}
+                    />
+                    <Slider
+                      label="卡片模糊度"
+                      value={glassBlur}
+                      min={0}
+                      max={40}
+                      step={1}
+                      valueFormatter={(v) => `${v}px`}
+                      onChange={(v) => setGlassBlur(v)}
+                      disabled={reducedMotion}
+                    />
+                    {reducedMotion && (
+                      <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                        精简动画已锁定玻璃效果
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 精简动画开关 */}
+                  <div
+                    className="zen-dropdown-item mt-3 flex items-center justify-between gap-2 px-3 py-2 rounded-[var(--md-sys-shape-corner)]"
+                    style={
+                      {
+                        border: '1px solid var(--md-sys-color-outline)',
+                        '--item-delay': '220ms',
+                      } as React.CSSProperties
+                    }
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Sparkles className="w-4 h-4 text-[var(--md-sys-color-primary)] shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm text-[var(--md-sys-color-on-surface)] truncate">
+                          精简动画
+                        </p>
+                        <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] truncate">
+                          关闭后启用华丽效果
+                        </p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={reducedMotion}
+                      onChange={(e) => setReducedMotion(e.target.checked)}
+                    />
+                  </div>
+
+                  {/* 自定义背景入口 */}
+                  <button
+                    ref={backgroundBtnRef}
+                    onClick={() => setBackgroundModalOpen((v) => !v)}
+                    className={cn(
+                      'zen-dropdown-item mt-3 w-full flex items-center gap-2 px-3 py-2 rounded-[var(--md-sys-shape-corner)] text-sm transition-all hover:translate-x-0.5',
+                      backgroundModalOpen
+                        ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)] border-[var(--md-sys-color-primary)]'
+                        : 'text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                    )}
+                    style={
+                      {
+                        border: '1px solid var(--md-sys-color-outline)',
+                        '--item-delay': '260ms',
+                      } as React.CSSProperties
+                    }
+                  >
+                    <Image className="w-4 h-4 text-[var(--md-sys-color-primary)]" />
+                    <span className="flex-1 text-left">自定义背景</span>
+                  </button>
+
                   </div>
                 </div>,
                 document.body
@@ -652,13 +652,7 @@ export function Header() {
                 <Avatar
                   size="sm"
                   alt={user.username}
-                  src={
-                    user.avatar
-                      ? `${API_URL}${user.avatar}`
-                      : user.role === 'root'
-                        ? '/root-avatar.jpg'
-                        : undefined
-                  }
+                  src={user.avatar ? `${API_URL}${user.avatar}` : (user.role === 'root' ? '/root-avatar.jpg' : undefined)}
                 />
                 <span className="hidden sm:inline text-xs font-medium max-w-[8rem] truncate">
                   {user.username}
@@ -692,7 +686,8 @@ export function Header() {
                       className="zen-dropdown-item flex items-center gap-2 px-2.5 py-2 rounded-[var(--md-sys-shape-corner)]"
                       style={
                         {
-                          backgroundColor: 'var(--glass-bg)',
+                          backgroundColor:
+                            'var(--glass-bg)',
                           '--item-delay': '0ms',
                         } as React.CSSProperties
                       }
@@ -700,13 +695,7 @@ export function Header() {
                       <Avatar
                         size="md"
                         alt={user.username}
-                        src={
-                          user.avatar
-                            ? `${API_URL}${user.avatar}`
-                            : user.role === 'root'
-                              ? '/root-avatar.jpg'
-                              : undefined
-                        }
+                        src={user.avatar ? `${API_URL}${user.avatar}` : (user.role === 'root' ? '/root-avatar.jpg' : undefined)}
                       />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-[var(--md-sys-color-on-surface)] truncate">
@@ -875,25 +864,25 @@ export function Header() {
           />
           <div className="space-y-1 text-xs text-[var(--md-sys-color-on-surface-variant)]">
             <p>
-              当前 API 地址:{' '}
+              当前 API 地址:{" "}
               <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
                 {API_URL}
               </code>
             </p>
             <p>
-              当前 WebSocket 地址:{' '}
+              当前 WebSocket 地址:{" "}
               <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
                 {SOCKET_URL}
               </code>
             </p>
             <p>
-              当前 FLV 基础地址:{' '}
+              当前 FLV 基础地址:{" "}
               <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
                 {FLV_BASE_URL || '(相对路径 /live)'}
               </code>
             </p>
             <p>
-              当前 RTMP 端口:{' '}
+              当前 RTMP 端口:{" "}
               <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
                 {RTMP_PORT}
               </code>

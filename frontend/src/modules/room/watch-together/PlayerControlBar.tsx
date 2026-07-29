@@ -464,7 +464,7 @@ export function PlayerControlBar({
       }
       setRateOpen(false)
     },
-    [isHost, videoRef, setRateOpen]
+    [isHost, videoRef]
   )
 
   const VolumeIcon =

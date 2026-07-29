@@ -546,14 +546,7 @@ export function useWatchTogether({
         isReloadingBilibiliRef.current = false
       }
     },
-    [
-      videoRef,
-      quality,
-      applySourceToVideo,
-      setWatchTogether,
-      broadcastState,
-      fetchBlobsForBufferModeLocal,
-    ]
+    [videoRef, quality, applySourceToVideo, setWatchTogether, broadcastState]
   )
 
   // 响应 BilibiliParseSettings 中 codec / CDN 偏好变更触发的重新解析请求。
@@ -949,7 +942,6 @@ export function useWatchTogether({
     sendControl,
     quality,
     suppressEventsRef,
-    fetchBlobsForBufferModeLocal,
   ])
 
   // 组件卸载或切换房间时释放 MSE blob URL 与音频同步资源

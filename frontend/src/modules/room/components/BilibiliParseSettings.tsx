@@ -177,8 +177,6 @@ export function BilibiliParseSettings({
   useEffect(() => {
     if (!pendingCliReload) return
     if (cliAgent.available) {
-      // 等待 CLI 代理就绪后一次性触发重载；这是状态机的同步收尾，非级联渲染。
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPendingCliReload(false)
       if (isHost) {
         triggerReloadBilibili()

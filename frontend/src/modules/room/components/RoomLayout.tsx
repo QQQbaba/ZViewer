@@ -3,6 +3,7 @@ import {
   Children,
   Fragment,
   isValidElement,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -339,7 +340,7 @@ export function RoomLayout({
   const mobileCardsScrollRef = useRef<HTMLDivElement>(null)
   const [activeControlIndex, setActiveControlIndex] = useState(0)
 
-  const handleMobileCardsScroll = () => {
+  const handleMobileCardsScroll = useCallback(() => {
     const el = mobileCardsScrollRef.current
     if (!el) return
     const card = el.firstElementChild as HTMLElement | null
@@ -351,9 +352,9 @@ export function RoomLayout({
     setActiveControlIndex(
       Math.min(controlChildren.length - 1, Math.max(0, index))
     )
-  }
+  }, [controlChildren.length])
 
-  const scrollToMobileCard = (index: number) => {
+  const scrollToMobileCard = useCallback((index: number) => {
     const el = mobileCardsScrollRef.current
     if (!el) return
     const card = el.children[index] as HTMLElement | undefined
@@ -361,9 +362,10 @@ export function RoomLayout({
       card.scrollIntoView({
         behavior: 'smooth',
         inline: 'start',
+        block: 'nearest',
       })
     }
-  }
+  }, [])
 
   const roomContent = (
     <>
@@ -420,9 +422,7 @@ export function RoomLayout({
       <div
         className={cn(
           'relative mt-4 flex min-h-0 flex-none gap-3 overflow-hidden',
-          isNativeFullscreen
-            ? ''
-            : 'max-h-[calc(100vh-150px)] md:max-h-[calc(100vh-220px)]'
+          isNativeFullscreen ? '' : 'max-h-[calc(100vh-150px)] md:max-h-[calc(100vh-220px)]'
         )}
       >
         {/* 左侧播放器：决定整个容器高度，flex-1 随侧栏开闭平滑改变宽度 */}
@@ -497,9 +497,7 @@ export function RoomLayout({
             if (controlChildren.length === 1) {
               // 共享状态下评论区单独在下方时限制高度，避免无限撑开
               return (
-                <div
-                  className={isSharing ? 'h-[360px] md:h-[500px]' : 'h-full'}
-                >
+                <div className={isSharing ? 'h-[360px] md:h-[500px]' : 'h-full'}>
                   {controlChildren[0]}
                 </div>
               )

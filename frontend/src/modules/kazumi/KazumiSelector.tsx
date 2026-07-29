@@ -137,7 +137,7 @@ export function KazumiSelector({
     } finally {
       setSearching(false)
     }
-  }, [selectedSource, keyword, selectedSourceLabel])
+  }, [selectedSource, keyword])
 
   const handleToggleExpand = useCallback(
     async (result: KazumiSearchResult) => {
