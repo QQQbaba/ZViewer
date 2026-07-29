@@ -4,6 +4,26 @@
 
 ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影。房主控制播放进度，观众实时跟随；支持 Bilibili、WebDAV、FTP、OpenList、MP4 直链等多种视频源，并内置屏幕共享、弹幕、评论等互动能力。
 
+<p align="left">
+  <a href="LICENSE">
+    <img src="https://img.shields.io/github/license/Zero-wyc/ZViewer?style=flat-square&logo=github&label=LICENSE&labelColor=333&color=orange" alt="License">
+  </a>
+  <img src="https://img.shields.io/github/stars/Zero-wyc/ZViewer?style=flat-square&logo=github&label=Stars&labelColor=333&color=blue" alt="Stars">
+  <a href="https://github.com/Zero-wyc/ZViewer/releases">
+    <img src="https://img.shields.io/github/v/release/Zero-wyc/ZViewer?style=flat-square&logo=github&label=RELEASE&labelColor=333&color=green" alt="Release">
+  </a>
+  <img src="https://img.shields.io/github/contributors/Zero-wyc/ZViewer?style=flat-square&logo=github&label=Contributors&labelColor=333&color=brightgreen" alt="Contributors">
+  <img src="https://img.shields.io/github/repo-size/Zero-wyc/ZViewer?style=flat-square&logo=github&label=Size&labelColor=333&color=yellow" alt="Repo Size">
+  <img src="https://img.shields.io/github/last-commit/Zero-wyc/ZViewer?style=flat-square&logo=github&label=Last%20Commit&labelColor=333&color=inactive" alt="Last Commit">
+  <img src="https://img.shields.io/github/languages/top/Zero-wyc/ZViewer?style=flat-square&logo=typescript&labelColor=333&color=3178C6" alt="Top Language">
+  <a href="https://t.me/Zero_251">
+    <img src="https://img.shields.io/badge/Telegram-26A5E4?style=flat-square&logo=telegram&logoColor=white" alt="Telegram">
+  </a>
+  <a href="https://qm.qq.com/q/jOQUoISESs">
+    <img src="https://img.shields.io/badge/QQ-12B7F5?style=flat-square&logo=tencentqq&logoColor=white" alt="QQ">
+  </a>
+</p>
+
 ---
 
 ## 目录
@@ -22,6 +42,18 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 - [常见问题](#常见问题)
 
 ---
+
+| ![image-20260730001949027](https://github.cdn.zero251.xyz/Zero-wyc/Image/main/All/20260730001949577.webp) | ![image-20260730002020513](https://github.cdn.zero251.xyz/Zero-wyc/Image/main/All/20260730002021032.webp) |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| ![image-20260730002033267](https://github.cdn.zero251.xyz/Zero-wyc/Image/main/All/20260730002033753.webp) | ![image-20260730002058938](https://github.cdn.zero251.xyz/Zero-wyc/Image/main/All/20260730002059371.webp) |
+
+---
+
+
+
+可以来群组玩玩捏
+
+https://t.me/Zero_251
 
 ## 功能特性
 
