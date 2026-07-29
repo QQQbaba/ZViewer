@@ -13,7 +13,17 @@ export interface UseVoiceChatOptions {
   socket: Socket | null
   roomId: string | undefined
   username?: string
+  /** 是否为房主，房主可设置房间语音码率 */
+  isHost?: boolean
 }
+
+/** 支持的语音码率选项（kbps） */
+export const VOICE_BITRATE_OPTIONS = [32, 96, 128, 192] as const
+
+export type VoiceBitrate = (typeof VOICE_BITRATE_OPTIONS)[number]
+
+/** 默认语音码率（kbps） */
+const DEFAULT_VOICE_BITRATE: VoiceBitrate = 32
 
 export interface UseVoiceChatResult {
   /** 是否已加入语音聊天 */
@@ -40,6 +50,10 @@ export interface UseVoiceChatResult {
   setGlobalVolume: (value: number) => void
   /** 设置某个远端成员的单独音量 */
   setPeerVolume: (socketId: string, value: number) => void
+  /** 当前房间语音码率（kbps） */
+  bitrate: VoiceBitrate
+  /** 设置房间语音码率（仅房主生效） */
+  setBitrate: (bitrate: VoiceBitrate) => void
   /** 本地麦克风反送（监听）是否开启 */
   monitorEnabled: boolean
   /** 切换本地麦克风反送开关 */
@@ -62,7 +76,7 @@ interface SignalPayload<T> {
  * 仅传输音频 track，实现多人在线语音。
  */
 export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
-  const { socket, roomId, username } = options
+  const { socket, roomId, username, isHost } = options
 
   const [joined, setJoined] = useState(false)
   const [joining, setJoining] = useState(false)
@@ -74,6 +88,9 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
   const [micVolume, setMicVolumeState] = useState(1)
   const [peerLatencies, setPeerLatencies] = useState<Map<string, number>>(
     new Map()
+  )
+  const [bitrate, setBitrateState] = useState<VoiceBitrate>(
+    DEFAULT_VOICE_BITRATE
   )
 
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -198,6 +215,30 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
     setPeerLatencies(new Map())
   }, [cleanupPeerConnection, stopMonitor])
 
+  /**
+   * 将当前码率应用到指定 PeerConnection 的 audio sender。
+   * maxBitrate 单位是 bps，因此需要把 kbps 乘以 1000。
+   */
+  const applyBitrateToConnection = useCallback(
+    (pc: RTCPeerConnection, targetBitrateKbps?: VoiceBitrate) => {
+      const target = targetBitrateKbps ?? bitrate
+      const audioSender = pc
+        .getSenders()
+        .find((s) => s.track?.kind === 'audio')
+      if (!audioSender) return
+
+      const params = audioSender.getParameters()
+      if (!params.encodings) params.encodings = [{}]
+      params.encodings[0].maxBitrate = target * 1000
+      audioSender
+        .setParameters(params)
+        .catch((err) =>
+          console.error('[voice] set audio maxBitrate error:', err)
+        )
+    },
+    [bitrate]
+  )
+
   const createPeerConnection = useCallback(
     (targetSocketId: string) => {
       const currentSocket = socketRef.current
@@ -225,6 +266,9 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
           pc.addTrack(track, localStream)
         })
       }
+
+      // 应用当前房间码率到音频发送器
+      applyBitrateToConnection(pc)
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -265,7 +309,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
 
       return pc
     },
-    [cleanupPeerConnection, applyAudioVolume]
+    [cleanupPeerConnection, applyAudioVolume, applyBitrateToConnection]
   )
 
   const createAndSendOffer = useCallback(
@@ -435,7 +479,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       })
 
       const response = await new Promise<
-        | { success: true; members: string[] }
+        | { success: true; members: string[]; bitrate?: number }
         | { success: false; message: string }
       >((resolve) => {
         currentSocket.emit(
@@ -443,7 +487,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
           { roomId: currentRoomId },
           (
             res:
-              | { success: true; members: string[] }
+              | { success: true; members: string[]; bitrate?: number }
               | { success: false; message: string }
           ) => resolve(res)
         )
@@ -459,6 +503,14 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
 
       setJoined(true)
       setJoining(false)
+
+      // 同步服务端当前房间码率
+      if (
+        response.bitrate &&
+        VOICE_BITRATE_OPTIONS.includes(response.bitrate as VoiceBitrate)
+      ) {
+        setBitrateState(response.bitrate as VoiceBitrate)
+      }
 
       const currentSocketId = currentSocket.id
       const initialMembers: VoiceMember[] = response.members.map((id) => ({
@@ -559,6 +611,38 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
     [applyAudioVolume]
   )
 
+  /**
+   * 设置房间语音码率。
+   * 房主会同步到服务端并广播给其他成员；观众仅更新本地状态。
+   */
+  const setBitrate = useCallback(
+    (value: VoiceBitrate) => {
+      if (!VOICE_BITRATE_OPTIONS.includes(value)) return
+
+      setBitrateState(value)
+
+      // 对已有连接实时应用新码率
+      peerConnectionsRef.current.forEach((pc) => {
+        applyBitrateToConnection(pc, value)
+      })
+
+      const currentSocket = socketRef.current
+      const currentRoomId = roomIdRef.current
+      if (isHost && currentSocket && currentRoomId) {
+        currentSocket.emit(
+          'voice-set-bitrate',
+          { roomId: currentRoomId, bitrate: value },
+          (res?: { success: boolean; message?: string }) => {
+            if (res && !res.success) {
+              message.error(res.message ?? '设置码率失败')
+            }
+          }
+        )
+      }
+    },
+    [isHost, applyBitrateToConnection]
+  )
+
   // 定时采集每个 PeerConnection 的 RTT，用于展示语音延迟
   const updateLatencies = useCallback(() => {
     const next = new Map<string, number>()
@@ -600,11 +684,22 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
   useEffect(() => {
     if (!socket) return
 
+    const handleVoiceBitrate = (payload: { bitrate: number }) => {
+      const value = payload.bitrate as VoiceBitrate
+      if (VOICE_BITRATE_OPTIONS.includes(value)) {
+        setBitrateState(value)
+        peerConnectionsRef.current.forEach((pc) => {
+          applyBitrateToConnection(pc, value)
+        })
+      }
+    }
+
     socket.on('voice-offer', handleVoiceOffer)
     socket.on('voice-answer', handleVoiceAnswer)
     socket.on('voice-ice-candidate', handleVoiceIceCandidate)
     socket.on('voice-user-joined', handleVoiceUserJoined)
     socket.on('voice-user-left', handleVoiceUserLeft)
+    socket.on('voice-bitrate', handleVoiceBitrate)
 
     return () => {
       socket.off('voice-offer', handleVoiceOffer)
@@ -612,6 +707,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       socket.off('voice-ice-candidate', handleVoiceIceCandidate)
       socket.off('voice-user-joined', handleVoiceUserJoined)
       socket.off('voice-user-left', handleVoiceUserLeft)
+      socket.off('voice-bitrate', handleVoiceBitrate)
     }
   }, [
     socket,
@@ -620,6 +716,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
     handleVoiceIceCandidate,
     handleVoiceUserJoined,
     handleVoiceUserLeft,
+    applyBitrateToConnection,
   ])
 
   // 组件卸载或房间变化时自动离开
@@ -648,5 +745,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
     setGlobalVolume,
     setPeerVolume,
     setMicVolume,
+    bitrate,
+    setBitrate,
   }
 }

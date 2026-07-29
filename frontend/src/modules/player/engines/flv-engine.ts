@@ -22,7 +22,7 @@ export const flvEngine: PlayerEngine = {
 
     resetVideoElement(video)
 
-    // 统一代理策略：由 url-proxy.ts 根据 forceMediaProxy 开关、URL 特征与源格式决定
+    // 统一代理策略：由 url-proxy.ts 根据 URL 特征与源格式决定
     const targetUrl = resolveProxyUrl(source.url, source.headers, source.format)
 
     const player = flvjs.createPlayer(

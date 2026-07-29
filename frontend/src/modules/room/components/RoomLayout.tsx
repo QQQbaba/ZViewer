@@ -9,7 +9,7 @@ import {
   useState,
 } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, PanelRight, PanelRightClose, X } from 'lucide-react'
+import { ArrowLeft, PanelRight, PanelRightClose } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -311,21 +311,6 @@ export function RoomLayout({
         backfaceVisibility: 'hidden',
       }}
     >
-      {/* 侧栏关闭条：所有端/所有场景下都提供显式关闭按钮 */}
-      <div className="flex items-center justify-between border-b border-[var(--md-sys-color-outline-variant)]/50 px-4 py-3">
-        <span className="text-sm font-medium text-[var(--md-sys-color-on-surface)]">
-          房间面板
-        </span>
-        <button
-          type="button"
-          onClick={() => setIsRightPanelOpen(false)}
-          aria-label="收起侧栏"
-          title="收起侧栏"
-          className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
-        >
-          <X size={18} />
-        </button>
-      </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {effectiveRightPanel}
       </div>
@@ -444,11 +429,11 @@ export function RoomLayout({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg bg-black md:aspect-video">
             {renderMainContent()}
-            {isNativeFullscreen && rightPanelNode}
+            {isNativeFullscreen && !webFullscreen && rightPanelNode}
           </div>
         </div>
         {/* 移动端抽屉背景遮罩：点击可关闭侧栏 */}
-        {!isNativeFullscreen && isRightPanelOpen && (
+        {!isNativeFullscreen && !webFullscreen && isRightPanelOpen && (
           <div
             className="absolute inset-0 z-10 bg-black/50 md:hidden"
             aria-hidden="true"
@@ -456,7 +441,7 @@ export function RoomLayout({
           />
         )}
         {/* 右侧占位区：仅桌面端显示，宽度动画与绝对定位面板同步滑动 */}
-        {!isNativeFullscreen && (
+        {!isNativeFullscreen && !webFullscreen && (
           <div
             className={cn(
               'hidden flex-shrink-0 overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:block',
@@ -466,7 +451,7 @@ export function RoomLayout({
           />
         )}
         {/* 右侧面板：移动端为全宽抽屉覆盖在视频上方，桌面端为固定宽度侧边栏 */}
-        {!isNativeFullscreen && (
+        {!isNativeFullscreen && !webFullscreen && (
           <div
             className={cn(
               'pointer-events-none fixed inset-y-0 right-0 z-[9999] w-full overflow-hidden transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:absolute md:top-0 md:h-full md:w-[320px]',

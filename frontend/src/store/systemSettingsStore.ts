@@ -11,12 +11,6 @@ export interface SystemSettings {
   /** 房间创建权限模式：admin-only=仅管理员，all-users=所有登录用户（不含 guest） */
   roomCreationMode: RoomCreationMode
   betaFeaturesEnabled: boolean
-  /**
-   * 强制视频流走服务端代理（兼容旧方案）。
-   * - false（默认，SYNCTV 风格无需中转）：智能模式，仅 B站 CDN / 带防盗链 headers 等必须代理的源走代理
-   * - true（强制代理）：所有跨域 URL 都走服务器代理，服务器承载全部流量
-   */
-  forceMediaProxy: boolean
   dataSourceConfig?: Record<string, unknown> | null
 }
 
@@ -42,7 +36,6 @@ const DEFAULT_SETTINGS: SystemSettings = {
   registrationMode: 'approval',
   roomCreationMode: 'admin-only',
   betaFeaturesEnabled: false,
-  forceMediaProxy: false,
   dataSourceConfig: null,
 }
 

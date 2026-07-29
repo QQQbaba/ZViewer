@@ -16,7 +16,6 @@ const DEFAULT_SETTINGS: Partial<SystemSettings> = {
   registrationMode: 'approval',
   roomCreationMode: 'admin-only',
   betaFeaturesEnabled: false,
-  forceMediaProxy: false,
 };
 
 /**

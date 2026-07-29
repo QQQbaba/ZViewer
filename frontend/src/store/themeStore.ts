@@ -69,6 +69,13 @@ interface ThemeState {
   /** 背景旋转角度，0~360° */
   backgroundRotate: number
 
+  /** 精简动画关闭前的参数快照（不持久化） */
+  _reducedMotionPrev: {
+    glassStrength: number
+    glassBlur: number
+    backgroundBlur: number
+  }
+
   /** 设置种子颜色 */
   setSourceColor: (color: string) => void
   /** 切换深浅模式 */
@@ -115,6 +122,11 @@ export const useThemeStore = create<ThemeState>()(
       backgroundPositionY: 0,
       backgroundScale: 1,
       backgroundRotate: 0,
+      _reducedMotionPrev: {
+        glassStrength: 0.6,
+        glassBlur: 12,
+        backgroundBlur: 0,
+      },
 
       setSourceColor: (color: string) => set({ sourceColor: color }),
       toggleDark: () => set((state) => ({ isDark: !state.isDark })),
@@ -122,7 +134,31 @@ export const useThemeStore = create<ThemeState>()(
       setRadius: (value: RadiusPreset) => set({ radius: value }),
       setGlassStrength: (value: number) => set({ glassStrength: value }),
       setGlassBlur: (value: number) => set({ glassBlur: value }),
-      setReducedMotion: (value: boolean) => set({ reducedMotion: value }),
+      setReducedMotion: (value: boolean) =>
+        set((state) => {
+          if (value) {
+            // 开启精简动画：保存当前值并锁定为玻璃不透明、卡片无模糊、背景无模糊
+            return {
+              reducedMotion: true,
+              _reducedMotionPrev: {
+                glassStrength: state.glassStrength,
+                glassBlur: state.glassBlur,
+                backgroundBlur: state.backgroundBlur,
+              },
+              glassStrength: 1,
+              glassBlur: 0,
+              backgroundBlur: 0,
+            }
+          }
+          // 关闭精简动画：恢复之前保存的参数
+          const prev = state._reducedMotionPrev
+          return {
+            reducedMotion: false,
+            glassStrength: prev.glassStrength,
+            glassBlur: prev.glassBlur,
+            backgroundBlur: prev.backgroundBlur,
+          }
+        }),
       setBackgroundImage: (value: string | null) =>
         set({ backgroundImage: value }),
       setBackgroundBlur: (value: number) => set({ backgroundBlur: value }),
@@ -144,16 +180,15 @@ export const useThemeStore = create<ThemeState>()(
         glassStrength: state.glassStrength,
         glassBlur: state.glassBlur,
         reducedMotion: state.reducedMotion,
-        // 仅持久化 URL 图片，不持久化 base64 数据（避免 localStorage 配额溢出）
-        backgroundImage: state.backgroundImage?.startsWith('data:')
-          ? null
-          : state.backgroundImage,
+        // 自定义背景同时持久化 URL 与 base64 数据（用户上传图片在 5MB 限制内）
+        backgroundImage: state.backgroundImage,
         backgroundBlur: state.backgroundBlur,
         backgroundOpacity: state.backgroundOpacity,
         backgroundPositionX: state.backgroundPositionX,
         backgroundPositionY: state.backgroundPositionY,
         backgroundScale: state.backgroundScale,
         backgroundRotate: state.backgroundRotate,
+        // 注意：_reducedMotionPrev 不持久化，仅运行时缓存
       }),
       merge: (persisted, current) => {
         const p = persisted as Partial<ThemeState>

@@ -305,7 +305,13 @@ export function BackgroundSettingsPanel({
               step={1}
               valueFormatter={(v) => `${v}px`}
               onChange={store.setBackgroundBlur}
+              disabled={store.reducedMotion}
             />
+            {store.reducedMotion && (
+              <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                精简动画已关闭背景模糊
+              </p>
+            )}
             <Slider
               label="透明度"
               value={Math.round(store.backgroundOpacity * 100)}

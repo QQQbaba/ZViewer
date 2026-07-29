@@ -11,7 +11,11 @@ import {
   Volume2,
 } from 'lucide-react'
 import type { Socket } from 'socket.io-client'
-import { useVoiceChat } from '../hooks/useVoiceChat'
+import {
+  useVoiceChat,
+  VOICE_BITRATE_OPTIONS,
+  type VoiceBitrate,
+} from '../hooks/useVoiceChat'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Slider } from '@/components/ui/Slider'
@@ -20,12 +24,15 @@ interface VoiceChatPanelProps {
   socket: Socket | null
   roomId: string | undefined
   username?: string
+  /** 是否为房主，房主可设置语音码率 */
+  isHost?: boolean
 }
 
 export function VoiceChatPanel({
   socket,
   roomId,
   username,
+  isHost,
 }: VoiceChatPanelProps) {
   const [expanded, setExpanded] = useState(false)
   const [editingPeer, setEditingPeer] = useState<string | null>(null)
@@ -39,6 +46,7 @@ export function VoiceChatPanel({
     peerLatencies,
     micVolume,
     monitorEnabled,
+    bitrate,
     join,
     leave,
     toggleMic,
@@ -46,7 +54,8 @@ export function VoiceChatPanel({
     setGlobalVolume,
     setPeerVolume,
     setMicVolume,
-  } = useVoiceChat({ socket, roomId, username })
+    setBitrate,
+  } = useVoiceChat({ socket, roomId, username, isHost })
 
   if (!roomId) return null
 
@@ -140,6 +149,38 @@ export function VoiceChatPanel({
                 <span className="w-9 text-right text-xs font-medium tabular-nums text-[var(--md-sys-color-on-surface-variant)]">
                   {Math.round(micVolume * 100)}%
                 </span>
+              </div>
+            </div>
+          )}
+
+          {/* 语音码率（仅房主可切换，观众仅显示当前码率） */}
+          {joined && (
+            <div className="mb-1.5 rounded-[var(--md-sys-radius-small)] bg-[var(--glass-bg)] px-2 py-1.5">
+              <div className="mb-1.5 text-xs font-medium text-[var(--md-sys-color-on-surface)]">
+                语音码率
+                {!isHost && (
+                  <span className="ml-1 text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                    （仅房主可调整）
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {VOICE_BITRATE_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    disabled={!isHost}
+                    onClick={() => setBitrate(option as VoiceBitrate)}
+                    className={cn(
+                      'rounded-[var(--md-sys-radius-small)] py-1 text-[10px] font-medium transition-all',
+                      bitrate === option
+                        ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                        : 'bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]',
+                      !isHost && 'cursor-default opacity-80'
+                    )}
+                  >
+                    {option}kbps
+                  </button>
+                ))}
               </div>
             </div>
           )}

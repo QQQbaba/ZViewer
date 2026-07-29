@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
 import { useAuthStore } from '@/store/authStore'
-
-// 生产环境通过 Nginx 反向代理，默认使用当前域名即可；
-// 开发环境可通过 .env 文件设置 VITE_API_URL=http://localhost:3333
-const rawApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-const SERVER_URL = rawApiUrl || window.location.origin
+import { SOCKET_URL } from '@/lib/api'
 
 let globalSocket: Socket | null = null
 let refCount = 0
@@ -25,7 +21,7 @@ function getSocket(): Socket {
     return globalSocket
   }
 
-  globalSocket = io(SERVER_URL, {
+  globalSocket = io(SOCKET_URL, {
     transports: ['websocket', 'polling'],
     autoConnect: false,
     withCredentials: true,
@@ -102,7 +98,7 @@ export function useSocket() {
       if (isAuthError && !isRefreshingRef.current) {
         isRefreshingRef.current = true
         try {
-          const res = await fetch(`${SERVER_URL}/api/auth/refresh`, {
+          const res = await fetch(`${SOCKET_URL}/api/auth/refresh`, {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },

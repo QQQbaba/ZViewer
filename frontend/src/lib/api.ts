@@ -1,16 +1,140 @@
 /**
- * 统一 fetch 封装。
+ * 统一 fetch 封装与后端地址配置中心。
  *
  * 关键能力：
  * 1. 自动 `credentials: 'include'`：让浏览器携带 httpOnly cookie（access_token / refresh_token）
  * 2. 401 自动 refresh + 重试：access token 过期时调用 /api/auth/refresh（也走 cookie），成功后重试原请求一次
  * 3. refresh 失败时返回原 401 响应，由调用方决定降级策略（如 AuthInitializer 降级为 guest）
+ * 4. 支持用户自定义后端地址（覆盖环境变量），持久化在 localStorage
+ *    - API_URL：REST API 基础地址
+ *    - SOCKET_URL：WebRTC / 房间状态同步的 socket.io 信令地址
+ *    - FLV_BASE_URL：HTTP-FLV 拉流基础地址
+ *    - RTMP_PORT：OBS RTMP 推流端口
  *
  * 业务代码不再需要手动拼 Authorization header，也不需要从 authStore 取 accessToken。
  */
 
-const rawApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-export const API_URL = rawApiUrl || window.location.origin
+const CUSTOM_API_URL_KEY = 'zviewer-custom-api-url'
+const CUSTOM_SOCKET_URL_KEY = 'zviewer-custom-socket-url'
+const CUSTOM_FLV_BASE_URL_KEY = 'zviewer-custom-flv-base-url'
+const CUSTOM_RTMP_PORT_KEY = 'zviewer-custom-rtmp-port'
+
+function readStored(key: string): string | null {
+  try {
+    const v = localStorage.getItem(key)
+    return v ? v.trim().replace(/\/$/, '') : null
+  } catch {
+    return null
+  }
+}
+
+function normalizeUrl(url: string): string {
+  return url.trim().replace(/\/$/, '')
+}
+
+const rawApiUrl = normalizeUrl(import.meta.env.VITE_API_URL || '')
+const rawSocketUrl = normalizeUrl(import.meta.env.VITE_SOCKET_URL || '')
+const rawFlvBaseUrl = normalizeUrl(import.meta.env.VITE_FLV_BASE_URL || '')
+const rawRtmpPort = (import.meta.env.VITE_RTMP_PORT || '3334').toString()
+
+const storedApiUrl = readStored(CUSTOM_API_URL_KEY)
+const storedSocketUrl = readStored(CUSTOM_SOCKET_URL_KEY)
+const storedFlvBaseUrl = readStored(CUSTOM_FLV_BASE_URL_KEY)
+const storedRtmpPort = readStored(CUSTOM_RTMP_PORT_KEY)
+
+/** 当前生效的 REST API 地址（自定义 > 环境变量 > 当前页面 origin） */
+export let API_URL = normalizeUrl(storedApiUrl || rawApiUrl || window.location.origin)
+
+/**
+ * 当前生效的 socket.io 信令地址。
+ * 未单独设置时默认跟随 API_URL，保证大多数部署场景下无需额外配置。
+ */
+export let SOCKET_URL = normalizeUrl(storedSocketUrl || rawSocketUrl || API_URL)
+
+/**
+ * 当前生效的 HTTP-FLV 拉流基础地址。
+ * 未单独设置时按页面协议推断：
+ * - HTTPS 生产环境默认使用相对路径 ''（由 Nginx/Caddy 反向代理到 Node Media Server）
+ * - HTTP 开发环境默认直连 `http://host:3335`
+ */
+export let FLV_BASE_URL =
+  storedFlvBaseUrl ||
+  rawFlvBaseUrl ||
+  (window.location.protocol === 'https:'
+    ? ''
+    : `http://${window.location.hostname}:3335`)
+
+/** 当前生效的 RTMP 推流端口 */
+export let RTMP_PORT = storedRtmpPort || rawRtmpPort
+
+function setStored(key: string, value: string): void {
+  try {
+    if (value) {
+      localStorage.setItem(key, value)
+    } else {
+      localStorage.removeItem(key)
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/** 获取用户设置的自定义 API 地址（未设置返回空字符串） */
+export function getCustomApiUrl(): string {
+  return storedApiUrl || ''
+}
+
+/** 设置自定义 API 地址；传入空字符串则清除自定义设置 */
+export function setCustomApiUrl(url: string): void {
+  const normalized = url ? normalizeUrl(url) : ''
+  setStored(CUSTOM_API_URL_KEY, normalized)
+  API_URL = normalized || rawApiUrl || window.location.origin
+  // 当 socket 未单独配置时，跟随 API 地址变化
+  if (!storedSocketUrl && !rawSocketUrl) {
+    SOCKET_URL = API_URL
+  }
+}
+
+/** 获取用户设置的自定义 socket.io 地址 */
+export function getCustomSocketUrl(): string {
+  return storedSocketUrl || ''
+}
+
+/** 设置自定义 socket.io 地址；传入空字符串则恢复默认（跟随 API_URL） */
+export function setCustomSocketUrl(url: string): void {
+  const normalized = url ? normalizeUrl(url) : ''
+  setStored(CUSTOM_SOCKET_URL_KEY, normalized)
+  SOCKET_URL = normalized || rawSocketUrl || API_URL
+}
+
+/** 获取用户设置的自定义 FLV 拉流基础地址 */
+export function getCustomFlvBaseUrl(): string {
+  return storedFlvBaseUrl || ''
+}
+
+/** 设置自定义 FLV 拉流基础地址；传入空字符串则恢复默认推断 */
+export function setCustomFlvBaseUrl(url: string): void {
+  const normalized = url ? normalizeUrl(url) : ''
+  setStored(CUSTOM_FLV_BASE_URL_KEY, normalized)
+  FLV_BASE_URL =
+    normalized ||
+    rawFlvBaseUrl ||
+    (window.location.protocol === 'https:'
+      ? ''
+      : `http://${window.location.hostname}:3335`)
+}
+
+/** 获取用户设置的自定义 RTMP 推流端口 */
+export function getCustomRtmpPort(): string {
+  return storedRtmpPort || ''
+}
+
+/** 设置自定义 RTMP 推流端口；传入空字符串则恢复默认 */
+export function setCustomRtmpPort(port: string): void {
+  const normalized = port ? port.toString().trim() : ''
+  setStored(CUSTOM_RTMP_PORT_KEY, normalized)
+  RTMP_PORT = normalized || rawRtmpPort
+}
 
 type RequestOptions = Omit<RequestInit, 'headers'> & {
   headers?: Record<string, string>
