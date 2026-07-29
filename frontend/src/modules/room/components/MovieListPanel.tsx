@@ -14,8 +14,18 @@ import {
   filterQualitiesByVip,
   getBilibiliUserInfo,
 } from '@/modules/bilibili/bilibiliApi'
+import { extractBvid, resolveBilibiliViaCli } from '@/modules/bilibili/cliApi'
+import type { ResolvedSource } from '@/modules/bilibili/types'
 import { BilibiliParseSettings } from './BilibiliParseSettings'
-import { getEffectivePreferMp4 } from '@/modules/room/watch-together/movie-source-resolver'
+import {
+  getEffectivePreferMp4,
+  getActiveCliProxyUrl,
+} from '@/modules/room/watch-together/movie-source-resolver'
+import {
+  useBilibiliParsePreferences,
+  getBilibiliParseOptions,
+} from '@/modules/bilibili/parseOptions'
+import { useCliAgentStore } from '@/store/cliAgentStore'
 import { cn } from '@/lib/utils'
 
 interface MovieListPanelProps {
@@ -41,6 +51,15 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
   const updateMovie = useRoomStore((state) => state.updateMovie)
   const setPendingQualityChange = useRoomStore(
     (state) => state.setPendingQualityChange
+  )
+  const setViewerCliResolvedSource = useRoomStore(
+    (state) => state.setViewerCliResolvedSource
+  )
+  const triggerViewerSourceReload = useRoomStore(
+    (state) => state.triggerViewerSourceReload
+  )
+  const viewerCliResolvedSource = useRoomStore(
+    (state) => state.viewerCliResolvedSource
   )
   const mode = useRoomStore((state) => state.mode)
   const [search, setSearch] = useState('')
@@ -117,16 +136,36 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
 
     setQualityLoadingId(movie.id)
     try {
-      // 读取该影片独立的播放模式偏好，避免 MP4 模式下切换清晰度时被改回 DASH
-      // CLI 未连接时强制 MP4 降级。
-      const resolved = await resolveBilibiliWithOptions(
-        movie.url,
-        qn,
-        undefined,
-        {
-          preferMp4: getEffectivePreferMp4(movie.id),
+      const parsePrefs = getBilibiliParseOptions(movie.id)
+      const proxyUrl = parsePrefs.cliEnabled ? getActiveCliProxyUrl() : null
+      let resolved: ResolvedSource
+
+      if (proxyUrl) {
+        // CLI 已连接：使用本地 CLI 代理解析，强制 DASH，不再降级 MP4
+        const bvid = extractBvid(movie.url)
+        if (bvid && movie.cid) {
+          resolved = await resolveBilibiliViaCli(
+            proxyUrl,
+            bvid,
+            movie.cid,
+            qn,
+            false,
+            true
+          )
+        } else {
+          throw new Error('无法提取 BV 号或 cid，无法使用 CLI 代理')
         }
-      )
+      } else {
+        // CLI 未连接时强制 MP4 降级
+        resolved = await resolveBilibiliWithOptions(
+          movie.url,
+          qn,
+          undefined,
+          {
+            preferMp4: getEffectivePreferMp4(movie.id),
+          }
+        )
+      }
       await updateMovie(roomId, movie.id, {
         audioUrl: resolved.audioUrl,
         format: resolved.format,
@@ -149,6 +188,53 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
   }
 
   /**
+   * 观众端通过本地 CLI 切换清晰度。
+   *
+   * 仅影响当前客户端：用观众自己的 B站 Cookie 解析所选清晰度的 DASH 地址，
+   * 覆盖房主广播的源，但不写入影片列表也不广播。
+   */
+  const handleViewerQualityChange = async (movie: Movie, value: string) => {
+    if (isHost || isScreenShare) return
+    const qn = Number(value)
+    if (!Number.isFinite(qn) || qn === movie.currentQn) return
+
+    const proxyUrl = useCliAgentStore
+      .getState()
+      .agents.find((a) => a.proxyUrl)?.proxyUrl
+    if (!proxyUrl) {
+      message.error('CLI 代理未连接')
+      return
+    }
+
+    const bvid = extractBvid(movie.url)
+    if (!bvid || !movie.cid) {
+      message.error('无法解析该 B站 影片')
+      return
+    }
+
+    setQualityLoadingId(movie.id)
+    try {
+      const resolved = await resolveBilibiliViaCli(
+        proxyUrl,
+        bvid,
+        movie.cid,
+        qn,
+        false,
+        true
+      )
+      setViewerCliResolvedSource({ movieId: movie.id, resolved })
+      if (movie.id === currentMovieId) {
+        triggerViewerSourceReload()
+      }
+    } catch (err) {
+      console.error('[MovieListPanel] viewer change quality error:', err)
+      message.error(err instanceof Error ? err.message : 'CLI 切换清晰度失败')
+    } finally {
+      setQualityLoadingId(null)
+    }
+  }
+
+  /**
    * 切换分P（分集）。
    *
    * 多 P 视频每个分集有独立的 cid 和 m4s 文件，必须用对应 cid 重新请求 playurl。
@@ -161,17 +247,38 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
 
     setPageLoadingId(movie.id)
     try {
-      // 读取该影片独立的播放模式偏好，保持切换分P 后清晰度一致
-      // CLI 未连接时强制 MP4 降级。
-      const resolved = await resolveBilibiliWithOptions(
-        movie.url,
-        movie.currentQn,
-        undefined,
-        {
-          preferMp4: getEffectivePreferMp4(movie.id),
-          page,
+      const parsePrefs = getBilibiliParseOptions(movie.id)
+      const proxyUrl = parsePrefs.cliEnabled ? getActiveCliProxyUrl() : null
+      const targetPage = movie.pages?.find((p) => p.page === page)
+      let resolved: ResolvedSource
+
+      if (proxyUrl && targetPage) {
+        // CLI 已连接：使用本地 CLI 代理解析目标分P，强制 DASH，不再降级 MP4
+        const bvid = extractBvid(movie.url)
+        if (bvid && targetPage.cid) {
+          resolved = await resolveBilibiliViaCli(
+            proxyUrl,
+            bvid,
+            targetPage.cid,
+            movie.currentQn,
+            false,
+            true
+          )
+        } else {
+          throw new Error('无法提取 BV 号或 cid，无法使用 CLI 代理')
         }
-      )
+      } else {
+        // CLI 未连接时强制 MP4 降级
+        resolved = await resolveBilibiliWithOptions(
+          movie.url,
+          movie.currentQn,
+          undefined,
+          {
+            preferMp4: getEffectivePreferMp4(movie.id),
+            page,
+          }
+        )
+      }
       await updateMovie(roomId, movie.id, {
         audioUrl: resolved.audioUrl,
         format: resolved.format,
@@ -314,8 +421,7 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
                         </Tag>
                       )}
                     </div>
-                    {isHost &&
-                      movie.sourceType === 'bilibili' &&
+                    {movie.sourceType === 'bilibili' &&
                       movie.acceptQuality &&
                       movie.acceptQuality.length > 0 && (
                         <BilibiliQualitySelect
@@ -324,8 +430,15 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
                           isScreenShare={isScreenShare}
                           qualityLoadingId={qualityLoadingId}
                           bilibiliVip={bilibiliVip}
+                          selectedQn={
+                            viewerCliResolvedSource?.movieId === movie.id
+                              ? viewerCliResolvedSource.resolved.currentQn
+                              : undefined
+                          }
                           onChange={(value) =>
-                            handleQualityChange(movie, value)
+                            isHost
+                              ? handleQualityChange(movie, value)
+                              : handleViewerQualityChange(movie, value)
                           }
                         />
                       )}
@@ -471,6 +584,7 @@ interface BilibiliQualitySelectProps {
   isScreenShare: boolean
   qualityLoadingId: number | null
   bilibiliVip: boolean
+  selectedQn?: number
   onChange: (value: string) => void
 }
 
@@ -480,16 +594,36 @@ function BilibiliQualitySelect({
   isScreenShare,
   qualityLoadingId,
   bilibiliVip,
+  selectedQn,
   onChange,
 }: BilibiliQualitySelectProps) {
+  // 订阅该影片解析偏好的变化，确保在 BilibiliParseSettings 中切换 MP4/DASH 模式后
+  // 本组件能立即重新渲染，避免禁用状态停留在旧模式。
+  const parsePrefs = useBilibiliParsePreferences(movie.id)
+
+  // CLI 代理可用状态：观众端需要本地 CLI 在线才能切换清晰度。
+  const cliAgentAvailable = useCliAgentStore(
+    (s) => s.localOnline && s.agents.length > 0
+  )
+
   // 使用生效的播放模式：CLI 未连接时强制 MP4，清晰度选择随之禁用
   const effectivePreferMp4 = getEffectivePreferMp4(movie.id)
+
+  // 观众端未启用 CLI 时不显示清晰度选择器
+  if (!isHost && !parsePrefs.cliEnabled) {
+    return null
+  }
+
+  const canChangeQuality =
+    isHost || (parsePrefs.cliEnabled && cliAgentAvailable)
 
   return (
     <Select
       className="mt-1.5"
       size="sm"
-      value={String(movie.currentQn ?? movie.acceptQuality[0]?.id)}
+      value={String(
+        selectedQn ?? movie.currentQn ?? movie.acceptQuality[0]?.id
+      )}
       options={filterQualitiesByVip(movie.acceptQuality, bilibiliVip).map(
         (q) => ({
           label: q.resolution ? `${q.label} · ${q.resolution}` : q.label,
@@ -497,7 +631,7 @@ function BilibiliQualitySelect({
         })
       )}
       disabled={
-        !isHost ||
+        !canChangeQuality ||
         isScreenShare ||
         qualityLoadingId === movie.id ||
         effectivePreferMp4

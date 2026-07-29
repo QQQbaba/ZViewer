@@ -20,6 +20,8 @@ export type NormalizedParseOptions = {
   bufferMode: boolean
   p2pEnabled: boolean
   cliEnabled: boolean
+  /** 启用 CLI 之前保存的播放模式 */
+  cliPrevPreferMp4?: boolean
 }
 
 /** 存储格式：以 movieId 字符串为 key 的配置映射 */
@@ -75,6 +77,7 @@ function normalizeOptions(
     bufferMode: opts?.bufferMode === true,
     p2pEnabled: opts?.p2pEnabled === true,
     cliEnabled: opts?.cliEnabled === true,
+    cliPrevPreferMp4: opts?.cliPrevPreferMp4,
   }
 }
 

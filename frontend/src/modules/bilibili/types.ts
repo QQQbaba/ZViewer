@@ -121,4 +121,8 @@ export interface BilibiliParseOptions {
    * 自动回退到服务端解析。
    */
   cliEnabled?: boolean
+  /**
+   * 启用 CLI 之前保存的播放模式，用于关闭 CLI 后恢复原来的 DASH/MP4 选择。
+   */
+  cliPrevPreferMp4?: boolean
 }

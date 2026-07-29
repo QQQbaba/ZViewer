@@ -190,6 +190,7 @@ export function useVideoSource({
   //   - DASH / 含 audioUrl：使用 MSE 合并 videoUrl + audioUrl
   //   - 其他格式（如 mp4）：直接设置 video.src
   // 观众端不再独立调用 B站 解析接口，直接复用房主广播的地址。
+  // 例外：观众端启用了本地 CLI 并自主切换了清晰度时，使用自己解析的源覆盖房主源。
   const applySourceToVideo = useCallback(
     async (
       video: HTMLVideoElement,
@@ -198,9 +199,32 @@ export function useVideoSource({
       blobs?: { videoBlob: Blob; audioBlob: Blob }
     ) => {
       if (!state.sourceUrl) return
-      await attachSource(video, toPlayerSource(state, startTime, blobs))
+
+      let effectiveState = state
+      if (!isHostRef.current) {
+        const storeState = useRoomStore.getState()
+        const override = storeState.viewerCliResolvedSource
+        const currentMovieId = storeState.currentMovieId
+        if (override && override.movieId === currentMovieId) {
+          effectiveState = {
+            ...state,
+            sourceUrl: override.resolved.videoUrl,
+            audioUrl: override.resolved.audioUrl,
+            format: override.resolved.format,
+            videoCodec: override.resolved.videoCodec,
+            audioCodec: override.resolved.audioCodec,
+            duration: override.resolved.duration ?? state.duration,
+            currentQn: override.resolved.currentQn,
+          }
+        }
+      }
+
+      await attachSource(
+        video,
+        toPlayerSource(effectiveState, startTime, blobs)
+      )
     },
-    [attachSource]
+    [attachSource, isHostRef]
   )
 
   // 组件重新挂载（或 videoRef 首次可用）时，从 roomStore 恢复视频源。

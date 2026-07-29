@@ -98,6 +98,11 @@ export function WatchTogetherCore({
   const isReloading = useRoomStore((state) => state.isReloading)
   // 缓冲模式下载进度（房主/观众共享，由 useWatchTogether/useViewerStateSync 写入）
   const bufferProgress = useRoomStore((state) => state.bufferProgress)
+  // 观众端本地 CLI 代理覆盖的源（用于统计信息展示）
+  const viewerCliResolvedSource = useRoomStore(
+    (state) => state.viewerCliResolvedSource
+  )
+  const currentMovieId = useRoomStore((state) => state.currentMovieId)
   const {
     watchTogether,
     setWatchTogether,
@@ -1122,21 +1127,38 @@ export function WatchTogetherCore({
       )}
 
       {/* 视频统计信息（右键菜单，绑定 art.video） */}
-      <VideoStatsMenu
-        videoElement={video}
-        sourceType={
-          watchTogether.sourceType === 'bilibili' ? 'bilibili' : 'custom'
-        }
-        videoCodec={watchTogether.videoCodec}
-        sourceUrl={watchTogether.sourceUrl}
-        currentQuality={currentQuality}
-        availableQualities={availableQualities}
-        format={
-          watchTogether.format === 'dash' || watchTogether.format === 'mp4'
-            ? watchTogether.format
-            : undefined
-        }
-      />
+      {/* 观众端启用本地 CLI 代理时，统计信息应反映本地代理覆盖后的真实源。 */}
+      {(() => {
+        const isCliOverrideActive =
+          !isHost &&
+          watchTogether.sourceType === 'bilibili' &&
+          viewerCliResolvedSource?.movieId === currentMovieId
+        const override = isCliOverrideActive
+          ? viewerCliResolvedSource.resolved
+          : null
+        const statsFormat =
+          override?.format === 'dash' || override?.format === 'mp4'
+            ? override.format
+            : watchTogether.format === 'dash' ||
+                watchTogether.format === 'mp4'
+              ? watchTogether.format
+              : undefined
+        return (
+          <VideoStatsMenu
+            videoElement={video}
+            sourceType={
+              watchTogether.sourceType === 'bilibili' ? 'bilibili' : 'custom'
+            }
+            videoCodec={override?.videoCodec ?? watchTogether.videoCodec}
+            sourceUrl={override?.videoUrl ?? watchTogether.sourceUrl}
+            currentQuality={override?.currentQn ?? currentQuality}
+            availableQualities={
+              override?.acceptQuality ?? availableQualities
+            }
+            format={statsFormat}
+          />
+        )
+      })()}
 
       <RequestNotification
         items={requestNotifications}

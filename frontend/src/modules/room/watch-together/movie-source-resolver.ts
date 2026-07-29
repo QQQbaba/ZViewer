@@ -79,13 +79,18 @@ export function getActiveCliProxyUrl(): string | null {
 /**
  * 获取影片实际生效的 MP4 偏好。
  *
- * 当用户启用 CLI 高画质代理但本地 CLI 未连接时，强制降级为 MP4 模式，
- * 避免 DASH 高画质地址因无大会员 Cookie 而无法播放；CLI 连接成功后
- * 恢复为用户原本的 DASH/MP4 选择。
+ * 当用户启用 CLI 高画质代理且本地 CLI 已连接时，强制走 DASH 代理路径，
+ * 不再降级到 MP4；CLI 启用但未连接时，强制降级为 MP4 模式，避免 DASH
+ * 高画质地址因无大会员 Cookie 而无法播放。
  */
 export function getEffectivePreferMp4(movieId: number): boolean {
   const { preferMp4, cliEnabled } = getBilibiliParseOptions(movieId)
-  if (cliEnabled && !getActiveCliProxyUrl()) return true
+  if (cliEnabled) {
+    // CLI 已连接：强制使用 DASH，不再降级 MP4
+    if (getActiveCliProxyUrl()) return false
+    // CLI 启用但未连接：强制降级为 MP4
+    return true
+  }
   return preferMp4
 }
 
@@ -135,9 +140,10 @@ export async function resolveBilibiliOnline(
 ): Promise<ResolvedMovieSource> {
   const parsePrefs = getBilibiliParseOptions(movie.id)
   const proxyUrl = parsePrefs.cliEnabled ? getActiveCliProxyUrl() : null
-  // CLI 未连接时强制使用 MP4 模式；调用方显式传入的 preferMp4 优先级最高
+  // CLI 已连接时强制使用 DASH 代理，不再降级 MP4；未连接时强制 MP4
   const effectivePreferMp4 =
     options?.preferMp4 ?? getEffectivePreferMp4(movie.id)
+  const forceDash = parsePrefs.cliEnabled && !!proxyUrl
 
   if (proxyUrl) {
     const bvid = extractBvid(movie.url)
@@ -147,7 +153,8 @@ export async function resolveBilibiliOnline(
         bvid,
         movie.cid,
         movie.currentQn,
-        effectivePreferMp4
+        effectivePreferMp4,
+        forceDash
       )
       return mapResolvedSourceToMovieSource(resolved, movie)
     }
