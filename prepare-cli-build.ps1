@@ -1,5 +1,5 @@
-$src = 'F:\Code\ZViewerCLI'
-$dst = 'F:\Code\ZControl\ZViewerCLI'
+﻿$src = 'F:\Code\ZViewer\ZViewerCLI'
+$dst = Join-Path $PSScriptRoot 'ZViewerCLI'
 
 New-Item -ItemType Directory -Force -Path $dst | Out-Null
 

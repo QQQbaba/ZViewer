@@ -54,10 +54,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           文档顺序保证内容仍在背景图之上，无需显式 z-index。 */}
       <div className="relative z-auto flex flex-1 flex-col">
         <Header />
-        <main
-          key={location.pathname}
-          className="flex flex-1 flex-col"
-        >
+        <main key={location.pathname} className="flex flex-1 flex-col">
           {children}
         </main>
       </div>

@@ -55,10 +55,7 @@ export function parseMp4Boxes(
 /**
  * 递归查找指定类型的 box（仅在顶级及其子级中查找，不深于 3 层）。
  */
-export function findBox(
-  boxes: Mp4Box[],
-  type: string
-): Mp4Box | undefined {
+export function findBox(boxes: Mp4Box[], type: string): Mp4Box | undefined {
   for (const box of boxes) {
     if (box.type === type) return box
   }
@@ -112,17 +109,21 @@ export interface SidxInfo {
   references: SidxReference[]
 }
 
-export function parseSidx(
-  buffer: ArrayBuffer,
-  box: Mp4Box
-): SidxInfo | null {
+export function parseSidx(buffer: ArrayBuffer, box: Mp4Box): SidxInfo | null {
   if (box.type !== 'sidx') return null
 
-  const view = new DataView(buffer, box.dataOffset, box.size - (box.dataOffset - box.start))
+  const view = new DataView(
+    buffer,
+    box.dataOffset,
+    box.size - (box.dataOffset - box.start)
+  )
   let offset = 0
 
   const version = view.getUint8(offset)
-  const flags = (view.getUint8(offset + 1) << 16) | (view.getUint8(offset + 2) << 8) | view.getUint8(offset + 3)
+  const flags =
+    (view.getUint8(offset + 1) << 16) |
+    (view.getUint8(offset + 2) << 8) |
+    view.getUint8(offset + 3)
   offset += 4
 
   const referenceId = view.getUint32(offset)
@@ -218,7 +219,7 @@ export function findAllSidxInBuffer(
       view.getUint8(offset + 4) !== 0x73 || // 's'
       view.getUint8(offset + 5) !== 0x69 || // 'i'
       view.getUint8(offset + 6) !== 0x64 || // 'd'
-      view.getUint8(offset + 7) !== 0x78    // 'x'
+      view.getUint8(offset + 7) !== 0x78 // 'x'
     ) {
       continue
     }

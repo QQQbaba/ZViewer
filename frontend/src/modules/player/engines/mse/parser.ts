@@ -101,7 +101,10 @@ export function calculateSeekOffset(
   }
 
   if (meta.duration && meta.totalSize && meta.initSize) {
-    const ratio = Math.min(MAX_SEEK_RATIO, Math.max(0, targetTime / meta.duration))
+    const ratio = Math.min(
+      MAX_SEEK_RATIO,
+      Math.max(0, targetTime / meta.duration)
+    )
     return Math.max(meta.initSize, Math.floor(ratio * meta.totalSize))
   }
 

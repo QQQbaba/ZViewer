@@ -4,7 +4,7 @@
 #   1. 自动构建前后端代码（npm run build 通过 workspaces 同时构建）
 #   2. 将项目源码 + 构建产物（backend/dist / frontend/dist）打包为可分发的 zip
 #   3. 自动排除 node_modules / 数据库 / .env / 日志 / 测试文件 / IDE 临时文件
-#   4. 接收者解压后执行 npm install --omit=dev && npm start 即可运行（无需再构建）
+#   4. 接收者解压后执行 npm install --omit=dev，再执行 npm start 即可运行（无需再构建）
 #
 # 用法：
 #   .\release-zip.ps1              # 打包到项目根目录，文件名带时间戳
@@ -84,7 +84,7 @@ function Write-Title {
 }
 
 function Show-Help {
-  Write-Title 'ZControl 一键打包发布脚本'
+  Write-Title 'ZViewer 一键打包发布脚本'
   Write-Host '用法：' -ForegroundColor Yellow
   Write-Host '  .\release-zip.ps1              打包到项目根目录，文件名带时间戳'
   Write-Host '  .\release-zip.ps1 -OutputPath <路径>  指定输出 zip 路径'
@@ -125,7 +125,8 @@ function Show-Help {
   Write-Host '    2. 备份旧版本的 config/ 目录（包含数据库、上传文件、头像等）'
   Write-Host '    3. 解压新版本 zip 到新目录（或覆盖旧目录）'
   Write-Host '    4. 将备份的 config/ 目录复制到新版本根目录'
-  Write-Host '    5. npm install --omit=dev && npm start'
+  Write-Host '    5. npm install --omit=dev'
+  Write-Host '       npm start'
   Write-Host ''
 }
 
@@ -182,7 +183,7 @@ function Invoke-Release {
     }
   } else {
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmm'
-    $dest = Join-Path $root "ZControl-release-$timestamp.zip"
+    $dest = Join-Path $root "ZViewer-release-$timestamp.zip"
   }
 
   Write-Host '打包配置：' -ForegroundColor Yellow
@@ -210,8 +211,8 @@ function Invoke-Release {
   }
 
   # 3. 创建临时目录并复制文件
-  $tempBase = Join-Path $env:TEMP "zcontrol-release-$(Get-Date -Format 'yyyyMMddHHmmss')"
-  $tempDir = Join-Path $tempBase 'ZControl'
+  $tempBase = Join-Path $env:TEMP "zviewer-release-$(Get-Date -Format 'yyyyMMddHHmmss')"
+  $tempDir = Join-Path $tempBase 'ZViewer'
   Write-Host '步骤 2/4：复制文件（含构建产物，过滤敏感内容）...' -ForegroundColor Yellow
   Write-Host "  临时目录：$tempDir"
   New-Item -ItemType Directory -Path $tempDir -Force | Out-Null

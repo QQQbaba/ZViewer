@@ -46,7 +46,7 @@ export async function downloadObsConfig(roomId: string): Promise<void> {
   const objectUrl = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = objectUrl
-  a.download = 'zcontrol-obs-config.json'
+  a.download = 'zviewer-obs-config.json'
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)

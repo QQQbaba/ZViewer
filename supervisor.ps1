@@ -11,9 +11,9 @@
   - 被 taskkill /T /F 终止时连同子进程一起退出，不会进入重启循环
 .EXAMPLE
   powershell.exe -File supervisor.ps1 -Command node -CommandArgs "dist/index.js" `
-    -WorkingDirectory "F:\Code\ZControl\backend" `
-    -LogStdout "F:\Code\ZControl\backend-prod.log" `
-    -LogStderr "F:\Code\ZControl\backend-prod.err.log"
+    -WorkingDirectory "F:\Code\ZViewer\ZViewer\backend" `
+    -LogStdout "F:\Code\ZViewer\ZViewer\log\backend-prod.log" `
+    -LogStderr "F:\Code\ZViewer\ZViewer\log\backend-prod.err.log"
 #>
 
 param(

@@ -67,10 +67,7 @@ export function Dropdown({
       const spaceAbove = rect.top - margin
 
       // 估算菜单自然高度：每项约 40px（py-2 + text-sm）+ 容器 padding 12px，上限 288px(max-h-72)
-      const naturalHeight = Math.min(
-        options.length * 40 + 12,
-        288,
-      )
+      const naturalHeight = Math.min(options.length * 40 + 12, 288)
       const menuHeight = actualMenuHeight ?? naturalHeight
 
       let top: number
@@ -109,7 +106,7 @@ export function Dropdown({
         maxHeight,
       })
     },
-    [options.length],
+    [options.length]
   )
 
   const closeMenu = useCallback(() => {

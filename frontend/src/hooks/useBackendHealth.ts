@@ -41,7 +41,7 @@ export function useBackendHealth(): void {
           lastStartedAtRef.current !== data.startedAt
         ) {
           message.info(
-            `后端已自动重启（第 ${data.restartCount} 次），服务已恢复`,
+            `后端已自动重启（第 ${data.restartCount} 次），服务已恢复`
           )
         }
         lastStartedAtRef.current = data.startedAt

@@ -222,9 +222,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
   const applyBitrateToConnection = useCallback(
     (pc: RTCPeerConnection, targetBitrateKbps?: VoiceBitrate) => {
       const target = targetBitrateKbps ?? bitrate
-      const audioSender = pc
-        .getSenders()
-        .find((s) => s.track?.kind === 'audio')
+      const audioSender = pc.getSenders().find((s) => s.track?.kind === 'audio')
       if (!audioSender) return
 
       const params = audioSender.getParameters()

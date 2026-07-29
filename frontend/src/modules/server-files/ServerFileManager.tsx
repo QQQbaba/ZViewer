@@ -135,10 +135,13 @@ export default function ServerFileManager() {
   }, [])
 
   useEffect(() => {
+    // 组件挂载时加载根列表：标准数据获取模式。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadRoots()
   }, [loadRoots])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load('uploads:/')
   }, [load])
 
@@ -227,7 +230,10 @@ export default function ServerFileManager() {
       setDirPickerOpen(false)
       // 自动填充名称（如果名称为空）
       if (!newRootName.trim()) {
-        const parts = dirPickerPath.replace(/\\/g, '/').split('/').filter(Boolean)
+        const parts = dirPickerPath
+          .replace(/\\/g, '/')
+          .split('/')
+          .filter(Boolean)
         const lastPart = parts[parts.length - 1] || dirPickerPath
         setNewRootName(lastPart)
       }
@@ -295,9 +301,7 @@ export default function ServerFileManager() {
     fileInputRef.current?.click()
   }
 
-  const handleFileChange = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (files.length === 0) return
     setUploading(true)
@@ -512,9 +516,10 @@ export default function ServerFileManager() {
                     <HardDrive
                       className="h-3.5 w-3.5 shrink-0"
                       style={{
-                        color: r.key === currentRootKey
-                          ? 'var(--md-sys-color-primary)'
-                          : 'var(--md-sys-color-on-surface-variant)',
+                        color:
+                          r.key === currentRootKey
+                            ? 'var(--md-sys-color-primary)'
+                            : 'var(--md-sys-color-on-surface-variant)',
                       }}
                     />
                     <div className="flex min-w-0 flex-1 flex-col">
@@ -579,7 +584,11 @@ export default function ServerFileManager() {
           size="sm"
           icon={<ChevronLeft className="h-4 w-4" />}
           onClick={handleBack}
-          disabled={currentPath === 'uploads:/' || currentPath === 'custom:/' || !currentPath}
+          disabled={
+            currentPath === 'uploads:/' ||
+            currentPath === 'custom:/' ||
+            !currentPath
+          }
         >
           返回
         </Button>
@@ -625,7 +634,9 @@ export default function ServerFileManager() {
       ) : entries.length === 0 ? (
         <div className="py-6 text-center">
           <Text type="secondary" className="text-sm">
-            {readonly ? '当前目录为空' : '当前目录为空，点击上方「上传文件」添加'}
+            {readonly
+              ? '当前目录为空'
+              : '当前目录为空，点击上方「上传文件」添加'}
           </Text>
         </div>
       ) : (
@@ -659,7 +670,9 @@ export default function ServerFileManager() {
               <div
                 className="min-w-0 flex-1"
                 onClick={() => handleEntryClick(entry)}
-                style={{ cursor: entry.type === 'directory' ? 'pointer' : 'default' }}
+                style={{
+                  cursor: entry.type === 'directory' ? 'pointer' : 'default',
+                }}
               >
                 <Text className="block truncate text-sm font-medium">
                   {entry.name}
@@ -719,16 +732,15 @@ export default function ServerFileManager() {
               }}
             >
               {/* 主面板 */}
-              <div
-                className="glass flex w-[360px] flex-shrink-0 flex-col p-5"
-              >
+              <div className="glass flex w-[360px] flex-shrink-0 flex-col p-5">
                 {/* 标题栏 */}
                 <div className="mb-4 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div
                       className="flex h-8 w-8 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
                       style={{
-                        backgroundColor: 'var(--md-sys-color-primary-container)',
+                        backgroundColor:
+                          'var(--md-sys-color-primary-container)',
                         color: 'var(--md-sys-color-on-primary-container)',
                       }}
                     >
@@ -919,7 +931,8 @@ export default function ServerFileManager() {
         cancelText="取消"
       >
         确定要删除「{deleteTarget?.name}」吗？
-        {deleteTarget?.type === 'directory' && ' 该文件夹内所有内容将被一并删除，且不可恢复。'}
+        {deleteTarget?.type === 'directory' &&
+          ' 该文件夹内所有内容将被一并删除，且不可恢复。'}
       </ConfirmModal>
 
       {/* 删除根目录确认 */}

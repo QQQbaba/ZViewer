@@ -87,6 +87,8 @@ export interface PlaybackStateDto extends SyncStateDto {
   currentMovieId?: number;
   /** 最近一次更新的时间戳 */
   updatedAt: number;
+  /** 是否启用缓冲模式（B站 DASH 源：先完整缓存到 IndexedDB 再播放） */
+  bufferMode?: boolean;
 }
 
 /**

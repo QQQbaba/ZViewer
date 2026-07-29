@@ -727,7 +727,8 @@ export function WatchTogetherCore({
   const handleDanmakuClick = useCallback((text: string) => {
     // 提取内容：若文本以 "xxx: " 开头（发送者前缀），则取冒号后内容；否则用原文
     const colonIdx = text.indexOf(': ')
-    const content = colonIdx >= 0 && colonIdx < 30 ? text.slice(colonIdx + 2) : text
+    const content =
+      colonIdx >= 0 && colonIdx < 30 ? text.slice(colonIdx + 2) : text
     const textToCopy = content.trim() || text.trim()
     if (!textToCopy) return
 
@@ -881,6 +882,8 @@ export function WatchTogetherCore({
     })
   }
   if (seekRequest) {
+    // 通知项在渲染时组装，onOk/onCancel 为事件回调，不在渲染期执行。
+    // eslint-disable-next-line react-hooks/refs
     requestNotifications.push({
       id: 'seek',
       title: '跳转申请',
@@ -905,6 +908,7 @@ export function WatchTogetherCore({
     })
   }
   if (pauseRequest) {
+    // eslint-disable-next-line react-hooks/refs
     requestNotifications.push({
       id: 'pause',
       title: '暂停申请',
@@ -926,6 +930,7 @@ export function WatchTogetherCore({
     })
   }
   if (playRequest) {
+    // eslint-disable-next-line react-hooks/refs
     requestNotifications.push({
       id: 'play',
       title: '播放申请',
@@ -1022,7 +1027,8 @@ export function WatchTogetherCore({
                       bufferProgress.total > 0
                         ? Math.min(
                             100,
-                            (bufferProgress.downloaded / bufferProgress.total) * 100,
+                            (bufferProgress.downloaded / bufferProgress.total) *
+                              100
                           )
                         : 0
                     }%`,
@@ -1031,20 +1037,11 @@ export function WatchTogetherCore({
               </div>
               <div className="mt-2 flex justify-between text-[10px] text-white/50">
                 <span>
-                  {(
-                    bufferProgress.downloaded /
-                    1024 /
-                    1024
-                  ).toFixed(1)}{' '}
-                  MB
+                  {(bufferProgress.downloaded / 1024 / 1024).toFixed(1)} MB
                 </span>
                 <span>
                   {bufferProgress.total > 0
-                    ? `${(
-                        bufferProgress.total /
-                        1024 /
-                        1024
-                      ).toFixed(1)} MB`
+                    ? `${(bufferProgress.total / 1024 / 1024).toFixed(1)} MB`
                     : '未知大小'}
                 </span>
               </div>
@@ -1139,8 +1136,7 @@ export function WatchTogetherCore({
         const statsFormat =
           override?.format === 'dash' || override?.format === 'mp4'
             ? override.format
-            : watchTogether.format === 'dash' ||
-                watchTogether.format === 'mp4'
+            : watchTogether.format === 'dash' || watchTogether.format === 'mp4'
               ? watchTogether.format
               : undefined
         return (
@@ -1152,9 +1148,7 @@ export function WatchTogetherCore({
             videoCodec={override?.videoCodec ?? watchTogether.videoCodec}
             sourceUrl={override?.videoUrl ?? watchTogether.sourceUrl}
             currentQuality={override?.currentQn ?? currentQuality}
-            availableQualities={
-              override?.acceptQuality ?? availableQualities
-            }
+            availableQualities={override?.acceptQuality ?? availableQualities}
             format={statsFormat}
           />
         )

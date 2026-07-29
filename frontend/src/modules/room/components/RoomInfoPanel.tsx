@@ -507,9 +507,7 @@ export function RoomInfoPanel({
         <div
           className={cn(
             'zen-scroll flex min-h-0 flex-1 gap-3 overflow-y-auto px-4 py-3',
-            roomMode === 'screen-share' && isHost
-              ? 'flex-row'
-              : 'flex-col'
+            roomMode === 'screen-share' && isHost ? 'flex-row' : 'flex-col'
           )}
         >
           {/* 房间状态信息（左列 / 单列） */}
@@ -521,153 +519,157 @@ export function RoomInfoPanel({
                 : 'w-full'
             )}
           >
-          {/* 房间名称 */}
-          <div className="flex flex-col gap-1">
-            <Text
-              type="secondary"
-              className="text-[10px] uppercase tracking-wide"
-            >
-              房间名称
-            </Text>
-            {isEditingName ? (
-              <div className="flex flex-1 items-center gap-1">
-                <Input
-                  size="sm"
-                  value={editingNameValue}
-                  onChange={(e) => setEditingNameValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      void handleSaveName()
-                    } else if (e.key === 'Escape') {
-                      handleCancelEditName()
-                    }
-                  }}
-                  disabled={savingName}
-                  className="min-w-0 flex-1"
-                />
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="h-7 w-7 shrink-0 p-0"
-                  loading={savingName}
-                  disabled={savingName}
-                  onClick={() => void handleSaveName()}
-                  icon={<Check className="h-3.5 w-3.5" />}
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="h-7 w-7 shrink-0 p-0"
-                  disabled={savingName}
-                  onClick={handleCancelEditName}
-                  icon={<X className="h-3.5 w-3.5" />}
-                />
-              </div>
-            ) : (
-              <div className="flex min-w-0 items-center gap-1">
-                <span
-                  className="truncate text-sm font-medium"
-                  style={{ color: 'var(--md-sys-color-on-surface)' }}
-                  title={roomName || roomId}
-                >
-                  {roomName || '未命名房间'}
-                </span>
-                {isHost && (
-                  <button
-                    onClick={() => setIsEditingName(true)}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--md-sys-color-surface-container-high)]"
-                    style={{ color: 'var(--md-sys-color-primary)' }}
-                    title="修改房间名称"
+            {/* 房间名称 */}
+            <div className="flex flex-col gap-1">
+              <Text
+                type="secondary"
+                className="text-[10px] uppercase tracking-wide"
+              >
+                房间名称
+              </Text>
+              {isEditingName ? (
+                <div className="flex flex-1 items-center gap-1">
+                  <Input
+                    size="sm"
+                    value={editingNameValue}
+                    onChange={(e) => setEditingNameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        void handleSaveName()
+                      } else if (e.key === 'Escape') {
+                        handleCancelEditName()
+                      }
+                    }}
+                    disabled={savingName}
+                    className="min-w-0 flex-1"
+                  />
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="h-7 w-7 shrink-0 p-0"
+                    loading={savingName}
+                    disabled={savingName}
+                    onClick={() => void handleSaveName()}
+                    icon={<Check className="h-3.5 w-3.5" />}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-7 w-7 shrink-0 p-0"
+                    disabled={savingName}
+                    onClick={handleCancelEditName}
+                    icon={<X className="h-3.5 w-3.5" />}
+                  />
+                </div>
+              ) : (
+                <div className="flex min-w-0 items-center gap-1">
+                  <span
+                    className="truncate text-sm font-medium"
+                    style={{ color: 'var(--md-sys-color-on-surface)' }}
+                    title={roomName || roomId}
                   >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+                    {roomName || '未命名房间'}
+                  </span>
+                  {isHost && (
+                    <button
+                      onClick={() => setIsEditingName(true)}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--md-sys-color-surface-container-high)]"
+                      style={{ color: 'var(--md-sys-color-primary)' }}
+                      title="修改房间名称"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
 
-          {/* 房间 ID */}
-          <div className="flex flex-col gap-1">
-            <Text
-              type="secondary"
-              className="text-[10px] uppercase tracking-wide"
-            >
-              房间 ID
-            </Text>
-            <button
-              onClick={handleCopyRoomId}
-              className="flex items-center gap-1.5 self-start rounded-[var(--md-sys-shape-corner)] px-2 py-1 text-xs font-medium transition-all hover:translate-y-[-1px]"
-              style={{
-                color: 'var(--md-sys-color-primary)',
-                backgroundColor:
-                  'color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent)',
-              }}
-              title="点击复制"
-            >
-              {roomId}
-              <Copy className="h-3 w-3" />
-            </button>
-          </div>
+            {/* 房间 ID */}
+            <div className="flex flex-col gap-1">
+              <Text
+                type="secondary"
+                className="text-[10px] uppercase tracking-wide"
+              >
+                房间 ID
+              </Text>
+              <button
+                onClick={handleCopyRoomId}
+                className="flex items-center gap-1.5 self-start rounded-[var(--md-sys-shape-corner)] px-2 py-1 text-xs font-medium transition-all hover:translate-y-[-1px]"
+                style={{
+                  color: 'var(--md-sys-color-primary)',
+                  backgroundColor:
+                    'color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent)',
+                }}
+                title="点击复制"
+              >
+                {roomId}
+                <Copy className="h-3 w-3" />
+              </button>
+            </div>
 
-          {/* 操作按钮组 */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={<Share2 className="h-3.5 w-3.5" />}
-              onClick={handleCopyLink}
-            >
-              分享
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={<Users className="h-3.5 w-3.5" />}
-              onClick={() => setShowUsers(true)}
-            >
-              在线 ({viewers.length})
-            </Button>
-            {isHost && (
+            {/* 操作按钮组 */}
+            <div className="flex flex-wrap items-center gap-1.5">
               <Button
                 variant="secondary"
                 size="sm"
-                icon={<Settings className="h-3.5 w-3.5" />}
-                onClick={() => setShowSettings(true)}
+                icon={<Share2 className="h-3.5 w-3.5" />}
+                onClick={handleCopyLink}
               >
-                设置
+                分享
               </Button>
-            )}
-            {isHost && (
               <Button
-                variant={autoApproveRequests ? 'primary' : 'secondary'}
+                variant="secondary"
                 size="sm"
-                icon={<Zap className="h-3.5 w-3.5" />}
-                onClick={() => {
-                  toggleAutoApproveRequests()
-                  message.info(
-                    autoApproveRequests
-                      ? '已关闭自动通过申请'
-                      : '已开启自动通过申请'
-                  )
-                }}
-                title="开启后，seek / 暂停 / 继续播放 申请将自动通过"
+                icon={<Users className="h-3.5 w-3.5" />}
+                onClick={() => setShowUsers(true)}
               >
-                {autoApproveRequests ? '自动通过：开' : '自动通过：关'}
+                在线 ({viewers.length})
               </Button>
-            )}
-            {isHost && (
-              <Button
-                variant={roomSettings.requireApproval ? 'primary' : 'secondary'}
-                size="sm"
-                icon={<Shield className="h-3.5 w-3.5" />}
-                onClick={handleToggleRequireApproval}
-                title="开启后，观众加入需房主审批"
-              >
-                {roomSettings.requireApproval ? '需要审批：开' : '需要审批：关'}
-              </Button>
-            )}
-          </div>
+              {isHost && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<Settings className="h-3.5 w-3.5" />}
+                  onClick={() => setShowSettings(true)}
+                >
+                  设置
+                </Button>
+              )}
+              {isHost && (
+                <Button
+                  variant={autoApproveRequests ? 'primary' : 'secondary'}
+                  size="sm"
+                  icon={<Zap className="h-3.5 w-3.5" />}
+                  onClick={() => {
+                    toggleAutoApproveRequests()
+                    message.info(
+                      autoApproveRequests
+                        ? '已关闭自动通过申请'
+                        : '已开启自动通过申请'
+                    )
+                  }}
+                  title="开启后，seek / 暂停 / 继续播放 申请将自动通过"
+                >
+                  {autoApproveRequests ? '自动通过：开' : '自动通过：关'}
+                </Button>
+              )}
+              {isHost && (
+                <Button
+                  variant={
+                    roomSettings.requireApproval ? 'primary' : 'secondary'
+                  }
+                  size="sm"
+                  icon={<Shield className="h-3.5 w-3.5" />}
+                  onClick={handleToggleRequireApproval}
+                  title="开启后，观众加入需房主审批"
+                >
+                  {roomSettings.requireApproval
+                    ? '需要审批：开'
+                    : '需要审批：关'}
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* 房主端在线观众列表（投屏模式为右列，其他模式为下方） */}

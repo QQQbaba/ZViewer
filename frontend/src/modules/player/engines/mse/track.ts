@@ -18,7 +18,10 @@ import {
   clearSourceBuffer,
   getBufferedAhead,
 } from '../../services/buffer-manager'
-import { findFirstMoof, findLastCompleteFragmentEnd } from '../../services/mp4-parser'
+import {
+  findFirstMoof,
+  findLastCompleteFragmentEnd,
+} from '../../services/mp4-parser'
 import {
   downloadHead,
   downloadRange,
@@ -253,7 +256,12 @@ export class MediaTrack {
             `[MediaTrack] 重新计算 seekOffset: ${seekOffset} → ${newSeekOffset}`
           )
           // 重新走完整 seekStream 流程
-          return this.seekStream(targetTime, signal, onInitialAppend, stopAtTime)
+          return this.seekStream(
+            targetTime,
+            signal,
+            onInitialAppend,
+            stopAtTime
+          )
         }
       } catch (err) {
         if (signal.aborted) return
@@ -337,10 +345,7 @@ export class MediaTrack {
           // 确保残余数据（可能含下一 fragment 开头）被 processStream 重新对齐
           const nextOffset = frag.offset + completeEnd
           if (stopAtByte !== undefined && nextOffset >= stopAtByte) return
-          if (
-            this.meta.totalSize !== null &&
-            nextOffset >= this.meta.totalSize
-          )
+          if (this.meta.totalSize !== null && nextOffset >= this.meta.totalSize)
             return
 
           await this.stream(nextOffset, signal, {
@@ -352,10 +357,7 @@ export class MediaTrack {
           if (err instanceof Error && err.name === 'AbortError') return
           if (this.isSuperseded() || signal.aborted) return
           if (this.video.error) throw err
-          console.warn(
-            '[MediaTrack] sidx 精确路径失败，回退快速路径:',
-            err
-          )
+          console.warn('[MediaTrack] sidx 精确路径失败，回退快速路径:', err)
         }
       }
     }
@@ -410,7 +412,9 @@ export class MediaTrack {
       return
     }
 
-    console.warn(`[MediaTrack] 回退路径: 从 seekOffset 流式下载 offset=${seekOffset}`)
+    console.warn(
+      `[MediaTrack] 回退路径: 从 seekOffset 流式下载 offset=${seekOffset}`
+    )
     await this.stream(seekOffset, signal, {
       needFindMoof: true,
       customFlushSize: flushSize,
@@ -440,9 +444,8 @@ export class MediaTrack {
       offset += ref.size
     }
     // 目标时间超过最后一个 fragment：返回最后一个
-    const lastRef = this.meta.sidx.references[
-      this.meta.sidx.references.length - 1
-    ]
+    const lastRef =
+      this.meta.sidx.references[this.meta.sidx.references.length - 1]
     return {
       offset: offset - lastRef.size,
       size: lastRef.size,

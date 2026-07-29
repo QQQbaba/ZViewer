@@ -82,17 +82,13 @@ function DirectSharePage() {
     useState<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
-  // LiveArtPlayer 通过 onVideoReady 暴露 video 元素
-  const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(
-    null
-  )
-  const handleLocalVideoReady = useCallback(
-    (node: HTMLVideoElement | null) => {
-      localVideoRef.current = node
-      setLocalVideoEl(node)
-    },
-    []
-  )
+  // LiveArtPlayer 通过 onVideoReady 暴露 video 元素。
+  // 用计数器代替直接持有 video 元素的状态，避免在 effect 中修改状态对象。
+  const [videoReadyVersion, setVideoReadyVersion] = useState(0)
+  const handleLocalVideoReady = useCallback((node: HTMLVideoElement | null) => {
+    localVideoRef.current = node
+    setVideoReadyVersion((v) => v + 1)
+  }, [])
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const candidateQueueRef = useRef<RTCIceCandidateInit[]>([])
 
@@ -124,12 +120,12 @@ function DirectSharePage() {
   // LiveArtPlayer 挂载完成后绑定本地预览流（修复旧实现中
   // setIsSharing 后同步读取 ref 为 null 导致预览不显示的问题）
   useEffect(() => {
-    if (localVideoEl && localStreamRef.current) {
-      if (localVideoEl.srcObject !== localStreamRef.current) {
-        localVideoEl.srcObject = localStreamRef.current
-      }
+    const video = localVideoRef.current
+    const stream = localStreamRef.current
+    if (video && stream && video.srcObject !== stream) {
+      video.srcObject = stream
     }
-  }, [localVideoEl])
+  }, [videoReadyVersion])
 
   const handleStartDirectShare = async () => {
     if (pcRef.current) {

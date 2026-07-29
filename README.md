@@ -37,8 +37,6 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 | 来源 | 说明 |
 |---|---|
 | **Bilibili** | 解析 BV 号或视频链接，支持 DASH 音视频合并、清晰度切换、大会员凭证 |
-| **ani-subs 订阅** | 自定义 JSON 订阅源，聚合 web-selector 与 RSS 番剧资源 |
-| **Kazumi 规则** | 导入 Kazumi 插件规则，使用 XPath/CSS 选择器解析第三方站点 |
 | **MP4 直链** | 直接播放可访问的 MP4 视频地址 |
 | **WebDAV** | 挂载 WebDAV 服务器，浏览并播放其中的视频文件 |
 | **FTP** | 挂载 FTP 服务器，浏览并播放其中的视频文件 |
@@ -209,9 +207,9 @@ docker compose logs -f
 
 启动后访问：
 
-- 前端：http://localhost
-- 后端 API：http://localhost/api
-- 健康检查：http://localhost/health
+- 前端：http://localhost:4173
+- 后端 API：http://localhost:3333/api
+- 健康检查：http://localhost:3333/health
 
 停止服务：
 
@@ -382,24 +380,12 @@ docker compose up -d --build
 
 解析 BV 号或视频链接，支持 DASH 音视频合并播放、清晰度切换、大会员专享内容。可在管理后台配置 Bilibili 登录凭证以获取大会员清晰度。
 
-### ani-subs 订阅
-
-通过自定义 JSON 订阅源聚合番剧资源。在「权限管理 → 基础设置」中可在线浏览 GitHub 仓库并快速导入订阅源地址。
-
-### Kazumi 规则
-
-导入 Kazumi 插件规则，使用 XPath/CSS 选择器解析第三方站点资源。同样支持从 GitHub 仓库在线导入。
 
 ### 直链与挂载
 
 - **MP4 直链**：直接输入可访问的 MP4 视频地址播放。
 - **WebDAV / FTP / OpenList**：在挂载点管理中保存连接配置，浏览目录并播放视频文件。
 
-### GitHub CDN 加速
-
-内置 CDN 代理 `https://github.cdn.zero251.xyz/`，ani-subs 订阅、Kazumi 规则、一键更新等功能默认通过该 CDN 加速访问。
-
----
 
 ## ZViewerCLI 本地代理
 
@@ -411,7 +397,7 @@ ZViewerCLI 是一个可选的本地代理客户端，用于解决浏览器端无
 
 ### 使用方式
 
-1. 在本地运行 ZViewerCLI（详见 [ZViewerCLI 项目](../ZViewerCLI)）。
+1. 在本地运行 ZViewerCLI（详见 [ZViewerCLI 项目](https://github.com/Zero-wyc/ZViewerCLI)）。
 2. 在房间中开启「CLI 本地高画质代理」开关。
 3. 播放器将自动通过本地 CLI 加载视频。
 
@@ -451,7 +437,7 @@ Docker 部署时 SQLite 位于 `/app/config/dev.sqlite`，通过 `backend-data` 
 
 ```bash
 docker volume ls
-docker inspect zcontrol_backend-data
+docker inspect zviewer_backend-data
 ```
 
 ### Bilibili 解析失败

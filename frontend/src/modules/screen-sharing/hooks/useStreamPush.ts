@@ -16,7 +16,7 @@ export type { StreamStatus, ShareMethod }
  */
 export function useStreamStatus(
   socket: Socket | null,
-  roomId: string,
+  roomId: string
 ): StreamStatus {
   const streamStatus = useRoomStore((state) => state.streamStatus)
   const setStreamStatus = useRoomStore((state) => state.setStreamStatus)
@@ -51,7 +51,7 @@ export function useStreamStatus(
 export function useShareMethod(
   socket: Socket | null,
   roomId: string,
-  isHost: boolean,
+  isHost: boolean
 ) {
   const shareMethod = useRoomStore((state) => state.shareMethod)
   const setShareMethod = useRoomStore((state) => state.setShareMethod)
@@ -80,7 +80,7 @@ export function useShareMethod(
 
   // 切换子模式
   const updateShareMethod = async (
-    method: ShareMethod,
+    method: ShareMethod
   ): Promise<{ success: boolean; message?: string }> => {
     if (!socket || !roomId) {
       return { success: false, message: 'Socket 未连接' }
@@ -105,7 +105,7 @@ export function useShareMethod(
             }
           }
           resolve(response)
-        },
+        }
       )
     })
   }

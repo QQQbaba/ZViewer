@@ -229,7 +229,10 @@ export function CommentPanel({
                               </span>
                             )}
                           </div>
-                          <Text type="secondary" className="text-[9px] leading-none">
+                          <Text
+                            type="secondary"
+                            className="text-[9px] leading-none"
+                          >
                             {formatTime(comment.createdAt)}
                           </Text>
                         </div>
@@ -241,7 +244,9 @@ export function CommentPanel({
                             variant="ghost"
                             size="sm"
                             className="mt-1 h-5 px-1.5 text-[10px]"
-                            icon={<MessageSquareQuote className="h-2.5 w-2.5" />}
+                            icon={
+                              <MessageSquareQuote className="h-2.5 w-2.5" />
+                            }
                             onClick={() => {
                               socket?.emit(
                                 'send-danmaku',

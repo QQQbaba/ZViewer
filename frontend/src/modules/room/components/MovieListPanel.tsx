@@ -157,14 +157,9 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
         }
       } else {
         // CLI 未连接时强制 MP4 降级
-        resolved = await resolveBilibiliWithOptions(
-          movie.url,
-          qn,
-          undefined,
-          {
-            preferMp4: getEffectivePreferMp4(movie.id),
-          }
-        )
+        resolved = await resolveBilibiliWithOptions(movie.url, qn, undefined, {
+          preferMp4: getEffectivePreferMp4(movie.id),
+        })
       }
       await updateMovie(roomId, movie.id, {
         audioUrl: resolved.audioUrl,

@@ -38,18 +38,19 @@ export default defineConfig({
     allowedHosts: true,
     // preview 模式下也需要代理 /api、/socket.io、/live 到后端，
     // 否则前端 API 请求会发送到 preview 端口（如 4173）导致 404。
+    // target 通过环境变量注入，支持一键启动脚本自定义后端 / HTTP-FLV 端口。
     proxy: {
       '/api': {
-        target: 'http://localhost:3333',
+        target: process.env.VITE_API_TARGET || 'http://localhost:3333',
         changeOrigin: true,
       },
       '/socket.io': {
-        target: 'http://localhost:3333',
+        target: process.env.VITE_API_TARGET || 'http://localhost:3333',
         changeOrigin: true,
         ws: true,
       },
       '/live': {
-        target: 'http://localhost:3335',
+        target: process.env.VITE_LIVE_TARGET || 'http://localhost:3335',
         changeOrigin: true,
       },
     },

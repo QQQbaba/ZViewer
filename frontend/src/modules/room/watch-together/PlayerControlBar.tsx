@@ -71,7 +71,9 @@ function DanmakuIcon({ off }: { off?: boolean }) {
   )
 }
 
-function useVideoCurrentTime(videoRef: React.RefObject<HTMLVideoElement | null>) {
+function useVideoCurrentTime(
+  videoRef: React.RefObject<HTMLVideoElement | null>
+) {
   const [currentTime, setCurrentTime] = useState(0)
 
   useEffect(() => {
@@ -109,7 +111,9 @@ function useVideoVolume(videoRef: React.RefObject<HTMLVideoElement | null>) {
   return { volume, muted }
 }
 
-function useVideoPlaybackRate(videoRef: React.RefObject<HTMLVideoElement | null>) {
+function useVideoPlaybackRate(
+  videoRef: React.RefObject<HTMLVideoElement | null>
+) {
   const [rate, setRate] = useState(1)
 
   useEffect(() => {
@@ -160,7 +164,8 @@ function useVideoDuration(
   storeDuration?: number
 ) {
   const [duration, setDuration] = useState(() => {
-    if (Number.isFinite(storeDuration) && (storeDuration as number) > 0) return storeDuration as number
+    if (Number.isFinite(storeDuration) && (storeDuration as number) > 0)
+      return storeDuration as number
     return 0
   })
 
@@ -235,7 +240,8 @@ export function PlayerControlBar({
 }: PlayerControlBarProps) {
   const currentTime = useVideoCurrentTime(videoRef)
   const duration = useVideoDuration(videoRef, watchTogether.duration)
-  const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0
+  const progress =
+    duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0
   const bufferedProgress = useVideoBuffered(videoRef, duration)
   // 服务器端（房主广播的）进度比例，用于显示同步线
   const serverProgress =
@@ -458,7 +464,7 @@ export function PlayerControlBar({
       }
       setRateOpen(false)
     },
-    [isHost, videoRef]
+    [isHost, videoRef, setRateOpen]
   )
 
   const VolumeIcon =
@@ -534,7 +540,9 @@ export function PlayerControlBar({
           <div
             className={cn(
               'absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border-2 border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-on-primary)] shadow transition-opacity duration-150',
-              dragging || isHost ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              dragging || isHost
+                ? 'opacity-100'
+                : 'opacity-0 group-hover:opacity-100'
             )}
             style={{ left: `calc(${progress * 100}% - 5px)` }}
           />
@@ -755,11 +763,7 @@ export function PlayerControlBar({
             label={isFullscreen ? '退出全屏' : '全屏'}
             onClick={onToggleFullscreen}
           >
-            {isFullscreen ? (
-              <Minimize2 size={18} />
-            ) : (
-              <Maximize2 size={18} />
-            )}
+            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
           </ControlButton>
         </div>
       </div>

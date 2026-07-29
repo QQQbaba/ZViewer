@@ -79,9 +79,7 @@ export function KazumiSelector({
       })
       .catch((err) => {
         console.error('[KazumiSelector] load sources error:', err)
-        setSourcesError(
-          err instanceof Error ? err.message : '加载数据源失败'
-        )
+        setSourcesError(err instanceof Error ? err.message : '加载数据源失败')
       })
       .finally(() => setLoadingSources(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅在 open 变化时加载
@@ -131,9 +129,7 @@ export function KazumiSelector({
         errMsg.includes('超时') ||
         errMsg.includes('fetch failed')
       ) {
-        message.warning(
-          `${selectedSourceLabel} 无法访问，请尝试切换其他数据源`
-        )
+        message.warning(`${selectedSourceLabel} 无法访问，请尝试切换其他数据源`)
       } else {
         message.error(errMsg)
       }
@@ -141,7 +137,7 @@ export function KazumiSelector({
     } finally {
       setSearching(false)
     }
-  }, [selectedSource, keyword])
+  }, [selectedSource, keyword, selectedSourceLabel])
 
   const handleToggleExpand = useCallback(
     async (result: KazumiSearchResult) => {
@@ -362,8 +358,7 @@ export function KazumiSelector({
                   <div
                     className="flex h-14 w-14 items-center justify-center rounded-full"
                     style={{
-                      backgroundColor:
-                        'var(--glass-bg)',
+                      backgroundColor: 'var(--glass-bg)',
                     }}
                   >
                     <Loader2
@@ -375,8 +370,7 @@ export function KazumiSelector({
                   <div
                     className="flex h-14 w-14 items-center justify-center rounded-full"
                     style={{
-                      backgroundColor:
-                        'var(--glass-bg)',
+                      backgroundColor: 'var(--glass-bg)',
                     }}
                   >
                     <Tv
@@ -440,8 +434,7 @@ export function KazumiSelector({
                           : 'h-[110px] w-[80px]'
                       )}
                       style={{
-                        backgroundColor:
-                          'var(--glass-bg)',
+                        backgroundColor: 'var(--glass-bg)',
                       }}
                     >
                       <Tv
@@ -506,10 +499,7 @@ export function KazumiSelector({
                   >
                     {episodes.length === 0 && !loadingEpisodes && (
                       <div className="flex h-16 items-center justify-center">
-                        <Paragraph
-                          type="secondary"
-                          className="m-0 text-xs"
-                        >
+                        <Paragraph type="secondary" className="m-0 text-xs">
                           暂无集数信息
                         </Paragraph>
                       </div>
@@ -535,8 +525,7 @@ export function KazumiSelector({
                             <div
                               className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-semibold transition-colors group-hover:text-[var(--md-sys-color-on-primary)]"
                               style={{
-                                backgroundColor:
-                                  'var(--glass-bg)',
+                                backgroundColor: 'var(--glass-bg)',
                                 color: 'var(--md-sys-color-primary)',
                               }}
                             >

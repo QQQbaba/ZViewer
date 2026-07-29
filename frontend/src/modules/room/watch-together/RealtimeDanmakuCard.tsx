@@ -448,9 +448,7 @@ export function RealtimeDanmakuCard() {
               className="h-6 px-1.5 text-[10px]"
               icon={<ListX className="h-3 w-3" />}
               onClick={() => {
-                setManageTab(
-                  blockKeywords.length > 0 ? 'blocked' : 'deleted'
-                )
+                setManageTab(blockKeywords.length > 0 ? 'blocked' : 'deleted')
                 setManageModalOpen(true)
               }}
             >
@@ -612,7 +610,10 @@ export function RealtimeDanmakuCard() {
         className="max-w-lg"
       >
         <div className="flex flex-col gap-3">
-          <div className="flex gap-1 rounded-lg border p-1" style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}>
+          <div
+            className="flex gap-1 rounded-lg border p-1"
+            style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}
+          >
             <button
               type="button"
               className={cn(
@@ -640,7 +641,10 @@ export function RealtimeDanmakuCard() {
           </div>
 
           {manageTab === 'blocked' && (
-            <div className="flex max-h-[50vh] min-h-[120px] flex-col gap-1.5 overflow-y-auto rounded-[var(--md-sys-shape-corner)] border p-2" style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}>
+            <div
+              className="flex max-h-[50vh] min-h-[120px] flex-col gap-1.5 overflow-y-auto rounded-[var(--md-sys-shape-corner)] border p-2"
+              style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}
+            >
               {blockKeywords.length === 0 ? (
                 <div className="flex h-24 items-center justify-center">
                   <Text type="secondary" className="text-xs">
@@ -652,10 +656,18 @@ export function RealtimeDanmakuCard() {
                   <div
                     key={kw}
                     className="flex items-center gap-2 rounded-md border px-2 py-1.5"
-                    style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}
+                    style={{
+                      borderColor: 'var(--md-sys-color-outline-variant)',
+                    }}
                   >
-                    <Ban size={12} className="shrink-0 text-[var(--md-sys-color-primary)]" />
-                    <Text className="min-w-0 flex-1 truncate text-xs" title={kw}>
+                    <Ban
+                      size={12}
+                      className="shrink-0 text-[var(--md-sys-color-primary)]"
+                    />
+                    <Text
+                      className="min-w-0 flex-1 truncate text-xs"
+                      title={kw}
+                    >
                       {kw}
                     </Text>
                     <button
@@ -676,7 +688,10 @@ export function RealtimeDanmakuCard() {
           )}
 
           {manageTab === 'deleted' && (
-            <div className="flex max-h-[50vh] min-h-[120px] flex-col gap-1.5 overflow-y-auto rounded-[var(--md-sys-shape-corner)] border p-2" style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}>
+            <div
+              className="flex max-h-[50vh] min-h-[120px] flex-col gap-1.5 overflow-y-auto rounded-[var(--md-sys-shape-corner)] border p-2"
+              style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}
+            >
               {deletedLog.length === 0 ? (
                 <div className="flex h-24 items-center justify-center">
                   <Text type="secondary" className="text-xs">
@@ -689,10 +704,15 @@ export function RealtimeDanmakuCard() {
                     <div
                       key={`${entry.trackId}-${entry.item.id}`}
                       className="flex items-center gap-2 rounded-md border px-2 py-1.5"
-                      style={{ borderColor: 'var(--md-sys-color-outline-variant)' }}
+                      style={{
+                        borderColor: 'var(--md-sys-color-outline-variant)',
+                      }}
                     >
                       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <Text className="truncate text-xs" title={entry.item.content}>
+                        <Text
+                          className="truncate text-xs"
+                          title={entry.item.content}
+                        >
                           {entry.item.content}
                         </Text>
                         <Text type="secondary" className="text-[10px]">

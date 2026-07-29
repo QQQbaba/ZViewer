@@ -44,10 +44,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Text } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
 import { resolveBilibili } from '@/modules/bilibili/bilibiliApi'
-import type {
-  QualityOption,
-  ResolvedSource,
-} from '@/modules/bilibili/types'
+import type { QualityOption, ResolvedSource } from '@/modules/bilibili/types'
 import {
   browseServerFiles,
   checkFfmpeg,
@@ -76,7 +73,10 @@ export interface BilibiliDownloadModalProps {
   onClose: () => void
 }
 
-export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalProps) {
+export function BilibiliDownloadModal({
+  open,
+  onClose,
+}: BilibiliDownloadModalProps) {
   // 步骤状态
   // - 'input'：输入 URL 阶段
   // - 'resolved'：解析完成，选择清晰度阶段
@@ -113,7 +113,9 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
   const [ffmpegInstallPercent, setFfmpegInstallPercent] = useState(0)
 
   // 下载状态
-  const [stage, setStage] = useState<'parsing' | 'downloading' | 'merging' | null>(null)
+  const [stage, setStage] = useState<
+    'parsing' | 'downloading' | 'merging' | null
+  >(null)
   const [stagePhase, setStagePhase] = useState<'video' | 'audio'>('video')
   const [stageMessage, setStageMessage] = useState('')
   const [percent, setPercent] = useState(0)
@@ -135,12 +137,16 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
 
   useEffect(() => {
     if (open) {
+      // 弹窗打开/关闭时同步动画状态，这是受控弹窗的标准入场/退场模式。
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setVisible(true)
+
       setExiting(false)
     } else if (visible) {
       setExiting(true)
       const t = setTimeout(() => {
         setVisible(false)
+
         setExiting(false)
       }, POPUP_DURATION)
       return () => clearTimeout(t)
@@ -179,7 +185,10 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
 
   useEffect(() => {
     if (visible) {
+      // 弹窗可见时初始化数据：标准的数据获取模式。
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (roots.length === 0) void loadRoots()
+
       if (!ffmpegStatus && !ffmpegChecking) void refreshFfmpegStatus()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -234,7 +243,13 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
 
   // 完全关闭
   const handleClose = () => {
-    if (stage === 'parsing' || stage === 'downloading' || stage === 'merging' || ffmpegInstalling) return
+    if (
+      stage === 'parsing' ||
+      stage === 'downloading' ||
+      stage === 'merging' ||
+      ffmpegInstalling
+    )
+      return
     resetToInput()
     setUrl('')
     setDirPickerOpen(false)
@@ -264,12 +279,12 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
       setSelectedPage(result.currentPage ?? 1)
       // 默认选中最高可用清晰度（优先 1080P，无则取列表第一个）
       const accept = result.acceptQuality ?? []
-      const preferred =
-        accept.find((q) => q.id === MP4_MAX_QN) ?? accept[0] ?? { id: MP4_MAX_QN, label: '1080P' }
+      const preferred = accept.find((q) => q.id === MP4_MAX_QN) ??
+        accept[0] ?? { id: MP4_MAX_QN, label: '1080P' }
       // 如果默认选中的是高画质但 FFmpeg 不可用，回退到 1080P
       const fallback =
         preferred.id > MP4_MAX_QN && !canUseDash
-          ? accept.find((q) => q.id <= MP4_MAX_QN) ?? preferred
+          ? (accept.find((q) => q.id <= MP4_MAX_QN) ?? preferred)
           : preferred
       setSelectedQn(fallback.id)
       setStep('resolved')
@@ -366,7 +381,8 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
   const formatSize = (size: number): string => {
     if (size < 1024) return `${size} B`
     if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-    if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
+    if (size < 1024 * 1024 * 1024)
+      return `${(size / 1024 / 1024).toFixed(1)} MB`
     return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`
   }
 
@@ -375,7 +391,8 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
     const h = Math.floor(seconds / 3600)
     const m = Math.floor((seconds % 3600) / 60)
     const s = Math.floor(seconds % 60)
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    if (h > 0)
+      return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
     return `${m}:${String(s).padStart(2, '0')}`
   }
 
@@ -392,7 +409,9 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
     >
       {/* 轻量遮罩 */}
       <div
-        className={exiting ? 'zen-modal-backdrop-exit' : 'zen-modal-backdrop-enter'}
+        className={
+          exiting ? 'zen-modal-backdrop-exit' : 'zen-modal-backdrop-enter'
+        }
         style={{
           position: 'absolute',
           inset: 0,
@@ -473,7 +492,13 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
                   <Button
                     variant="primary"
                     size="sm"
-                    icon={parsing ? <Spinner size={14} /> : <Search className="h-3.5 w-3.5" />}
+                    icon={
+                      parsing ? (
+                        <Spinner size={14} />
+                      ) : (
+                        <Search className="h-3.5 w-3.5" />
+                      )
+                    }
                     onClick={() => void handleParse()}
                     disabled={parsing || !url.trim()}
                   >
@@ -691,7 +716,8 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
                   <div
                     className="flex flex-col gap-2 rounded-[var(--md-sys-shape-corner)] p-3"
                     style={{
-                      backgroundColor: 'var(--md-sys-color-surface-container-high)',
+                      backgroundColor:
+                        'var(--md-sys-color-surface-container-high)',
                     }}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -743,7 +769,9 @@ export function BilibiliDownloadModal({ open, onClose }: BilibiliDownloadModalPr
                           <div className="flex items-center justify-between text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
                             <span>{formatSize(received)}</span>
                             <span>
-                              {total > 0 ? `共 ${formatSize(total)}` : '大小未知'}
+                              {total > 0
+                                ? `共 ${formatSize(total)}`
+                                : '大小未知'}
                             </span>
                           </div>
                         )}
@@ -944,7 +972,8 @@ function QualitySelector({
         {list.map((opt) => {
           const active = selectedQn === opt.id
           const requiresDash = opt.id > MP4_MAX_QN
-          const disabledByFfmpeg = requiresDash && !canUseDash && !ffmpegInstalling
+          const disabledByFfmpeg =
+            requiresDash && !canUseDash && !ffmpegInstalling
           const isVipOnly = VIP_ONLY_QNS.includes(opt.id)
           const disabledByVip = isVipOnly && !isVip
           const isDisabled = disabled || disabledByFfmpeg || disabledByVip
@@ -1208,7 +1237,8 @@ function DirBrowseSidePanel({
               <div
                 className="flex h-10 w-10 items-center justify-center rounded-full"
                 style={{
-                  backgroundColor: 'var(--md-sys-color-surface-container-highest)',
+                  backgroundColor:
+                    'var(--md-sys-color-surface-container-highest)',
                 }}
               >
                 <Folder className="h-4 w-4 text-[var(--md-sys-color-on-surface-variant)]" />

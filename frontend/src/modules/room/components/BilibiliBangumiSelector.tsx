@@ -301,8 +301,7 @@ export function BilibiliBangumiSelector({
                           : 'h-[120px] w-[90px]'
                       )}
                       style={{
-                        backgroundColor:
-                          'var(--glass-bg)',
+                        backgroundColor: 'var(--glass-bg)',
                       }}
                     >
                       <Tv

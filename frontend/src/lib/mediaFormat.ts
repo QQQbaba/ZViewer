@@ -27,7 +27,12 @@ export type MediaFormat =
   | 'unknown'
 
 /** 浏览器原生支持的容器格式（可直接设置 video.src） */
-export const BROWSER_NATIVE_FORMATS: MediaFormat[] = ['mp4', 'webm', 'mov', 'mkv']
+export const BROWSER_NATIVE_FORMATS: MediaFormat[] = [
+  'mp4',
+  'webm',
+  'mov',
+  'mkv',
+]
 
 /** 通过 MSE / 第三方库可播放的格式 */
 export const MSE_SUPPORTED_FORMATS: MediaFormat[] = ['dash', 'flv', 'hls']
