@@ -2,11 +2,12 @@
  * 推流模式（OBS RTMP + HTTP-FLV）API 层
  */
 
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch, API_URL, FLV_BASE_URL, RTMP_PORT } from '@/lib/api'
 
 /**
  * 构建拉流地址。
- * 优先使用 VITE_FLV_BASE_URL 环境变量，否则按当前页面协议自动选择：
+ * 使用 FLV_BASE_URL（支持用户自定义或环境变量 VITE_FLV_BASE_URL），
+ * 默认按当前页面协议推断：
  * - HTTPS 页面默认使用相对路径 `/live`，假设生产环境通过 Nginx/Caddy 等反向代理
  *   将 `/live` 映射到 Node Media Server 的 HTTP-FLV 端口（默认 3335）。
  * - HTTP 页面默认直连 `http://host:3335`，用于本地开发。
@@ -17,23 +18,17 @@ import { apiFetch, API_URL } from '@/lib/api'
  * 观众端需从 roomStore 或后端广播中获取 streamKey。
  */
 export function buildFlvUrl(streamKey: string): string {
-  const base =
-    import.meta.env.VITE_FLV_BASE_URL ||
-    (window.location.protocol === 'https:'
-      ? ''
-      : `http://${window.location.hostname}:3335`)
-  return `${base}/live/${streamKey}.flv`
+  return `${FLV_BASE_URL}/live/${streamKey}.flv`
 }
 
 /**
  * 构建推流地址（仅用于显示）。
- * 端口来自 VITE_RTMP_PORT 环境变量或默认 3334。
+ * 端口来自 RTMP_PORT（支持用户自定义或环境变量 VITE_RTMP_PORT，默认 3334）。
  * 主机名来自 window.location.hostname。
  */
 export function getRtmpPushUrl(): string {
-  const rtmpPort = import.meta.env.VITE_RTMP_PORT || '3334'
   const host = window.location.hostname
-  return `rtmp://${host}:${rtmpPort}/live`
+  return `rtmp://${host}:${RTMP_PORT}/live`
 }
 
 /**

@@ -54,9 +54,6 @@ interface RoomItem {
   createdAt: string
 }
 
-const rawApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-void rawApiUrl
-
 export default function RoomsListPage() {
   const navigate = useNavigate()
   const { isAuthenticated, user } = useAuthStore()

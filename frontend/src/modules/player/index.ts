@@ -44,7 +44,6 @@ export {
   isBilibiliMediaUrl,
   buildProxyUrl,
   resolveProxyUrl,
-  needsProxy,
   isLocalUrl,
   isRelativeUrl,
 } from './services/url-proxy'

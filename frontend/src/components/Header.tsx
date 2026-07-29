@@ -15,8 +15,47 @@ import {
   ChevronDown,
   Image,
   Sparkles,
+  Download,
+  Server,
 } from 'lucide-react'
+// lucide-react 没有导出 Github，使用自定义 SVG
+const GithubIcon = ({ className }: { className?: string }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+    <path d="M9 18c-4.51 2-5-2-7-2" />
+  </svg>
+)
 import { useAuthStore } from '@/store/authStore'
+import {
+  apiFetch,
+  getCustomApiUrl,
+  setCustomApiUrl,
+  getCustomSocketUrl,
+  setCustomSocketUrl,
+  getCustomFlvBaseUrl,
+  setCustomFlvBaseUrl,
+  getCustomRtmpPort,
+  setCustomRtmpPort,
+  API_URL,
+  SOCKET_URL,
+  FLV_BASE_URL,
+  RTMP_PORT,
+} from '@/lib/api'
+import { Modal } from '@/components/ui/Modal'
+import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
+import { message } from '@/components/ui/message'
 import {
   useThemeStore,
   RADIUS_PRESETS,
@@ -26,8 +65,6 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Slider } from '@/components/ui/Slider'
 import { Switch } from '@/components/ui/Switch'
 import { BackgroundSettingsPanel } from '@/components/BackgroundSettingsPanel'
-import { message } from '@/components/ui/message'
-import { apiFetch, API_URL } from '@/lib/api'
 import { PRESET_SEEDS } from '@/lib/themes'
 import { cn } from '@/lib/utils'
 
@@ -52,6 +89,15 @@ export function Header() {
   const [userOpen, setUserOpen] = useState(false)
   const [userClosing, setUserClosing] = useState(false)
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false)
+  const [serverModalOpen, setServerModalOpen] = useState(false)
+  const [customApiUrl, setCustomApiUrlState] = useState(getCustomApiUrl())
+  const [customSocketUrl, setCustomSocketUrlState] = useState(
+    getCustomSocketUrl()
+  )
+  const [customFlvBaseUrl, setCustomFlvBaseUrlState] = useState(
+    getCustomFlvBaseUrl()
+  )
+  const [customRtmpPort, setCustomRtmpPortState] = useState(getCustomRtmpPort())
   // 按钮与菜单分别 ref：菜单通过 createPortal 渲染到 document.body，
   // 脱离 Header(fixed + backdrop-filter) 的合成层，使二级菜单的 backdrop-filter 能看到真实页面内容。
   const themeBtnRef = useRef<HTMLButtonElement>(null)
@@ -228,6 +274,65 @@ export function Header() {
         </Link>
 
         <div className="flex items-center gap-1.5">
+          <a
+            href="https://github.com/Zero-wyc/ZViewer"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 rounded-[var(--md-sys-shape-corner)] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]"
+            style={{
+              border: '1px solid var(--md-sys-color-outline)',
+            }}
+            title="GitHub 仓库"
+          >
+            <GithubIcon className="w-4 h-4" />
+          </a>
+          <button
+            type="button"
+            onClick={() => {
+              const ua = navigator.userAgent.toLowerCase()
+              const isWindows = /windows nt|win32|win64/.test(ua)
+              const isMac = /macintosh|mac os x/.test(ua)
+              const isLinux = /linux/.test(ua)
+              if (isWindows) {
+                const a = document.createElement('a')
+                a.href = '/zviewer-cli-windows-amd64.exe'
+                a.download = 'zviewer-cli-windows-amd64.exe'
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+              } else if (isMac || isLinux) {
+                window.open(
+                  'https://github.com/Zero-wyc/ZViewerCLI',
+                  '_blank',
+                  'noopener,noreferrer'
+                )
+              } else {
+                message.info(
+                  '请前往 https://github.com/Zero-wyc/ZViewerCLI 下载对应版本 CLI'
+                )
+              }
+            }}
+            className="p-2 rounded-[var(--md-sys-shape-corner)] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]"
+            style={{
+              border: '1px solid var(--md-sys-color-outline)',
+            }}
+            title="下载 CLI 高画质代理"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setServerModalOpen(true)}
+            className="p-2 rounded-[var(--md-sys-shape-corner)] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]"
+            style={{
+              border: '1px solid var(--md-sys-color-outline)',
+            }}
+            title="自定义后端地址"
+          >
+            <Server className="w-4 h-4" />
+          </button>
+
           <div className="relative">
             <button
               ref={themeBtnRef}
@@ -261,26 +366,21 @@ export function Header() {
                 <div
                   ref={themeMenuRef}
                   className={cn(
-                    'fixed',
+                    'glass fixed flex overflow-hidden rounded-[var(--md-sys-shape-corner)] shadow-lg',
                     themeClosing ? 'zen-dropdown-exit' : 'zen-dropdown-enter'
                   )}
                   style={{
                     top: `${themeMenuPos.top}px`,
                     right: `${themeMenuPos.right}px`,
                     zIndex: 50,
+                    height: 'min(520px, calc(100vh - 32px))',
+                    // 容器宽度由子元素决定，不单独动画 width，避免与侧面板的 width 动画不同步导致抖动
+                    backdropFilter: 'blur(var(--glass-blur-strong))',
+                    WebkitBackdropFilter: 'blur(var(--glass-blur-strong))',
+                    boxShadow:
+                      '0 8px 24px -8px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent)',
                   }}
                 >
-                  <div
-                    className="glass flex overflow-hidden rounded-[var(--md-sys-shape-corner)] shadow-lg"
-                    style={{
-                      height: 'min(520px, calc(100vh - 32px))',
-                      // 容器宽度由子元素决定，不单独动画 width，避免与侧面板的 width 动画不同步导致抖动
-                      backdropFilter: 'blur(var(--glass-blur-strong))',
-                      WebkitBackdropFilter: 'blur(var(--glass-blur-strong))',
-                      boxShadow:
-                        '0 8px 24px -8px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent)',
-                    }}
-                  >
                   <BackgroundSettingsPanel
                     open={backgroundModalOpen}
                     onClose={() => setBackgroundModalOpen(false)}
@@ -453,6 +553,7 @@ export function Header() {
                       step={1}
                       valueFormatter={(v) => `${v}%`}
                       onChange={(v) => setGlassStrength(v / 100)}
+                      disabled={reducedMotion}
                     />
                     <Slider
                       label="卡片模糊度"
@@ -462,7 +563,13 @@ export function Header() {
                       step={1}
                       valueFormatter={(v) => `${v}px`}
                       onChange={(v) => setGlassBlur(v)}
+                      disabled={reducedMotion}
                     />
+                    {reducedMotion && (
+                      <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                        精简动画已锁定玻璃效果
+                      </p>
+                    )}
                   </div>
 
                   {/* 精简动画开关 */}
@@ -512,7 +619,7 @@ export function Header() {
                     <Image className="w-4 h-4 text-[var(--md-sys-color-primary)]" />
                     <span className="flex-1 text-left">自定义背景</span>
                   </button>
-                  </div>
+
                   </div>
                 </div>,
                 document.body
@@ -697,6 +804,95 @@ export function Header() {
 
       {/* 顶部占位，避免内容被 fixed header 遮挡 */}
       <div style={{ height: '64px' }} />
+
+      <Modal
+        open={serverModalOpen}
+        onClose={() => setServerModalOpen(false)}
+        title="自定义后端地址"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setServerModalOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setCustomApiUrl(customApiUrl)
+                setCustomSocketUrl(customSocketUrl)
+                setCustomFlvBaseUrl(customFlvBaseUrl)
+                setCustomRtmpPort(customRtmpPort)
+                message.success('后端地址已更新，刷新页面后生效')
+                setServerModalOpen(false)
+              }}
+            >
+              保存
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Input
+            label="REST API 地址"
+            value={customApiUrl}
+            onChange={(e) => setCustomApiUrlState(e.target.value)}
+            placeholder="例如: http://localhost:3000"
+            size="md"
+          />
+          <Input
+            label="WebSocket / 信令地址（留空则跟随 API 地址）"
+            value={customSocketUrl}
+            onChange={(e) => setCustomSocketUrlState(e.target.value)}
+            placeholder="例如: http://localhost:3000"
+            size="md"
+          />
+          <Input
+            label="HTTP-FLV 拉流基础地址（留空则按页面协议自动推断）"
+            value={customFlvBaseUrl}
+            onChange={(e) => setCustomFlvBaseUrlState(e.target.value)}
+            placeholder="例如: http://localhost:3335 或 /live"
+            size="md"
+          />
+          <Input
+            label="RTMP 推流端口（留空则使用默认 3334）"
+            value={customRtmpPort}
+            onChange={(e) => setCustomRtmpPortState(e.target.value)}
+            placeholder="例如: 3334"
+            size="md"
+          />
+          <div className="space-y-1 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+            <p>
+              当前 API 地址:{" "}
+              <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
+                {API_URL}
+              </code>
+            </p>
+            <p>
+              当前 WebSocket 地址:{" "}
+              <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
+                {SOCKET_URL}
+              </code>
+            </p>
+            <p>
+              当前 FLV 基础地址:{" "}
+              <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
+                {FLV_BASE_URL || '(相对路径 /live)'}
+              </code>
+            </p>
+            <p>
+              当前 RTMP 端口:{" "}
+              <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
+                {RTMP_PORT}
+              </code>
+            </p>
+          </div>
+          <div className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
+            提示：留空将使用环境变量或页面默认值，保存后刷新页面生效。
+          </div>
+        </div>
+      </Modal>
     </>
   )
 }

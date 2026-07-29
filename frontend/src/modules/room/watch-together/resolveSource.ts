@@ -195,25 +195,6 @@ export function buildAnimeProxyUrl(
   return `${API_URL}/api/stream/anime/proxy?${params.toString()}`
 }
 
-/**
- * 判断 URL 是否需要走代理：
- * - 携带防盗链 headers（Referer/UA 等）：浏览器无法直接设置，必须代理
- * - 跨域：浏览器 video 元素虽允许跨域播放，但部分 CDN 会拒绝无 CORS 头的请求，
- *   走代理可避免控制台噪音与潜在失败
- */
-export function needsProxy(
-  url: string,
-  headers?: Record<string, string>
-): boolean {
-  if (headers && Object.keys(headers).length > 0) return true
-  try {
-    const target = new URL(url, API_URL)
-    return target.origin !== API_URL
-  } catch {
-    return false
-  }
-}
-
 export interface FollowingBangumi {
   seasonId: number
   title: string

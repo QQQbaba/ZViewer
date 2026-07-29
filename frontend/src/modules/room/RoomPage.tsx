@@ -237,7 +237,12 @@ function RoomPage() {
   }
 
   const voiceChatPanel = (
-    <VoiceChatPanel socket={socket} roomId={roomId} username={username} />
+    <VoiceChatPanel
+      socket={socket}
+      roomId={roomId}
+      username={username}
+      isHost={isHost}
+    />
   )
 
   // 房主：使用 RoomLayout，根据模式渲染对应播放器

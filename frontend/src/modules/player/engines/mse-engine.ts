@@ -15,7 +15,6 @@ import type { PlayerEngine, PlayerSource, EngineAttachResult } from '../types'
 import { resetVideoElement, waitForMetadata } from '../utils'
 import { MsePlayer } from './mse'
 import { createAudioSync } from '../services/audio-sync'
-import { resolveProxyUrl } from '../services/url-proxy'
 
 export const mseEngine: PlayerEngine = {
   type: 'mse',
@@ -29,7 +28,7 @@ export const mseEngine: PlayerEngine = {
     // 无音频 URL 时无法 MSE 合并，直接走 direct
     if (!audioUrl) {
       resetVideoElement(video)
-      video.src = resolveProxyUrl(source.url, source.headers, source.format)
+      video.src = source.url
       video.load()
       await waitForMetadata(video)
       return { cleanup: () => {} }
@@ -62,7 +61,7 @@ export const mseEngine: PlayerEngine = {
       // 非 DASH 格式（如 anime 带独立音频轨）降级为 direct + audio-sync
       console.warn('[mse-engine] MSE 合并失败，降级为音频同步:', err)
       resetVideoElement(video)
-      video.src = resolveProxyUrl(source.url, source.headers, source.format)
+      video.src = source.url
       video.load()
       await waitForMetadata(video)
       const audioCleanup = createAudioSync(video, audioUrl)

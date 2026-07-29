@@ -406,7 +406,6 @@ router.get(
           registrationMode: settings.registrationMode,
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
-          forceMediaProxy: settings.forceMediaProxy,
         },
       });
     } catch (err) {
@@ -424,7 +423,7 @@ router.put(
     res: import('express').Response,
   ): Promise<void> => {
     try {
-      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled, forceMediaProxy } = req.body;
+      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled } = req.body;
 
       if (typeof autoDeleteInactiveRooms !== 'boolean') {
         res.status(400).json({
@@ -476,14 +475,6 @@ router.put(
         });
         return;
       }
-      if (forceMediaProxy !== undefined && typeof forceMediaProxy !== 'boolean') {
-        res.status(400).json({
-          success: false,
-          message: 'forceMediaProxy 必须是布尔值',
-        });
-        return;
-      }
-
       const settingsRepo = AppDataSource.getRepository(SystemSettings);
       const settings = await getSystemSettings();
       settings.autoDeleteInactiveRooms = autoDeleteInactiveRooms;
@@ -503,9 +494,6 @@ router.put(
       if (betaFeaturesEnabled !== undefined) {
         settings.betaFeaturesEnabled = betaFeaturesEnabled;
       }
-      if (forceMediaProxy !== undefined) {
-        settings.forceMediaProxy = forceMediaProxy;
-      }
       await settingsRepo.save(settings);
 
       res.json({
@@ -517,7 +505,6 @@ router.put(
           registrationMode: settings.registrationMode,
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
-          forceMediaProxy: settings.forceMediaProxy,
         },
       });
     } catch (err) {

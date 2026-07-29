@@ -36,9 +36,6 @@ interface AuthForm {
 
 type AuthMode = 'login' | 'register'
 
-const rawApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-void rawApiUrl
-
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()

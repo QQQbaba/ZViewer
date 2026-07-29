@@ -73,10 +73,13 @@ export function ReturnToRoomButton() {
       <button
         onClick={handleReturn}
         className={cn(
-          'glass-strong group flex items-center gap-2.5 rounded-[var(--md-sys-shape-corner)] border border-[var(--glass-border)] px-4 py-2.5 shadow-lg transition-all duration-200',
+          'group flex items-center gap-2.5 rounded-[var(--md-sys-shape-corner)] border border-[var(--glass-border)] px-4 py-2.5 shadow-lg transition-all duration-200',
           'hover:scale-[1.02] hover:shadow-xl active:scale-[0.98]'
         )}
         style={{
+          backgroundColor: 'var(--glass-bg)',
+          backdropFilter: 'blur(var(--glass-blur-strong))',
+          WebkitBackdropFilter: 'blur(var(--glass-blur-strong))',
           boxShadow:
             '0 8px 24px -8px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent)',
         }}

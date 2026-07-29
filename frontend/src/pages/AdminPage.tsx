@@ -72,7 +72,6 @@ interface AdminSettings {
   registrationMode: RegistrationMode
   roomCreationMode: RoomCreationMode
   betaFeaturesEnabled: boolean
-  forceMediaProxy: boolean
   dataSourceConfig?: {
     aniSubsSubscriptions?: string[]
     kazumiRules?: string[]
@@ -85,10 +84,6 @@ interface AdminSettings {
     }>
   }
 }
-
-const rawApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-// 注：API_URL 从 lib/api 重新导出，避免重复定义
-void rawApiUrl
 
 export default function AdminPage() {
   const navigate = useNavigate()
@@ -105,7 +100,6 @@ export default function AdminPage() {
     registrationMode: 'approval',
     roomCreationMode: 'admin-only',
     betaFeaturesEnabled: false,
-    forceMediaProxy: false,
   })
   const [loading, setLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -457,7 +451,6 @@ export default function AdminPage() {
           registrationMode: settings.registrationMode,
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
-          forceMediaProxy: settings.forceMediaProxy,
           dataSourceConfig: settings.dataSourceConfig,
         }),
       })
@@ -1086,30 +1079,6 @@ export default function AdminPage() {
                   />
                   <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
                     关闭时，房间内的 Kazumi 与 AniSubs 番剧添加入口、个人中心的 B站视频下载按钮及其相关设置将被隐藏。
-                  </p>
-                </div>
-
-                <Title level={5} className="mb-4 mt-6">
-                  视频流代理
-                </Title>
-                <div className="mb-6">
-                  <Switch
-                    label="强制视频流走服务端代理（兼容旧方案）"
-                    checked={settings.forceMediaProxy}
-                    onChange={(e) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        forceMediaProxy: e.target.checked,
-                      }))
-                    }
-                  />
-                  <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                    关闭（默认，SYNCTV 风格无需中转）：B站 MP4 直链（platform=html5 接口，
-                    无防盗链）与 webdav / ftp / 用户直链等源直连源站，服务器零流量；
-                    仅 B站 DASH m4s 流（高画质，有防盗链）走服务器代理。
-                  </p>
-                  <p className="mt-1 text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                    开启：所有跨域 URL 都走服务器代理，适用于源站 CORS 严格 / 限流 / 防盗链场景，但服务器承载全部视频流流量。
                   </p>
                 </div>
 

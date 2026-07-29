@@ -19,7 +19,6 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { useRoomStore } from '@/store/roomStore'
-import { Button } from '@/components/ui/Button'
 import {
   useBilibiliParsePreferences,
   setBilibiliParseOptions,
@@ -59,7 +58,6 @@ export function BilibiliParseSettings({
     (state) => state.triggerViewerSourceReload
   )
   const currentMovieId = useRoomStore((state) => state.currentMovieId)
-  // 只订阅需要的字段，避免 watchTogether.currentTime 等高频更新导致整片重渲染
   const watchTogetherFormat = useRoomStore(
     (state) => state.watchTogether.format
   )
@@ -70,8 +68,6 @@ export function BilibiliParseSettings({
     state.movies.find((m) => m.id === movieId)
   )
 
-  // 生效的播放模式：CLI 代理启用后强制走 DASH（高画质由本地 CLI 提供），仅房主可决定；
-  // 若 CLI 未连接则实际解析降级为 MP4。观众侧显示房主当前广播的格式。
   const cliUnavailable = cliEnabled && !cliAgent.available
   const hostEffectivePreferMp4 = cliUnavailable ? true : preferMp4
   const viewerDisplayPreferMp4 =
@@ -81,29 +77,24 @@ export function BilibiliParseSettings({
     ? hostEffectivePreferMp4
     : viewerDisplayPreferMp4
 
-  // 缓冲模式：观众端显示房主当前广播的缓冲状态；房主侧显示本地偏好
   const viewerDisplayBufferMode =
     movieId === currentMovieId ? watchTogetherBufferMode : false
   const displayBufferMode = isHost ? bufferMode : viewerDisplayBufferMode
 
-  // P2P 与 CLI 使用观众/房主各自独立的本地偏好
   const displayP2pEnabled = p2pEnabled
   const displayCliEnabled = cliEnabled
 
-  // P2P 统计信息：仅在 P2P 引擎激活时显示
   const p2pEngineActive = useP2PStatsStore((s) => s.engineActive)
   const totalHTTPDownloaded = useP2PStatsStore((s) => s.totalHTTPDownloaded)
   const totalP2PDownloaded = useP2PStatsStore((s) => s.totalP2PDownloaded)
   const totalP2PUploaded = useP2PStatsStore((s) => s.totalP2PUploaded)
   const p2pDownloadSpeed = useP2PStatsStore((s) => s.p2pDownloadSpeed)
 
-  // 仅当该影片正在播放时才触发重载，避免影响其他影片
   const isCurrentMovie = movieId === currentMovieId
 
   const handlePreferMp4Change = useCallback(
     (next: boolean) => {
       if (!isHost) return
-      // 切换到 MP4 模式时强制关闭缓冲模式与 P2P（仅对 DASH 流生效）
       setBilibiliParseOptions(movieId, {
         preferMp4: next,
         bufferMode: next ? false : undefined,
@@ -119,7 +110,6 @@ export function BilibiliParseSettings({
   const handleBufferModeChange = useCallback(
     (next: boolean) => {
       if (!isHost) return
-      // 开启缓冲模式时关闭 P2P（视频已完整缓存到本地，P2P 无意义）
       setBilibiliParseOptions(movieId, {
         bufferMode: next,
         p2pEnabled: next ? false : undefined,
@@ -134,8 +124,6 @@ export function BilibiliParseSettings({
   const handleP2PChange = useCallback(
     (next: boolean) => {
       if (!isHost) return
-      // P2P 与 CLI 代理互斥：P2P 要求所有客户端使用相同的 videoUrl 作为 channelId，
-      // 而 CLI 代理是各客户端独立的 localhost 地址，无法匹配 peer。
       setBilibiliParseOptions(movieId, {
         p2pEnabled: next,
         cliEnabled: next ? false : undefined,
@@ -149,9 +137,6 @@ export function BilibiliParseSettings({
 
   const handleCliChange = useCallback(
     (next: boolean) => {
-      // CLI 代理与 P2P 互斥；启用 CLI 后强制使用 DASH 模式（本地 CLI 提供高画质），
-      // 关闭 CLI 时恢复启用前保存的 DASH/MP4 模式。
-      // 观众端开启/关闭 CLI 后需要重新 attach 当前源。
       const current = getBilibiliParseOptions(movieId)
       if (next) {
         setBilibiliParseOptions(movieId, {
@@ -170,7 +155,6 @@ export function BilibiliParseSettings({
       }
       if (!isCurrentMovie) return
       if (next && !cliAgent.available) {
-        // CLI 启用但未就绪：标记待重载，等代理上线后由 effect 触发
         setPendingCliReload(true)
         return
       }
@@ -190,8 +174,6 @@ export function BilibiliParseSettings({
     ]
   )
 
-  // CLI 启用后等待代理上线，一旦可用立即触发重载以切换到本地代理。
-  // 10 秒内未上线则自动放弃，避免状态悬挂。
   useEffect(() => {
     if (!pendingCliReload) return
     if (cliAgent.available) {
@@ -222,6 +204,51 @@ export function BilibiliParseSettings({
     window.open(url.toString(), '_blank', 'noopener,noreferrer')
   }, [roomId])
 
+  const renderSegmented = (
+    value: boolean,
+    onChange: (next: boolean) => void,
+    leftLabel: string,
+    rightLabel: string,
+    disabled = false
+  ) => (
+    <div
+      className={cn(
+        'grid grid-cols-2 gap-1 rounded-lg p-0.5',
+        disabled && 'opacity-40'
+      )}
+      style={{
+        backgroundColor: 'var(--md-sys-color-surface-container-high)',
+      }}
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(false)}
+        className={cn(
+          'rounded-md py-1 text-[10px] font-semibold transition-all',
+          !value
+            ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
+            : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+        )}
+      >
+        {leftLabel}
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(true)}
+        className={cn(
+          'rounded-md py-1 text-[10px] font-semibold transition-all',
+          value
+            ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
+            : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+        )}
+      >
+        {rightLabel}
+      </button>
+    </div>
+  )
+
   return (
     <div className="w-full">
       <button
@@ -231,7 +258,7 @@ export function BilibiliParseSettings({
         style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
         aria-expanded={expanded}
       >
-        <span className="flex items-center gap-1">
+        <span className="flex items-center gap-1 font-medium">
           <Settings2 className="h-3 w-3" />
           B站解析设置
         </span>
@@ -243,46 +270,30 @@ export function BilibiliParseSettings({
         />
       </button>
       {expanded && (
-        <div className="glass flex flex-col gap-1.5 rounded-[var(--md-sys-shape-corner)] p-1.5">
+        <div
+          className="mt-1 flex flex-col gap-2.5 rounded-[var(--md-sys-shape-corner)] p-2"
+          style={{
+            backgroundColor: 'var(--md-sys-color-surface-container)',
+            border: '1px solid var(--md-sys-color-outline-variant)',
+          }}
+        >
+          {/* 播放模式 */}
           <div>
             <div
-              className="mb-0.5 text-[10px] font-medium uppercase tracking-wide"
+              className="mb-1 text-[10px] font-bold uppercase tracking-wide"
               style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
             >
               播放模式
             </div>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                disabled={!isHost || cliEnabled}
-                onClick={() => handlePreferMp4Change(false)}
-                className={cn(
-                  'rounded-md py-0.5 text-[10px] font-medium transition-all',
-                  (!isHost || cliEnabled) && 'cursor-not-allowed opacity-40',
-                  !displayPreferMp4
-                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
-                    : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                )}
-              >
-                DASH 高清
-              </button>
-              <button
-                type="button"
-                disabled={!isHost || cliEnabled}
-                onClick={() => handlePreferMp4Change(true)}
-                className={cn(
-                  'rounded-md py-0.5 text-[10px] font-medium transition-all',
-                  (!isHost || cliEnabled) && 'cursor-not-allowed opacity-40',
-                  displayPreferMp4
-                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
-                    : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                )}
-              >
-                MP4 流畅
-              </button>
-            </div>
+            {renderSegmented(
+              displayPreferMp4,
+              handlePreferMp4Change,
+              'DASH 高清',
+              'MP4 流畅',
+              !isHost || cliEnabled
+            )}
             <div
-              className="mt-0.5 text-[9px] leading-tight"
+              className="mt-1 text-[10px] leading-snug"
               style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
             >
               {!isHost
@@ -299,53 +310,28 @@ export function BilibiliParseSettings({
             </div>
           </div>
 
-          {/* 缓冲模式开关：仅 DASH 模式可用，房主开启后所有用户先缓存到本地再播放 */}
+          {/* 缓冲模式 */}
           <div
             className={cn(
-              'rounded-md p-1.5 transition-opacity',
+              'transition-opacity',
               hostEffectivePreferMp4 && 'pointer-events-none opacity-40'
             )}
           >
             <div
-              className="mb-0.5 text-[10px] font-medium uppercase tracking-wide"
+              className="mb-1 text-[10px] font-bold uppercase tracking-wide"
               style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
             >
               缓冲模式
             </div>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                disabled={!isHost || hostEffectivePreferMp4}
-                onClick={() => handleBufferModeChange(false)}
-                className={cn(
-                  'rounded-md py-0.5 text-[10px] font-medium transition-all',
-                  (!isHost || hostEffectivePreferMp4) &&
-                    'cursor-not-allowed opacity-40',
-                  !displayBufferMode
-                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
-                    : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                )}
-              >
-                关闭
-              </button>
-              <button
-                type="button"
-                disabled={!isHost || hostEffectivePreferMp4}
-                onClick={() => handleBufferModeChange(true)}
-                className={cn(
-                  'rounded-md py-0.5 text-[10px] font-medium transition-all',
-                  (!isHost || hostEffectivePreferMp4) &&
-                    'cursor-not-allowed opacity-40',
-                  displayBufferMode
-                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
-                    : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                )}
-              >
-                开启
-              </button>
-            </div>
+            {renderSegmented(
+              displayBufferMode,
+              handleBufferModeChange,
+              '关闭',
+              '开启',
+              !isHost || hostEffectivePreferMp4
+            )}
             <div
-              className="mt-0.5 text-[9px] leading-tight"
+              className="mt-1 text-[10px] leading-snug"
               style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
             >
               {!isHost
@@ -358,12 +344,10 @@ export function BilibiliParseSettings({
             </div>
           </div>
 
-          {/* P2P 传输开关：仅 DASH 流模式可用，与缓冲模式 / CLI 代理互斥。
-              启用后通过 SwarmCloud 在房间内观众间共享 m4s 分片，减少服务器代理流量。
-              各客户端独立启用，无需房主协调。 */}
+          {/* P2P 传输 */}
           <div
             className={cn(
-              'rounded-md p-1.5 transition-opacity',
+              'transition-opacity',
               (!isHost ||
                 hostEffectivePreferMp4 ||
                 displayBufferMode ||
@@ -372,51 +356,23 @@ export function BilibiliParseSettings({
             )}
           >
             <div
-              className="mb-0.5 text-[10px] font-medium uppercase tracking-wide"
+              className="mb-1 text-[10px] font-bold uppercase tracking-wide"
               style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
             >
               P2P 传输
             </div>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                disabled={
-                  !isHost ||
-                  hostEffectivePreferMp4 ||
-                  displayBufferMode ||
-                  displayCliEnabled
-                }
-                onClick={() => handleP2PChange(false)}
-                className={cn(
-                  'rounded-md py-0.5 text-[10px] font-medium transition-all',
-                  !displayP2pEnabled
-                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
-                    : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                )}
-              >
-                关闭
-              </button>
-              <button
-                type="button"
-                disabled={
-                  !isHost ||
-                  hostEffectivePreferMp4 ||
-                  displayBufferMode ||
-                  displayCliEnabled
-                }
-                onClick={() => handleP2PChange(true)}
-                className={cn(
-                  'rounded-md py-0.5 text-[10px] font-medium transition-all',
-                  displayP2pEnabled
-                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
-                    : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                )}
-              >
-                开启
-              </button>
-            </div>
+            {renderSegmented(
+              displayP2pEnabled,
+              handleP2PChange,
+              '关闭',
+              '开启',
+              !isHost ||
+                hostEffectivePreferMp4 ||
+                displayBufferMode ||
+                displayCliEnabled
+            )}
             <div
-              className="mt-0.5 text-[9px] leading-tight"
+              className="mt-1 text-[10px] leading-snug"
               style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
             >
               {!isHost
@@ -432,11 +388,9 @@ export function BilibiliParseSettings({
                         : '所有流量走服务器代理'}
             </div>
 
-            {/* P2P 实时统计信息：仅在 P2P 引擎激活时显示。
-                字段单位 KB / KB/s，由 DashPlayer 通过 stats 回调写入 store。 */}
             {displayP2pEnabled && p2pEngineActive && (
               <div
-                className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-0.5 rounded-md p-1.5 text-[9px]"
+                className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 rounded-lg p-1.5 text-[10px]"
                 style={{
                   backgroundColor: 'var(--md-sys-color-surface-container-high)',
                 }}
@@ -447,7 +401,7 @@ export function BilibiliParseSettings({
                   >
                     ↓HTTP
                   </span>
-                  <span className="font-mono font-medium">
+                  <span className="font-mono font-semibold">
                     {formatKBytes(totalHTTPDownloaded)}
                   </span>
                 </div>
@@ -457,7 +411,7 @@ export function BilibiliParseSettings({
                   >
                     ↓P2P
                   </span>
-                  <span className="font-mono font-medium">
+                  <span className="font-mono font-semibold">
                     {formatKBytes(totalP2PDownloaded)}
                   </span>
                 </div>
@@ -467,7 +421,7 @@ export function BilibiliParseSettings({
                   >
                     ↑P2P
                   </span>
-                  <span className="font-mono font-medium">
+                  <span className="font-mono font-semibold">
                     {formatKBytes(totalP2PUploaded)}
                   </span>
                 </div>
@@ -477,7 +431,7 @@ export function BilibiliParseSettings({
                   >
                     速度
                   </span>
-                  <span className="font-mono font-medium">
+                  <span className="font-mono font-semibold">
                     {formatKBytes(p2pDownloadSpeed)}/s
                   </span>
                 </div>
@@ -485,39 +439,38 @@ export function BilibiliParseSettings({
             )}
           </div>
 
-          {/* CLI 本地高画质代理：手动开关，与 P2P 互斥，需要用户本地启动 zcontrol-cli */}
+          {/* CLI 本地高画质代理 */}
           <div
             className={cn(
-              'rounded-[var(--md-sys-shape-corner)] p-2 transition-opacity',
+              'rounded-[var(--md-sys-shape-corner)] p-1.5 transition-opacity',
               displayP2pEnabled && 'pointer-events-none opacity-40'
             )}
             style={{
               backgroundColor: 'var(--md-sys-color-surface-container-high)',
             }}
           >
-            {/* 头部：渐变图标容器 + 标题 + 大写副标题 + 状态指示 */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <div
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
                 style={{
                   background:
                     'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-tertiary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-secondary) 18%, transparent))',
                 }}
               >
                 <MonitorSmartphone
-                  className="h-3.5 w-3.5"
+                  className="h-3 w-3"
                   style={{ color: 'var(--md-sys-color-tertiary)' }}
                 />
               </div>
               <div className="flex min-w-0 flex-1 flex-col">
                 <span
-                  className="text-xs font-medium leading-tight"
+                  className="text-[10px] font-bold leading-tight"
                   style={{ color: 'var(--md-sys-color-on-surface)' }}
                 >
                   CLI 高画质代理
                 </span>
                 <span
-                  className="text-[9px] uppercase tracking-wide"
+                  className="text-[8px] font-medium uppercase tracking-wide"
                   style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
                 >
                   LOCAL PROXY
@@ -525,7 +478,7 @@ export function BilibiliParseSettings({
               </div>
               <div className="flex items-center gap-1">
                 <span
-                  className="inline-block h-1.5 w-1.5 rounded-full"
+                  className="inline-block h-1 w-1 rounded-full"
                   style={{
                     backgroundColor: cliAgent.available
                       ? 'var(--md-sys-color-tertiary)'
@@ -533,12 +486,12 @@ export function BilibiliParseSettings({
                         ? 'var(--md-sys-color-error)'
                         : 'var(--md-sys-color-outline)',
                     boxShadow: cliAgent.available
-                      ? '0 0 6px var(--md-sys-color-tertiary)'
+                      ? '0 0 4px var(--md-sys-color-tertiary)'
                       : 'none',
                   }}
                 />
                 <span
-                  className="text-[9px]"
+                  className="text-[9px] font-medium"
                   style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
                 >
                   {cliAgent.available
@@ -550,32 +503,40 @@ export function BilibiliParseSettings({
               </div>
             </div>
 
-            {/* 开关：使用项目统一 Button 组件 */}
-            <div className="mt-2 grid grid-cols-2 gap-1.5">
-              <Button
-                variant={!displayCliEnabled ? 'primary' : 'secondary'}
-                size="sm"
+            <div className="mt-1.5 grid grid-cols-2 gap-1">
+              <button
+                type="button"
                 disabled={displayP2pEnabled}
                 onClick={() => handleCliChange(false)}
-                block
+                className={cn(
+                  'rounded-md py-1 text-[10px] font-semibold transition-all',
+                  displayP2pEnabled && 'cursor-not-allowed opacity-40',
+                  !displayCliEnabled
+                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
+                    : 'bg-[var(--md-sys-color-surface-container)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                )}
               >
                 关闭
-              </Button>
-              <Button
-                variant={displayCliEnabled ? 'primary' : 'secondary'}
-                size="sm"
+              </button>
+              <button
+                type="button"
                 disabled={displayP2pEnabled}
                 onClick={() => handleCliChange(true)}
-                block
+                className={cn(
+                  'rounded-md py-1 text-[10px] font-semibold transition-all',
+                  displayP2pEnabled && 'cursor-not-allowed opacity-40',
+                  displayCliEnabled
+                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
+                    : 'bg-[var(--md-sys-color-surface-container)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                )}
               >
                 启用
-              </Button>
+              </button>
             </div>
 
-            {/* 状态说明 */}
             <div
               className={cn(
-                'mt-1.5 text-[9px] leading-tight',
+                'mt-1 text-[9px] leading-snug',
                 cliUnavailable && 'text-[var(--md-sys-color-error)]'
               )}
               style={
@@ -593,17 +554,17 @@ export function BilibiliParseSettings({
                   : '使用本地 zcontrol-cli 获取大会员等高画质'}
             </div>
 
-            {/* 配置入口 */}
-            <Button
-              variant="secondary"
-              size="sm"
-              block
-              icon={<ExternalLink className="h-3.5 w-3.5" />}
+            <button
+              type="button"
               onClick={handleOpenCliSetup}
-              className="mt-2"
+              className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-md bg-[var(--md-sys-color-surface-container)] px-2 py-1 text-[10px] font-semibold text-[var(--md-sys-color-on-surface-variant)] transition-all hover:bg-[var(--md-sys-color-surface-container-highest)]"
+              style={{
+                border: '1px solid var(--md-sys-color-outline)',
+              }}
             >
+              <ExternalLink className="h-3 w-3" />
               打开 CLI 配置页
-            </Button>
+            </button>
           </div>
         </div>
       )}

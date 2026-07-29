@@ -1,7 +1,5 @@
+import { API_URL } from '@/lib/api'
 import type { ProxyModule } from './types'
-
-const rawApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-const API_URL = rawApiUrl || window.location.origin
 
 /**
  * 构建代理播放 URL

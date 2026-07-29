@@ -3,6 +3,12 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 /** 每个房间当前处于语音聊天中的 socket id 集合 */
 const voiceMembers = new Map<string, Set<string>>();
 
+/** 每个房间的语音码率（kbps），由房主设置 */
+const voiceBitrates = new Map<string, number>();
+
+/** 默认语音码率（kbps） */
+const DEFAULT_VOICE_BITRATE = 32;
+
 /**
  * 校验 socket 是否已加入指定房间。
  */
@@ -46,6 +52,7 @@ function leaveVoiceChat(io: SocketIOServer, socket: Socket, roomId: string): voi
 
   if (members.size === 0) {
     voiceMembers.delete(roomId);
+    voiceBitrates.delete(roomId);
   }
 }
 
@@ -139,6 +146,7 @@ export function registerSignalingHandlers(io: SocketIOServer): void {
             | {
                 success: true;
                 members: string[];
+                bitrate: number;
               }
             | { success: false; message: string },
         ) => void,
@@ -156,10 +164,13 @@ export function registerSignalingHandlers(io: SocketIOServer): void {
           members = new Set();
           voiceMembers.set(roomId, members);
         }
+        const currentBitrate = voiceBitrates.get(roomId) ?? DEFAULT_VOICE_BITRATE;
+
         if (members.has(socket.id)) {
           return callback?.({
             success: true,
             members: Array.from(members).filter((id) => id !== socket.id),
+            bitrate: currentBitrate,
           });
         }
 
@@ -170,6 +181,7 @@ export function registerSignalingHandlers(io: SocketIOServer): void {
         callback?.({
           success: true,
           members: Array.from(members).filter((id) => id !== socket.id),
+          bitrate: currentBitrate,
         });
       },
     );
@@ -182,6 +194,30 @@ export function registerSignalingHandlers(io: SocketIOServer): void {
         callback?: (response: { success: boolean }) => void,
       ) => {
         leaveVoiceChat(io, socket, payload.roomId);
+        callback?.({ success: true });
+      },
+    );
+
+    // --- 房主设置语音码率 ---
+    socket.on(
+      'voice-set-bitrate',
+      (
+        payload: { roomId: string; bitrate: number },
+        callback?: (response: { success: boolean; message?: string }) => void,
+      ) => {
+        const { roomId, bitrate } = payload;
+        if (!isSocketInRoom(socket, roomId)) {
+          return callback?.({ success: false, message: '不在该房间中' });
+        }
+
+        const validBitrates = [32, 96, 128, 192];
+        if (!validBitrates.includes(bitrate)) {
+          return callback?.({ success: false, message: '不支持该码率' });
+        }
+
+        voiceBitrates.set(roomId, bitrate);
+        socket.to(roomId).emit('voice-bitrate', { bitrate });
+        console.log(`[voice] bitrate set to ${bitrate} kbps in room ${roomId}`);
         callback?.({ success: true });
       },
     );

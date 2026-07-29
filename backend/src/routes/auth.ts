@@ -254,7 +254,6 @@ router.get(
  * - registrationMode：注册模式（登录/注册页展示）
  * - roomCreationMode：房间创建权限模式（HomePage 据此决定是否显示「开始共享」按钮）
  * - betaFeaturesEnabled：Beta 功能开关
- * - forceMediaProxy：强制视频流走服务端代理（前端 url-proxy 据此决定代理策略）
  *
  * 管理员级完整设置走 GET /api/admin/settings。
  */
@@ -272,7 +271,6 @@ router.get(
           registrationMode: settings.registrationMode,
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
-          forceMediaProxy: settings.forceMediaProxy,
         },
       });
     } catch (err) {
