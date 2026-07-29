@@ -1,8 +1,8 @@
 {
-  "name": "zcontrol",
+  "name": "zviewer",
   "version": "1.0.0",
   "private": true,
-  "description": "Browser-based remote control platform with WebRTC screen sharing.",
+  "description": "ZViewer —— 基于浏览器的在线观影与屏幕共享平台。",
   "workspaces": [
     "frontend",
     "backend"

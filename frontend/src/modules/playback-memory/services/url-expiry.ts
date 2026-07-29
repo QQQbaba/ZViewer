@@ -63,10 +63,7 @@ export function isVideoErrorFromExpiry(
 ): boolean {
   if (!error) return false
   if (error.code !== MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) return false
-  if (
-    video &&
-    video.networkState !== HTMLMediaElement.NETWORK_NO_SOURCE
-  ) {
+  if (video && video.networkState !== HTMLMediaElement.NETWORK_NO_SOURCE) {
     return false
   }
   return true
@@ -85,7 +82,7 @@ export function isVideoErrorFromExpiry(
 export function isVideoSourceExpired(
   url: string,
   videoError?: HTMLMediaElement['error'] | null,
-  video?: HTMLVideoElement | null,
+  video?: HTMLVideoElement | null
 ): boolean {
   // 优先检查 URL deadline
   if (isBilibiliUrlExpired(url)) return true

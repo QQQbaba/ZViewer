@@ -3,7 +3,7 @@
 
 <#
 .SYNOPSIS
-  ZControl 一键启动 / 生产服务统一管理脚本
+  ZViewer 一键启动 / 生产服务统一管理脚本
 .DESCRIPTION
   一键启动：自动检测并安装依赖（npm install）、自动构建缺失产物（npm run build）、启动服务。
   无需提前执行 npm install 即可直接运行本脚本。
@@ -235,10 +235,14 @@ function Install-ProjectDependencies {
         # 优先 npm ci（要求 package-lock.json，可重现依赖树，更快更稳定）
         # 失败则回退到 npm install（兼容 lock 文件缺失或损坏的情况）
         # 用 --no-audit --no-fund 提速；--prefer-offline 减少网络
-        npm ci --no-audit --no-fund --prefer-offline
+        # 必须包含 devDependencies（typescript / vite 等），否则构建报 code 127。
+        # 同时显式移除 NODE_ENV=production，避免 npm 跳过 devDependencies。
+        $env:NPM_CONFIG_INCLUDE = 'dev'
+        $env:NODE_ENV = $null
+        npm ci --no-audit --no-fund --prefer-offline --include=dev
         if ($LASTEXITCODE -ne 0) {
             Write-Host "  npm ci 失败，回退到 npm install ..." -ForegroundColor Yellow
-            npm install --no-audit --no-fund
+            npm install --no-audit --no-fund --include=dev
             if ($LASTEXITCODE -ne 0) {
                 Write-Host ""
                 Write-Host "  ============================================" -ForegroundColor Red
@@ -648,7 +652,7 @@ function Test-ServiceRunning {
 }
 
 function Invoke-Start {
-    Write-Title "ZControl 生产服务启动"
+    Write-Title "ZViewer 生产服务启动"
 
     # 端口已在主入口统一解析（命令行参数 > 配置文件 > 默认值）
     Write-Host "  后端端口：$Port"
@@ -723,6 +727,13 @@ function Invoke-Start {
     # Node.js 在大多数平台上 '::' 会同时接受 IPv4-mapped 连接，无需额外配置。
     $env:HOST = "::"
     if ($Database) { $env:DATABASE_URL = $Database }
+
+    # 前端 Vite preview 需要通过代理访问后端 API 与 HTTP-FLV 拉流，
+    # 且必须支持用户自定义端口，因此把实际目标地址注入环境变量。
+    $rtmpPort = if ($env:RTMP_PORT) { [int]$env:RTMP_PORT } else { 3334 }
+    $httpFlvPort = if ($env:HTTP_FLV_PORT) { [int]$env:HTTP_FLV_PORT } else { 3335 }
+    $env:VITE_API_TARGET = "http://localhost:$Port"
+    $env:VITE_LIVE_TARGET = "http://localhost:$httpFlvPort"
 
     # 备份上一轮日志到归档（带时间戳），并清理超过 7 天的历史归档
     Write-Host "  归档上一轮日志 ..."
@@ -818,10 +829,6 @@ function Invoke-Start {
 
     Write-PidsFile -BackendPid $backendPid -FrontendPid $frontendPid -BackendPort $Port -FrontendPortNum $FrontendPort
 
-    # 获取 RTMP / HTTP-FLV 端口（用于端口放行提示）
-    $rtmpPort = if ($env:RTMP_PORT) { [int]$env:RTMP_PORT } else { 3334 }
-    $httpFlvPort = if ($env:HTTP_FLV_PORT) { [int]$env:HTTP_FLV_PORT } else { 3335 }
-
     Write-Title "启动完成"
 
     Write-Host "  可访问地址：" -ForegroundColor Cyan
@@ -852,7 +859,7 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-    Write-Title "ZControl 生产服务停止"
+    Write-Title "ZViewer 生产服务停止"
     $existing = Read-PidsFile
     if ($existing) {
         if ($existing.backend -and $existing.backend.pid) {
@@ -887,7 +894,7 @@ function Invoke-Stop {
 }
 
 function Invoke-Restart {
-    Write-Title "ZControl 生产服务重启"
+    Write-Title "ZViewer 生产服务重启"
     Invoke-Stop
     Start-Sleep -Seconds 1
     # 重启：跳过依赖检查和构建，直接使用已有产物启动，加快重启速度
@@ -901,7 +908,7 @@ function Invoke-Restart {
 }
 
 function Invoke-Status {
-    Write-Title "ZControl 生产服务状态"
+    Write-Title "ZViewer 生产服务状态"
 
     # 端口已在主入口统一解析（命令行参数 > 配置文件 > 默认值）
     $savedPorts = Read-PortsFile  # 仅用于显示配置文件状态
@@ -1004,7 +1011,7 @@ function Invoke-Logs {
     if (-not $LogTarget) { $LogTarget = 'backend' }
     $logFile = if ($LogTarget -eq 'frontend') { $frontendLog } else { $backendLog }
     $errFile = if ($LogTarget -eq 'frontend') { $frontendErrLog } else { $backendErrLog }
-    Write-Title "ZControl 日志 - $LogTarget"
+    Write-Title "ZViewer 日志 - $LogTarget"
     if (-not (Test-Path $logFile) -and -not (Test-Path $errFile)) {
         Write-Host "  日志文件不存在：$logFile" -ForegroundColor Yellow
         Write-Host "  提示：服务可能尚未启动"
@@ -1030,7 +1037,7 @@ function Invoke-Logs {
 }
 
 function Show-Help {
-    Write-Title "ZControl 生产服务管理脚本"
+    Write-Title "ZViewer 生产服务管理脚本"
     Write-Host "用法："
     Write-Host "  .\start-prod.ps1 <command> [options]"
     Write-Host ""
@@ -1091,7 +1098,7 @@ function Invoke-Menu {
     while ($true) {
         Write-Host ""
         Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "  ZControl 生产服务管理" -ForegroundColor Cyan
+        Write-Host "  ZViewer 生产服务管理" -ForegroundColor Cyan
         Write-Host "========================================" -ForegroundColor Cyan
         Write-Host "  1. 启动服务"
         Write-Host "  2. 停止服务"
@@ -1130,7 +1137,7 @@ function Invoke-Menu {
 function Invoke-Port {
     # 交互式端口配置：读取/修改后端、前端端口，持久化到 .prod.ports.json
     # 下次 start 时自动读取（命令行 -Port / -FrontendPort 参数优先级更高）
-    Write-Title "ZControl 端口配置"
+    Write-Title "ZViewer 端口配置"
 
     # 非交互式环境检测
     if ([Console]::IsInputRedirected) {

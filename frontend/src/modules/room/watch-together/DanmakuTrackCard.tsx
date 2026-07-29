@@ -35,7 +35,8 @@ export function DanmakuTrackCard() {
   const toggleTrackHidden = useDanmakuStore((state) => state.toggleTrackHidden)
 
   const [searchOpen, setSearchOpen] = useState(false)
-  const [danmakuSource, setDanmakuSource] = useState<DanmakuSource>('bilibili-video')
+  const [danmakuSource, setDanmakuSource] =
+    useState<DanmakuSource>('bilibili-video')
   const [bvInput, setBvInput] = useState('')
   const [bvLoading, setBvLoading] = useState(false)
   const [modalInitialKeyword, setModalInitialKeyword] = useState<
@@ -152,8 +153,7 @@ export function DanmakuTrackCard() {
             <div
               className="flex h-full min-h-[120px] flex-col items-center justify-center gap-2 rounded-[var(--md-sys-shape-corner)] border py-8"
               style={{
-                backgroundColor:
-                  'var(--glass-bg)',
+                backgroundColor: 'var(--glass-bg)',
                 borderColor: 'var(--md-sys-color-outline-variant)',
               }}
             >

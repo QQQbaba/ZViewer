@@ -69,7 +69,7 @@ export interface FetchBlobsResult {
  * 并向用户展示对应提示。
  */
 export async function fetchBlobsForBufferMode(
-  options: FetchBlobsOptions,
+  options: FetchBlobsOptions
 ): Promise<FetchBlobsResult> {
   const { state, bvid = '', title, onProgress, signal } = options
 
@@ -86,7 +86,7 @@ export async function fetchBlobsForBufferMode(
     console.log(
       `[buffer-mode] 缓冲模式命中缓存: ${cacheKey}, ` +
         `video=${(cached.videoBlob.size / 1024 / 1024).toFixed(1)}MB, ` +
-        `audio=${(cached.audioBlob.size / 1024 / 1024).toFixed(1)}MB`,
+        `audio=${(cached.audioBlob.size / 1024 / 1024).toFixed(1)}MB`
     )
     return {
       videoBlob: cached.videoBlob,
@@ -113,7 +113,7 @@ export async function fetchBlobsForBufferMode(
             title: displayTitle,
           })
         },
-        signal,
+        signal
       )
 
     // 写入 IndexedDB
@@ -134,7 +134,7 @@ export async function fetchBlobsForBufferMode(
     await setCacheEntry(entry)
 
     console.log(
-      `[buffer-mode] 缓冲模式下载完成: ${(totalBytes / 1024 / 1024).toFixed(1)}MB`,
+      `[buffer-mode] 缓冲模式下载完成: ${(totalBytes / 1024 / 1024).toFixed(1)}MB`
     )
     return { videoBlob, audioBlob, cacheKey, fromCache: false }
   } catch (err) {

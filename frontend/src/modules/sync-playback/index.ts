@@ -48,7 +48,10 @@ export type {
   UseHostBroadcastReturn,
 } from './hooks/useHostBroadcast'
 
-export { useViewerStateSync, useViewerHeartbeat } from './hooks/useViewerStateSync'
+export {
+  useViewerStateSync,
+  useViewerHeartbeat,
+} from './hooks/useViewerStateSync'
 export type {
   UseViewerStateSyncOptions,
   UseViewerStateSyncReturn,

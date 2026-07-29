@@ -94,7 +94,7 @@ function createSkippingStream(
   source: ReadableStream<Uint8Array>,
   skipBytes: number,
   maxBytes: number | undefined,
-  signal: AbortSignal,
+  signal: AbortSignal
 ): ReadableStream<Uint8Array> {
   const reader = source.getReader()
   let skipped = 0
@@ -111,7 +111,8 @@ function createSkippingStream(
 
       // 优先输出上次读取遗留的有用数据
       if (pending) {
-        const remaining = maxBytes !== undefined ? maxBytes - emitted : pending.length
+        const remaining =
+          maxBytes !== undefined ? maxBytes - emitted : pending.length
         if (remaining <= 0) {
           controller.close()
           reader.cancel().catch(() => {})
@@ -120,7 +121,8 @@ function createSkippingStream(
         const chunk = pending.subarray(0, Math.min(pending.length, remaining))
         controller.enqueue(chunk)
         emitted += chunk.length
-        pending = chunk.length < pending.length ? pending.subarray(chunk.length) : null
+        pending =
+          chunk.length < pending.length ? pending.subarray(chunk.length) : null
         if (maxBytes !== undefined && emitted >= maxBytes) {
           controller.close()
           reader.cancel().catch(() => {})
@@ -147,7 +149,8 @@ function createSkippingStream(
       }
 
       // 跳过完成，直接输出（受 maxBytes 限制）
-      const remaining = maxBytes !== undefined ? maxBytes - emitted : value.length
+      const remaining =
+        maxBytes !== undefined ? maxBytes - emitted : value.length
       if (remaining <= 0) {
         controller.close()
         reader.cancel().catch(() => {})
@@ -195,7 +198,7 @@ export async function downloadHead(
  */
 function isRangeResponseMaskedAs200(
   response: Response,
-  startByte: number,
+  startByte: number
 ): boolean {
   if (response.status !== 200) return false
   const contentRange = response.headers.get('content-range')
@@ -257,7 +260,7 @@ export async function downloadRange(
       response.body,
       startByte,
       requestedSize,
-      signal,
+      signal
     )
     const buffer = await new Response(limitedStream).arrayBuffer()
     const data = new Uint8Array(buffer)
@@ -320,7 +323,7 @@ export async function downloadStream(
       response.body,
       startByte,
       undefined,
-      signal,
+      signal
     )
     const wrapped = new Response(skippedStream, {
       status: 206,

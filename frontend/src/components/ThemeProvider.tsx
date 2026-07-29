@@ -74,13 +74,25 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       )
     })
     root.style.setProperty('--glass-strength', String(glassStrength))
-    root.style.setProperty('--glass-strong-strength', String(Math.min(0.95, glassStrength + 0.25)))
+    root.style.setProperty(
+      '--glass-strong-strength',
+      String(Math.min(0.95, glassStrength + 0.25))
+    )
 
     // 玻璃模糊统一由主题设置驱动，所有卡片/遮罩直接使用对应变量，避免各组件自行 calc 缩放
     root.style.setProperty('--glass-blur', `${glassBlur}px`)
-    root.style.setProperty('--glass-blur-strong', `${Math.min(40, glassBlur + 4)}px`)
-    root.style.setProperty('--glass-blur-mask', `${Math.max(0, Math.round(glassBlur * 0.4))}px`)
-    root.style.setProperty('--glass-blur-loading', `${Math.max(0, Math.round(glassBlur * 0.2))}px`)
+    root.style.setProperty(
+      '--glass-blur-strong',
+      `${Math.min(40, glassBlur + 4)}px`
+    )
+    root.style.setProperty(
+      '--glass-blur-mask',
+      `${Math.max(0, Math.round(glassBlur * 0.4))}px`
+    )
+    root.style.setProperty(
+      '--glass-blur-loading',
+      `${Math.max(0, Math.round(glassBlur * 0.2))}px`
+    )
 
     // 玻璃背景色跟随主题透明度与 surface 色，供所有 glass 工具类统一使用
     const rgb = colors['--md-sys-color-surface-container-rgb']

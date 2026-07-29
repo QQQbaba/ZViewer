@@ -32,16 +32,13 @@ import { resolveProxyUrl } from './url-proxy'
 /** 下载进度回调签名 */
 export type ProgressCallback = (
   downloadedBytes: number,
-  totalBytes: number,
+  totalBytes: number
 ) => void
 
 export class DownloadError extends Error {
   statusCode?: number
 
-  constructor(
-    message: string,
-    statusCode?: number,
-  ) {
+  constructor(message: string, statusCode?: number) {
     super(message)
     this.name = 'DownloadError'
     this.statusCode = statusCode
@@ -76,7 +73,7 @@ const PROGRESS_THROTTLE_BYTES = 1024 * 1024 // 每下载 1MB 触发一次
 export async function downloadM4sStream(
   originalUrl: string,
   onProgress?: ProgressCallback,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<Blob> {
   // 通过服务器代理下载：代理注入 Referer/Origin 绕过 B站 CDN 防盗链
   // 浏览器无法设置 Referer 头（forbidden header），必须走代理
@@ -90,12 +87,12 @@ export async function downloadM4sStream(
   if (!response.ok) {
     if (response.status === 403 || response.status === 410) {
       throw new UrlExpiredError(
-        `B站 URL 已过期或被拒绝（HTTP ${response.status}），请重新解析`,
+        `B站 URL 已过期或被拒绝（HTTP ${response.status}），请重新解析`
       )
     }
     throw new DownloadError(
       `下载失败: HTTP ${response.status} ${response.statusText}`,
-      response.status,
+      response.status
     )
   }
 
@@ -139,7 +136,7 @@ export async function downloadM4sStream(
       throw new DownloadAbortedError()
     }
     throw new DownloadError(
-      `流式下载失败: ${err instanceof Error ? err.message : String(err)}`,
+      `流式下载失败: ${err instanceof Error ? err.message : String(err)}`
     )
   }
 
@@ -167,7 +164,7 @@ export async function downloadBilibiliDashStreams(
   videoUrl: string,
   audioUrl: string,
   onProgress?: ProgressCallback,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<{
   videoBlob: Blob
   audioBlob: Blob
@@ -183,7 +180,7 @@ export async function downloadBilibiliDashStreams(
   console.log(
     `[bilibili-downloader] 总大小: video=${(videoSize / 1024 / 1024).toFixed(1)}MB, ` +
       `audio=${(audioSize / 1024 / 1024).toFixed(1)}MB, ` +
-      `total=${(totalBytes / 1024 / 1024).toFixed(1)}MB`,
+      `total=${(totalBytes / 1024 / 1024).toFixed(1)}MB`
   )
 
   // 已下载字节数（两个流共享）
@@ -198,19 +195,19 @@ export async function downloadBilibiliDashStreams(
   const [videoResult, audioResult] = await Promise.all([
     downloadM4sStream(
       videoUrl,
-      (d, _t) => {
+      (d) => {
         videoDownloaded = d
         reportProgress()
       },
-      signal,
+      signal
     ),
     downloadM4sStream(
       audioUrl,
-      (d, _t) => {
+      (d) => {
         audioDownloaded = d
         reportProgress()
       },
-      signal,
+      signal
     ),
   ])
 
@@ -228,7 +225,7 @@ export async function downloadBilibiliDashStreams(
  */
 async function queryContentSize(
   url: string,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<number> {
   try {
     const proxyUrl = resolveProxyUrl(url, undefined, 'dash')

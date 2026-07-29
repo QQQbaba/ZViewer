@@ -17,10 +17,7 @@ export function extractBvid(url: string): string | null {
  *
  * 若 targetUrl 本身已是该 CLI 代理地址，则直接返回避免双重包装。
  */
-export function buildCliProxyUrl(
-  proxyUrl: string,
-  targetUrl: string
-): string {
+export function buildCliProxyUrl(proxyUrl: string, targetUrl: string): string {
   const base = proxyUrl.replace(/\/$/, '')
   const proxyPrefix = `${base}/proxy?url=`
   if (targetUrl.startsWith(proxyPrefix)) {

@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { File, Folder, ChevronRight, Plus, CheckSquare2, Square, ListChecks } from 'lucide-react'
+import {
+  File,
+  Folder,
+  ChevronRight,
+  Plus,
+  CheckSquare2,
+  Square,
+  ListChecks,
+} from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
@@ -101,10 +109,16 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
 
   useEffect(() => {
     if (open && mountId !== null) {
+      // 打开新挂载时重置浏览状态，随后触发数据加载：标准初始化模式。
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentPath(undefined)
+
       setEntries([])
+
       setParentEntries([])
+
       setSelectedPaths(new Set())
+
       setMultiSelectMode(false)
       void load()
     }
@@ -129,7 +143,11 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
   const selectedFiles = useMemo(
     () =>
       [...selectedPaths]
-        .map((p) => entries.find((e) => e.path === p) ?? parentEntries.find((e) => e.path === p))
+        .map(
+          (p) =>
+            entries.find((e) => e.path === p) ??
+            parentEntries.find((e) => e.path === p)
+        )
         .filter((e): e is T => !!e && e.type === 'file'),
     [selectedPaths, entries, parentEntries]
   )
@@ -180,7 +198,9 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
               <span
                 className={cn(
                   'shrink-0 rounded-md p-1.5 text-[var(--md-sys-color-primary)] transition-all',
-                  showCheckbox ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                  showCheckbox
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100',
                   isSelected && 'bg-[var(--md-sys-color-primary-container)]'
                 )}
                 onClick={(e) => {
@@ -272,7 +292,9 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
               }}
               disabled={selectedFiles.length === 0}
             >
-              {multiSelectMode ? `添加 (${selectedFiles.length})` : '添加当前文件'}
+              {multiSelectMode
+                ? `添加 (${selectedFiles.length})`
+                : '添加当前文件'}
             </Button>
           </div>
         </div>
@@ -281,8 +303,14 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
       <div className="relative min-h-[320px]">
         {error ? (
           <div className="flex flex-col items-center gap-3 py-8">
-            <Text className="text-base text-[var(--md-sys-color-error)]">{error}</Text>
-            <Button variant="secondary" size="md" onClick={() => void load(currentPath)}>
+            <Text className="text-base text-[var(--md-sys-color-error)]">
+              {error}
+            </Text>
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => void load(currentPath)}
+            >
               重试
             </Button>
           </div>

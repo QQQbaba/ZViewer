@@ -1,9 +1,6 @@
 /** 弹幕源类型 */
 export type DanmakuSource =
-  | 'bilibili-video'
-  | 'bilibili-bangumi'
-  | 'bahamut'
-  | 'dandanplay'
+  'bilibili-video' | 'bilibili-bangumi' | 'bahamut' | 'dandanplay'
 
 /** 弹幕条目（统一格式，所有源共用） */
 export interface DanmakuItem {

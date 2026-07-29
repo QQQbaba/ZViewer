@@ -6,12 +6,8 @@
  */
 import { useEffect, useState } from 'react'
 
-export function useVideoPlayingState(
-  video: HTMLVideoElement | null
-): boolean {
-  const [isPlaying, setIsPlaying] = useState(
-    () => !!video && !video.paused
-  )
+export function useVideoPlayingState(video: HTMLVideoElement | null): boolean {
+  const [isPlaying, setIsPlaying] = useState(() => !!video && !video.paused)
 
   useEffect(() => {
     if (!video) return

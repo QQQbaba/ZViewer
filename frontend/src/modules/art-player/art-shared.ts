@@ -64,11 +64,7 @@ export function installViewerGuards(
   const { $player, $video, $progress } = art.template
   const disposers: (() => void)[] = []
 
-  const on = (
-    el: HTMLElement,
-    type: string,
-    fn: (e: Event) => void
-  ): void => {
+  const on = (el: HTMLElement, type: string, fn: (e: Event) => void): void => {
     el.addEventListener(type, fn, true)
     disposers.push(() => el.removeEventListener(type, fn, true))
   }

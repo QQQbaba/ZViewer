@@ -18,7 +18,12 @@ interface RoomPanelProps {
 export function RoomPanel({ onModeSelected }: RoomPanelProps) {
   const navigate = useNavigate()
   const { socket, connected } = useSocket()
-  const { setMode, setRoomId, setRoomSettings, mode: storeMode } = useRoomStore()
+  const {
+    setMode,
+    setRoomId,
+    setRoomSettings,
+    mode: storeMode,
+  } = useRoomStore()
   // 默认模式从 store 读取，不再从 URL 读取 mode 参数。
   // 模式切换由后端房间状态管理，URL 只保留 /room/:roomId 形式。
   const initialMode: RoomMode = storeMode || 'watch-together'

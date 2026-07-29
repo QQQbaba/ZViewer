@@ -14,14 +14,7 @@ import type { MediaFormat } from '@/lib/mediaFormat'
 
 /** 视频源类型（与 roomStore.Movie.sourceType 对齐） */
 export type SourceType =
-  | 'url'
-  | 'webdav'
-  | 'ftp'
-  | 'openlist'
-  | 'smb'
-  | 'bilibili'
-  | 'anime'
-  | string
+  'url' | 'webdav' | 'ftp' | 'openlist' | 'smb' | 'bilibili' | 'anime' | string
 
 /**
  * 视频格式。

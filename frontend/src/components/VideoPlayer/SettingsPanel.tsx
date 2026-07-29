@@ -183,39 +183,37 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 onChange={(e) => onToggleSubtitles?.(e.target.checked)}
               />
             </div>
-            {subtitleEnabled &&
-              subtitleTracks &&
-              subtitleTracks.length > 0 && (
-                <div className="mt-1">
-                  <div
-                    className="mb-1 text-[11px] font-medium uppercase tracking-wide"
-                    style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-                  >
-                    字幕轨道
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    {subtitleTracks.map((track, i) => {
-                      const active = i === (activeTrackIndex ?? -1)
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => onSelectSubtitleTrack?.(i)}
-                          className={cn(
-                            'flex items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors',
-                            active
-                              ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
-                              : 'text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                          )}
-                        >
-                          <span className="truncate">{track.label}</span>
-                          {active && <Check className="h-3 w-3 shrink-0" />}
-                        </button>
-                      )
-                    })}
-                  </div>
+            {subtitleEnabled && subtitleTracks && subtitleTracks.length > 0 && (
+              <div className="mt-1">
+                <div
+                  className="mb-1 text-[11px] font-medium uppercase tracking-wide"
+                  style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+                >
+                  字幕轨道
                 </div>
-              )}
+                <div className="flex flex-col gap-0.5">
+                  {subtitleTracks.map((track, i) => {
+                    const active = i === (activeTrackIndex ?? -1)
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => onSelectSubtitleTrack?.(i)}
+                        className={cn(
+                          'flex items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                          active
+                            ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                            : 'text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                        )}
+                      >
+                        <span className="truncate">{track.label}</span>
+                        {active && <Check className="h-3 w-3 shrink-0" />}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             {isHost && subtitleEnabled && (
               <>
                 <div
@@ -321,7 +319,6 @@ export function SettingsPanel(props: SettingsPanelProps) {
             onAdvancedToggle={() => setAdvancedOpen((v) => !v)}
           />
         )}
-
       </div>
     </div>
   )

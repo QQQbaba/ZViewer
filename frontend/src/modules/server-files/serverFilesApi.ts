@@ -177,7 +177,9 @@ export async function browseSystemDirs(
   absPath?: string
 ): Promise<SystemDirBrowseResult> {
   const query = absPath ? `?absPath=${encodeURIComponent(absPath)}` : ''
-  const res = await apiFetch(`${API_URL}/api/server-files/browse-system${query}`)
+  const res = await apiFetch(
+    `${API_URL}/api/server-files/browse-system${query}`
+  )
   const data = (await res.json()) as {
     success: boolean
     entries?: { name: string; absPath: string }[]
@@ -263,7 +265,7 @@ export function extractRootKey(path: string | undefined): string {
 /**
  * 替换路径中的根 key（用于切换根时构造新路径）。
  */
-export function withRootKey(rootKey: string, _relPath?: string): string {
+export function withRootKey(rootKey: string): string {
   // 切换根时总是回到该根的根目录
   return `${rootKey}:/`
 }
@@ -302,15 +304,21 @@ export async function downloadBilibiliVideo(
   callbacks?: BilibiliDownloadCallbacks
 ): Promise<BilibiliDownloadedFile> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), BILIBILI_DOWNLOAD_TIMEOUT_MS)
+  const timer = setTimeout(
+    () => controller.abort(),
+    BILIBILI_DOWNLOAD_TIMEOUT_MS
+  )
 
   try {
-    const res = await apiFetch(`${API_URL}/api/server-files/bilibili-download`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-      signal: controller.signal,
-    })
+    const res = await apiFetch(
+      `${API_URL}/api/server-files/bilibili-download`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+        signal: controller.signal,
+      }
+    )
 
     const contentType = res.headers.get('content-type') || ''
     if (!contentType.includes('application/x-ndjson')) {
@@ -363,7 +371,7 @@ export async function downloadBilibiliVideo(
     throw new Error('下载未完成')
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('下载 B站 视频超时，请稍后重试')
+      throw new Error('下载 B站 视频超时，请稍后重试', { cause: err })
     }
     throw err
   } finally {
@@ -457,7 +465,7 @@ export async function installFfmpeg(
     throw new Error('安装未完成')
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('安装 FFmpeg 超时，请稍后重试')
+      throw new Error('安装 FFmpeg 超时，请稍后重试', { cause: err })
     }
     throw err
   } finally {

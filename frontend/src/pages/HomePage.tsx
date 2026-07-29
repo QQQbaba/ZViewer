@@ -65,15 +65,20 @@ function HomePage() {
   const [allowDisconnected, setAllowDisconnected] = useState(false)
   useEffect(() => {
     if (autoLoginStatus !== 'done') {
+      // 重置连接状态标记，与 autoLogin 生命周期同步。
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAllowDisconnected(false)
       return
     }
     // autoLogin 完成后延迟 1.5s 启用"断开"显示
-    const timer = setTimeout(() => setAllowDisconnected(true), 1500)
+    const timer = setTimeout(() => {
+      setAllowDisconnected(true)
+    }, 1500)
     return () => clearTimeout(timer)
   }, [autoLoginStatus])
 
-  const isConnecting = autoLoginStatus !== 'done' || (!connected && !allowDisconnected)
+  const isConnecting =
+    autoLoginStatus !== 'done' || (!connected && !allowDisconnected)
 
   return (
     <div className="flex-1 flex items-center justify-center p-6">

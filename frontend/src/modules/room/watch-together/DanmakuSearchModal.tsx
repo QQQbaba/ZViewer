@@ -1,9 +1,4 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-} from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Search,
   Loader2,
@@ -123,7 +118,11 @@ export function DanmakuSearchModal({
   // 弹窗打开时若有 initialKeyword，自动填入并触发搜索
   const lastAutoSearchRef = useRef<string | null>(null)
   useEffect(() => {
-    if (open && initialKeyword && lastAutoSearchRef.current !== initialKeyword) {
+    if (
+      open &&
+      initialKeyword &&
+      lastAutoSearchRef.current !== initialKeyword
+    ) {
       lastAutoSearchRef.current = initialKeyword
       setKeyword(initialKeyword)
       const searchSource = defaultSource ?? 'bilibili-video'
@@ -198,9 +197,7 @@ export function DanmakuSearchModal({
       <div
         className="grid min-h-0 flex-1 gap-3"
         style={{
-          gridTemplateColumns: episodesOpen
-            ? '1fr 340px'
-            : '1fr 0fr',
+          gridTemplateColumns: episodesOpen ? '1fr 340px' : '1fr 0fr',
           transition: 'grid-template-columns 0.4s var(--ease-out-expo)',
         }}
       >
@@ -250,9 +247,7 @@ export function DanmakuSearchModal({
 
           <div className="zen-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
             {!hasResult && !loading && (
-              <div
-                className="glass flex flex-1 flex-col items-center justify-center gap-2 rounded-[var(--md-sys-shape-corner)] p-6 text-center"
-              >
+              <div className="glass flex flex-1 flex-col items-center justify-center gap-2 rounded-[var(--md-sys-shape-corner)] p-6 text-center">
                 <Search className="h-8 w-8 opacity-40" />
                 <Text type="secondary" className="text-xs">
                   输入关键词并搜索以查找弹幕源
@@ -354,77 +349,73 @@ export function DanmakuSearchModal({
           className="flex min-h-0 min-w-0 flex-col overflow-hidden"
           style={{
             opacity: episodesOpen ? 1 : 0,
-            transform: episodesOpen
-              ? 'translateX(0)'
-              : 'translateX(16px)',
+            transform: episodesOpen ? 'translateX(0)' : 'translateX(16px)',
             transition:
               'opacity 0.32s var(--ease-out-expo), transform 0.4s var(--ease-out-expo)',
           }}
         >
           {episodesOpen && (
             <div className="flex h-full flex-col border-l border-[var(--md-sys-color-outline-variant)] pl-3">
-            <div className="flex items-center justify-between gap-2 pb-2">
-              <div className="flex min-w-0 flex-col">
-                <Text
-                  type="secondary"
-                  className="text-[10px] uppercase tracking-wide"
-                >
-                  选择集数
-                </Text>
-                <Text className="truncate text-sm font-medium">
-                  {selectedResult?.title}
-                </Text>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 shrink-0 p-0"
-                onClick={handleBack}
-                icon={<X className="h-4 w-4" />}
-              />
-            </div>
-
-            <div className="zen-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
-              {episodes.length === 0 && !loading && (
-                <div className="flex flex-1 items-center justify-center">
-                  <Text type="secondary" className="text-xs">
-                    暂无可用集数
+              <div className="flex items-center justify-between gap-2 pb-2">
+                <div className="flex min-w-0 flex-col">
+                  <Text
+                    type="secondary"
+                    className="text-[10px] uppercase tracking-wide"
+                  >
+                    选择集数
+                  </Text>
+                  <Text className="truncate text-sm font-medium">
+                    {selectedResult?.title}
                   </Text>
                 </div>
-              )}
-              {episodes.map((episode) => (
-                <div
-                  key={episode.id}
-                  className="glass flex items-center justify-between gap-3 rounded-[var(--md-sys-shape-corner)] p-3"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <PlayCircle className="h-4 w-4 shrink-0 opacity-60" />
-                    <Text className="truncate text-sm">
-                      {episode.title}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 shrink-0 p-0"
+                  onClick={handleBack}
+                  icon={<X className="h-4 w-4" />}
+                />
+              </div>
+
+              <div className="zen-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+                {episodes.length === 0 && !loading && (
+                  <div className="flex flex-1 items-center justify-center">
+                    <Text type="secondary" className="text-xs">
+                      暂无可用集数
                     </Text>
                   </div>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="h-7 shrink-0 px-2.5 text-xs"
-                    loading={addingEpisodeId === episode.id}
-                    disabled={!!addingEpisodeId}
-                    onClick={() => handleAddEpisode(episode)}
+                )}
+                {episodes.map((episode) => (
+                  <div
+                    key={episode.id}
+                    className="glass flex items-center justify-between gap-3 rounded-[var(--md-sys-shape-corner)] p-3"
                   >
-                    添加
-                  </Button>
-                </div>
-              ))}
+                    <div className="flex min-w-0 items-center gap-2">
+                      <PlayCircle className="h-4 w-4 shrink-0 opacity-60" />
+                      <Text className="truncate text-sm">{episode.title}</Text>
+                    </div>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="h-7 shrink-0 px-2.5 text-xs"
+                      loading={addingEpisodeId === episode.id}
+                      disabled={!!addingEpisodeId}
+                      onClick={() => handleAddEpisode(episode)}
+                    >
+                      添加
+                    </Button>
+                  </div>
+                ))}
 
-              {loading && (
-                <div className="flex items-center justify-center gap-2 py-2 text-[var(--md-sys-color-on-surface-variant)]">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <Text type="secondary" className="text-xs">
-                    加载中…
-                  </Text>
-                </div>
-              )}
-            </div>
+                {loading && (
+                  <div className="flex items-center justify-center gap-2 py-2 text-[var(--md-sys-color-on-surface-variant)]">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Text type="secondary" className="text-xs">
+                      加载中…
+                    </Text>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

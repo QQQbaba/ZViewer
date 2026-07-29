@@ -89,10 +89,7 @@ export function useBilibiliQuality(ctx: BilibiliQualityContext) {
       if (!video) return
 
       const state = useRoomStore.getState().watchTogether
-      const {
-        broadcast = false,
-        resolved: preResolved,
-      } = options
+      const { broadcast = false, resolved: preResolved } = options
 
       // format 检查仅在内部解析路径（无 preResolved）时生效，
       // 因为 MP4 模式下清晰度由 B站 决定，无需手动切换。

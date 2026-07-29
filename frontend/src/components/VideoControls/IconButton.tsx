@@ -22,7 +22,16 @@ export interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>
  */
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
   function IconButton(
-    { icon, label, active, variant = 'ghost', size = 'md', className, title, ...props },
+    {
+      icon,
+      label,
+      active,
+      variant = 'ghost',
+      size = 'md',
+      className,
+      title,
+      ...props
+    },
     ref
   ) {
     return (
@@ -45,7 +54,8 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
             'bg-[var(--md-sys-color-surface-container-high)] hover:bg-[var(--md-sys-color-surface-container-highest)]',
           variant === 'primary' &&
             'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)] hover:bg-[var(--md-sys-color-primary)] hover:text-[var(--md-sys-color-on-primary)]',
-          active && 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]',
+          active &&
+            'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]',
           className
         )}
         {...props}

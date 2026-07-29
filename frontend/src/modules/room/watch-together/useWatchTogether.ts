@@ -546,7 +546,14 @@ export function useWatchTogether({
         isReloadingBilibiliRef.current = false
       }
     },
-    [videoRef, quality, applySourceToVideo, setWatchTogether, broadcastState]
+    [
+      videoRef,
+      quality,
+      applySourceToVideo,
+      setWatchTogether,
+      broadcastState,
+      fetchBlobsForBufferModeLocal,
+    ]
   )
 
   // 响应 BilibiliParseSettings 中 codec / CDN 偏好变更触发的重新解析请求。
@@ -630,9 +637,7 @@ export function useWatchTogether({
         await applySourceToVideo(video, state, video.currentTime)
       } catch (err) {
         console.error('[useWatchTogether] 观众重新 attach 源失败:', err)
-        message.error(
-          err instanceof Error ? err.message : '本地代理加载失败'
-        )
+        message.error(err instanceof Error ? err.message : '本地代理加载失败')
         // 出错时回退到房主广播源
         try {
           storeState.setViewerCliResolvedSource(null)
@@ -944,6 +949,7 @@ export function useWatchTogether({
     sendControl,
     quality,
     suppressEventsRef,
+    fetchBlobsForBufferModeLocal,
   ])
 
   // 组件卸载或切换房间时释放 MSE blob URL 与音频同步资源

@@ -211,7 +211,11 @@ export async function resolveBilibili(
   if (options?.preferMp4) {
     fetchUrl += `&preferMp4=true`
   }
-  if (options?.page != null && Number.isFinite(options.page) && options.page > 0) {
+  if (
+    options?.page != null &&
+    Number.isFinite(options.page) &&
+    options.page > 0
+  ) {
     fetchUrl += `&page=${options.page}`
   }
 
@@ -238,7 +242,7 @@ export async function resolveBilibili(
     return mapResolvedBilibili(data)
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('解析 B站 视频超时，请稍后重试')
+      throw new Error('解析 B站 视频超时，请稍后重试', { cause: err })
     }
     throw err
   } finally {

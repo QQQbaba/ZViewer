@@ -188,7 +188,9 @@ export function FlvPlayer({
       if (retryCount < MAX_RETRY) {
         const delay = RETRY_DELAYS_MS[retryCount]
         retryCount += 1
-        console.log(`[FlvPlayer] retry ${retryCount}/${MAX_RETRY} in ${delay}ms`)
+        console.log(
+          `[FlvPlayer] retry ${retryCount}/${MAX_RETRY} in ${delay}ms`
+        )
         onStatusChangeRef.current?.('connecting')
         if (retryTimer) clearTimeout(retryTimer)
         retryTimer = setTimeout(() => {
@@ -259,7 +261,10 @@ export function FlvPlayer({
           const bufferedEnd = buffered.end(buffered.length - 1)
           if (bufferedEnd - video.currentTime > 0.5) {
             video.currentTime = bufferedEnd - 0.3
-            console.log('[FlvPlayer] recovered from stall, seek to', video.currentTime)
+            console.log(
+              '[FlvPlayer] recovered from stall, seek to',
+              video.currentTime
+            )
           }
         }
       }

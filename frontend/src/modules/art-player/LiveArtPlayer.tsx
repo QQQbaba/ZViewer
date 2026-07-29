@@ -78,6 +78,8 @@ export function LiveArtPlayer({
   useEffect(() => {
     if (!art) return
     if (!showControls) {
+      // art 实例由 useArtPlayer 创建，此处仅操作其内部 DOM 元素样式。
+      // eslint-disable-next-line react-hooks/immutability
       art.template.$bottom.style.display = 'none'
     } else {
       art.template.$bottom.style.display = ''
@@ -96,6 +98,8 @@ export function LiveArtPlayer({
   // muted 变更同步
   useEffect(() => {
     if (video) {
+      // video 为原生 HTMLVideoElement，设置 muted 是标准 DOM 操作。
+      // eslint-disable-next-line react-hooks/immutability
       video.muted = muted
     }
   }, [video, muted])

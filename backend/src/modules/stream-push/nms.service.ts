@@ -99,7 +99,7 @@ class NmsService {
         // 关闭 NMS 自带的推流 token 校验，改由 postPublish 中通过 streamKey
         // 查询 Room 表进行业务层校验（房间存在、活跃、screen-share + stream-push）。
         publish: false,
-        secret: 'zcontrol-stream-push',
+        secret: 'zviewer-stream-push',
       },
     };
 

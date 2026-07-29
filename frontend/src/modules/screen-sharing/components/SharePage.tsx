@@ -88,13 +88,10 @@ function SharePage({
   const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(
     null
   )
-  const handleLocalVideoReady = useCallback(
-    (node: HTMLVideoElement | null) => {
-      localVideoRef.current = node
-      setLocalVideoEl(node)
-    },
-    []
-  )
+  const handleLocalVideoReady = useCallback((node: HTMLVideoElement | null) => {
+    localVideoRef.current = node
+    setLocalVideoEl(node)
+  }, [])
   // onStreamEnded 需引用下方 hook 返回的 stop/cleanupPeerConnections，用 ref 转发避免循环依赖
   const handleStreamEndedRef = useRef<() => void>(() => {})
 
@@ -420,7 +417,8 @@ function SharePage({
           <div
             className="glass-card w-full max-w-sm rounded-2xl border p-6 shadow-sm"
             style={{
-              borderColor: 'color-mix(in srgb, var(--md-sys-color-outline) 30%, transparent)',
+              borderColor:
+                'color-mix(in srgb, var(--md-sys-color-outline) 30%, transparent)',
               backgroundColor: 'var(--glass-bg)',
               backdropFilter: 'blur(var(--glass-blur-strong))',
               WebkitBackdropFilter: 'blur(var(--glass-blur-strong))',

@@ -676,6 +676,13 @@ do_start() {
   echo "  产物存在: backend/dist/index.js"
 
   echo "[5/5] 启动服务 ..."
+  # 前端 Vite preview 需要通过代理访问后端 API 与 HTTP-FLV 拉流，
+  # 且必须支持用户自定义端口，因此把实际目标地址注入环境变量。
+  local rtmp_port="${RTMP_PORT:-3334}"
+  local http_flv_port="${HTTP_FLV_PORT:-3335}"
+  export VITE_API_TARGET="http://localhost:$PORT"
+  export VITE_LIVE_TARGET="http://localhost:$http_flv_port"
+
   # 备份上一轮日志到归档（带时间戳），并清理超过 7 天的历史归档
   echo "  归档上一轮日志 ..."
   archived_count=$(backup_old_logs)
@@ -748,10 +755,6 @@ do_start() {
 EOF
 
   write_title "启动完成"
-
-  # 获取 RTMP / HTTP-FLV 端口（用于端口放行提示）
-  local rtmp_port="${RTMP_PORT:-3334}"
-  local http_flv_port="${HTTP_FLV_PORT:-3335}"
 
   echo "  可访问地址："
   format_access_urls "$FRONTEND_PORT"

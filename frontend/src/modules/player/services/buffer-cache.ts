@@ -79,7 +79,7 @@ function openDb(): Promise<IDBDatabase> {
 export function buildCacheKey(
   bvid: string,
   cid: number,
-  qn: number | undefined,
+  qn: number | undefined
 ): string {
   return `${bvid}-${cid}-${qn ?? 0}`
 }
@@ -90,7 +90,7 @@ export function buildCacheKey(
  * 命中时自动更新 lastAccessedAt，避免 LRU 清理误删活跃缓存。
  */
 export async function getCacheEntry(
-  key: string,
+  key: string
 ): Promise<BufferCacheEntry | null> {
   try {
     const db = await openDb()
@@ -118,9 +118,7 @@ export async function getCacheEntry(
 }
 
 /** 写入缓存条目（覆盖同 key 旧值） */
-export async function setCacheEntry(
-  entry: BufferCacheEntry,
-): Promise<void> {
+export async function setCacheEntry(entry: BufferCacheEntry): Promise<void> {
   try {
     const db = await openDb()
     await new Promise<void>((resolve, reject) => {
@@ -162,26 +160,24 @@ export async function deleteCacheEntry(key: string): Promise<void> {
 export async function evictIfOverLimit(): Promise<void> {
   try {
     const db = await openDb()
-    const allEntries = await new Promise<BufferCacheEntry[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite')
-      const store = tx.objectStore(STORE_NAME)
-      const request = store.getAll()
-      request.onerror = () => reject(request.error)
-      request.onsuccess = () => resolve(request.result as BufferCacheEntry[])
-    })
+    const allEntries = await new Promise<BufferCacheEntry[]>(
+      (resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite')
+        const store = tx.objectStore(STORE_NAME)
+        const request = store.getAll()
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => resolve(request.result as BufferCacheEntry[])
+      }
+    )
 
     const now = Date.now()
-    const expired = allEntries.filter(
-      (e) => now - e.createdAt > MAX_AGE_MS,
-    )
-    const valid = allEntries.filter(
-      (e) => now - e.createdAt <= MAX_AGE_MS,
-    )
+    const expired = allEntries.filter((e) => now - e.createdAt > MAX_AGE_MS)
+    const valid = allEntries.filter((e) => now - e.createdAt <= MAX_AGE_MS)
 
     // 删除过期缓存
     if (expired.length > 0) {
       console.log(
-        `[buffer-cache] 清理 ${expired.length} 个过期缓存（超过 ${MAX_AGE_MS / 60 / 60 / 1000} 小时）`,
+        `[buffer-cache] 清理 ${expired.length} 个过期缓存（超过 ${MAX_AGE_MS / 60 / 60 / 1000} 小时）`
       )
       const tx = db.transaction(STORE_NAME, 'readwrite')
       const store = tx.objectStore(STORE_NAME)
@@ -193,7 +189,7 @@ export async function evictIfOverLimit(): Promise<void> {
     // 按总大小清理
     const totalSize = valid.reduce(
       (sum, e) => sum + e.videoBlob.size + e.audioBlob.size,
-      0,
+      0
     )
     if (totalSize <= MAX_TOTAL_SIZE) return
 
@@ -209,7 +205,7 @@ export async function evictIfOverLimit(): Promise<void> {
     if (toDelete.length > 0) {
       console.log(
         `[buffer-cache] 总大小 ${(totalSize / 1024 / 1024).toFixed(0)}MB 超限，` +
-          `删除 ${toDelete.length} 个最旧缓存释放 ${((totalSize - currentSize) / 1024 / 1024).toFixed(0)}MB`,
+          `删除 ${toDelete.length} 个最旧缓存释放 ${((totalSize - currentSize) / 1024 / 1024).toFixed(0)}MB`
       )
       const tx = db.transaction(STORE_NAME, 'readwrite')
       const store = tx.objectStore(STORE_NAME)
@@ -241,7 +237,7 @@ export async function getCacheStats(): Promise<{
         const entries = request.result as BufferCacheEntry[]
         const totalBytes = entries.reduce(
           (sum, e) => sum + e.videoBlob.size + e.audioBlob.size,
-          0,
+          0
         )
         resolve({ count: entries.length, totalBytes })
       }

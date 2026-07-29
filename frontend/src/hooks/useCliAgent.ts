@@ -167,7 +167,16 @@ export function useCliAgent(roomId: string | undefined) {
       socket.off('cli-agent-unavailable', handleUnavailable)
       socket.off('cli-agents', handleAgents)
     }
-  }, [socket, roomId, connected, addAgent, removeAgent, setAgents, setIsLoadingAgents, listAgents])
+  }, [
+    socket,
+    roomId,
+    connected,
+    addAgent,
+    removeAgent,
+    setAgents,
+    setIsLoadingAgents,
+    listAgents,
+  ])
 
   // 3. socket 重连后重新拉取代理列表
   useEffect(() => {

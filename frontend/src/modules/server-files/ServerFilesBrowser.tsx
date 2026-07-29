@@ -168,9 +168,10 @@ export default function ServerFilesBrowser({
                         <HardDrive
                           className="h-3.5 w-3.5 shrink-0"
                           style={{
-                            color: r.key === currentRootKey
-                              ? 'var(--md-sys-color-primary)'
-                              : 'var(--md-sys-color-on-surface-variant)',
+                            color:
+                              r.key === currentRootKey
+                                ? 'var(--md-sys-color-primary)'
+                                : 'var(--md-sys-color-on-surface-variant)',
                           }}
                         />
                         <span
