@@ -812,7 +812,8 @@ export default function AdminPage() {
                           className="flex w-32 items-center justify-center rounded-[var(--md-sys-shape-corner)] border px-3 py-2 text-sm"
                           style={{
                             borderColor: 'var(--md-sys-color-outline)',
-                            backgroundColor: 'var(--glass-bg)',
+                            backgroundColor:
+                              'var(--glass-bg)',
                             color: 'var(--md-sys-color-on-surface-variant)',
                           }}
                         >
@@ -1047,14 +1048,8 @@ export default function AdminPage() {
                     label="允许创建房间的用户范围"
                     value={settings.roomCreationMode}
                     options={[
-                      {
-                        label: '仅管理员（root / admin）',
-                        value: 'admin-only',
-                      },
-                      {
-                        label: '所有登录用户（user / admin / root）',
-                        value: 'all-users',
-                      },
+                      { label: '仅管理员（root / admin）', value: 'admin-only' },
+                      { label: '所有登录用户（user / admin / root）', value: 'all-users' },
                     ]}
                     onChange={(value) =>
                       setSettings((prev) => ({
@@ -1083,8 +1078,7 @@ export default function AdminPage() {
                     }
                   />
                   <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                    关闭时，房间内的 Kazumi 与 AniSubs 番剧添加入口、个人中心的
-                    B站视频下载按钮及其相关设置将被隐藏。
+                    关闭时，房间内的 Kazumi 与 AniSubs 番剧添加入口、个人中心的 B站视频下载按钮及其相关设置将被隐藏。
                   </p>
                 </div>
 
@@ -1101,9 +1095,9 @@ export default function AdminPage() {
                         rows={4}
                         className="w-full rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] px-3 py-2 text-sm text-[var(--md-sys-color-on-surface)] placeholder:text-[var(--md-sys-color-on-surface-variant)] focus:border-[var(--md-sys-color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--md-sys-color-primary)]"
                         placeholder="https://raw.githubusercontent.com/Predidit/Kazumi/main/assets/plugins/DM84.json"
-                        value={(
-                          settings.dataSourceConfig?.kazumiRules || []
-                        ).join('\n')}
+                        value={(settings.dataSourceConfig?.kazumiRules || []).join(
+                          '\n'
+                        )}
                         onChange={(e) =>
                           setSettings((prev) => ({
                             ...prev,
@@ -1127,9 +1121,7 @@ export default function AdminPage() {
                       <AniSubsGithubBrowser
                         repoUrl="https://github.com/Predidit/Kazumi"
                         defaultPath="assets/plugins"
-                        existingUrls={
-                          settings.dataSourceConfig?.kazumiRules || []
-                        }
+                        existingUrls={settings.dataSourceConfig?.kazumiRules || []}
                         onAddUrls={(urls) =>
                           setSettings((prev) => ({
                             ...prev,

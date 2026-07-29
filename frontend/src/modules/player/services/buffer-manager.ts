@@ -229,8 +229,7 @@ export function appendBuffer(
       }
       // 所有清理尝试都失败，抛出明确错误让上层处理
       throw new Error(
-        `SourceBuffer 清理后仍然满（保留窗口已降至 0s），无法 append ${data.byteLength} 字节`,
-        { cause: err }
+        `SourceBuffer 清理后仍然满（保留窗口已降至 0s），无法 append ${data.byteLength} 字节`
       )
     }
   })

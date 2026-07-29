@@ -109,16 +109,10 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
 
   useEffect(() => {
     if (open && mountId !== null) {
-      // 打开新挂载时重置浏览状态，随后触发数据加载：标准初始化模式。
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentPath(undefined)
-
       setEntries([])
-
       setParentEntries([])
-
       setSelectedPaths(new Set())
-
       setMultiSelectMode(false)
       void load()
     }

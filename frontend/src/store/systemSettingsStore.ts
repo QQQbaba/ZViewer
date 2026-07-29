@@ -39,58 +39,56 @@ const DEFAULT_SETTINGS: SystemSettings = {
   dataSourceConfig: null,
 }
 
-export const useSystemSettingsStore = create<SystemSettingsState>(
-  (set, get) => ({
-    ...DEFAULT_SETTINGS,
-    loading: false,
-    fetched: false,
-    fetchSettings: async () => {
-      if (get().loading || get().fetched) return
-      set({ loading: true })
-      try {
-        // 公开接口：所有用户（含 guest）均可访问，仅返回非敏感字段。
-        // 用于 HomePage 决定是否显示「开始共享」按钮。
-        const res = await apiFetch(`${API_URL}/api/auth/public-settings`)
-        const data = (await res.json()) as {
-          success: boolean
-          settings?: Partial<SystemSettings>
-          message?: string
-        }
-        if (data.success && data.settings) {
-          set({
-            ...DEFAULT_SETTINGS,
-            ...data.settings,
-            fetched: true,
-          })
-        }
-      } catch (err) {
-        console.error('[systemSettingsStore] fetch settings error:', err)
-      } finally {
-        set({ loading: false })
+export const useSystemSettingsStore = create<SystemSettingsState>((set, get) => ({
+  ...DEFAULT_SETTINGS,
+  loading: false,
+  fetched: false,
+  fetchSettings: async () => {
+    if (get().loading || get().fetched) return
+    set({ loading: true })
+    try {
+      // 公开接口：所有用户（含 guest）均可访问，仅返回非敏感字段。
+      // 用于 HomePage 决定是否显示「开始共享」按钮。
+      const res = await apiFetch(`${API_URL}/api/auth/public-settings`)
+      const data = (await res.json()) as {
+        success: boolean
+        settings?: Partial<SystemSettings>
+        message?: string
       }
-    },
-    fetchAdminSettings: async () => {
-      set({ loading: true })
-      try {
-        const res = await apiFetch(`${API_URL}/api/admin/settings`)
-        const data = (await res.json()) as {
-          success: boolean
-          settings?: Partial<SystemSettings>
-          message?: string
-        }
-        if (data.success && data.settings) {
-          set({
-            ...DEFAULT_SETTINGS,
-            ...data.settings,
-            fetched: true,
-          })
-        }
-      } catch (err) {
-        console.error('[systemSettingsStore] fetch admin settings error:', err)
-      } finally {
-        set({ loading: false })
+      if (data.success && data.settings) {
+        set({
+          ...DEFAULT_SETTINGS,
+          ...data.settings,
+          fetched: true,
+        })
       }
-    },
-    invalidate: () => set({ fetched: false }),
-  })
-)
+    } catch (err) {
+      console.error('[systemSettingsStore] fetch settings error:', err)
+    } finally {
+      set({ loading: false })
+    }
+  },
+  fetchAdminSettings: async () => {
+    set({ loading: true })
+    try {
+      const res = await apiFetch(`${API_URL}/api/admin/settings`)
+      const data = (await res.json()) as {
+        success: boolean
+        settings?: Partial<SystemSettings>
+        message?: string
+      }
+      if (data.success && data.settings) {
+        set({
+          ...DEFAULT_SETTINGS,
+          ...data.settings,
+          fetched: true,
+        })
+      }
+    } catch (err) {
+      console.error('[systemSettingsStore] fetch admin settings error:', err)
+    } finally {
+      set({ loading: false })
+    }
+  },
+  invalidate: () => set({ fetched: false }),
+}))

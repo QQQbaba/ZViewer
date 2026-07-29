@@ -137,16 +137,12 @@ export function BilibiliDownloadModal({
 
   useEffect(() => {
     if (open) {
-      // 弹窗打开/关闭时同步动画状态，这是受控弹窗的标准入场/退场模式。
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setVisible(true)
-
       setExiting(false)
     } else if (visible) {
       setExiting(true)
       const t = setTimeout(() => {
         setVisible(false)
-
         setExiting(false)
       }, POPUP_DURATION)
       return () => clearTimeout(t)
@@ -185,10 +181,7 @@ export function BilibiliDownloadModal({
 
   useEffect(() => {
     if (visible) {
-      // 弹窗可见时初始化数据：标准的数据获取模式。
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (roots.length === 0) void loadRoots()
-
       if (!ffmpegStatus && !ffmpegChecking) void refreshFfmpegStatus()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
