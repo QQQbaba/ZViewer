@@ -26,8 +26,10 @@ import {
   resolveMovieSource,
   resolveBilibiliOnline,
   getEffectivePreferMp4,
+  getActiveCliProxyUrl,
   type ResolvedMovieSource,
 } from './movie-source-resolver'
+import type { ResolvedSource } from '@/modules/bilibili/types'
 import {
   fetchBlobsForBufferMode,
   DownloadError,
@@ -156,6 +158,8 @@ export function useWatchTogether({
   // （先结束的 finally 把 suppressEventsRef 重置为 false，但后结束的仍在解析中）
   // 以及重复 UI 闪烁。ref 标记确保同一时刻只有一个 reloadBilibili 在执行。
   const isReloadingBilibiliRef = useRef(false)
+  // 观众端 CLI 代理切换/清晰度覆盖的并发重入保护。
+  const isViewerReloadingRef = useRef(false)
 
   useEffect(() => {
     isHostRef.current = isHost
@@ -559,27 +563,100 @@ export function useWatchTogether({
   }, [pendingReloadBilibili])
 
   // 观众：切换 CLI 等仅影响本客户端代理的设置后，重新 attach 当前源以生效。
+  // 若启用了本地 CLI 代理且当前为 B站 源，优先通过 CLI 重新解析 DASH 高画质地址，
+  // 覆盖房主广播的源（可能为 MP4），实现观众端独立走本地代理。
   useEffect(() => {
     if (pendingViewerSourceReload === 0) return
     const run = async () => {
       if (isHostRef.current) return
+      if (isViewerReloadingRef.current) return
+      isViewerReloadingRef.current = true
+
       const video = videoRef.current
-      if (!video) return
-      const state = useRoomStore.getState().watchTogether
-      if (!state.sourceUrl) return
+      if (!video) {
+        isViewerReloadingRef.current = false
+        return
+      }
+      const storeState = useRoomStore.getState()
+      const state = storeState.watchTogether
+      if (!state.sourceUrl) {
+        isViewerReloadingRef.current = false
+        return
+      }
+
+      const movieId = storeState.currentMovieId
+      const movie =
+        movieId != null
+          ? storeState.movies.find((m) => m.id === movieId)
+          : undefined
+      const cliEnabled =
+        movieId != null && getBilibiliParseOptions(movieId).cliEnabled
+      const existingOverride = storeState.viewerCliResolvedSource
+      const hasOverride = existingOverride?.movieId === movieId
+
       suppressEventsRef.current = true
       try {
+        if (
+          cliEnabled &&
+          movie?.url &&
+          movie.cid &&
+          getActiveCliProxyUrl() &&
+          !hasOverride
+        ) {
+          const resolved = await resolveBilibiliOnline(movie, undefined, {
+            preferMp4: false,
+          })
+          const resolvedSource: ResolvedSource = {
+            videoUrl: resolved.sourceUrl,
+            audioUrl: resolved.audioUrl,
+            videoCodec: resolved.videoCodec,
+            audioCodec: resolved.audioCodec,
+            duration: resolved.duration,
+            format: resolved.format ?? 'mp4',
+            cid: resolved.cid,
+            currentQn: resolved.currentQn,
+            acceptQuality: resolved.acceptQuality,
+            title: movie.title,
+          }
+          storeState.setViewerCliResolvedSource({
+            movieId: movie.id,
+            resolved: resolvedSource,
+          })
+        } else if (!cliEnabled) {
+          // 关闭 CLI 时清除本地覆盖，恢复使用房主广播源
+          storeState.setViewerCliResolvedSource(null)
+        }
+
         await applySourceToVideo(video, state, video.currentTime)
       } catch (err) {
         console.error('[useWatchTogether] 观众重新 attach 源失败:', err)
+        message.error(
+          err instanceof Error ? err.message : '本地代理加载失败'
+        )
+        // 出错时回退到房主广播源
+        try {
+          storeState.setViewerCliResolvedSource(null)
+          await applySourceToVideo(video, state, video.currentTime)
+        } catch {
+          // ignore
+        }
       } finally {
         suppressEventsRef.current = false
+        isViewerReloadingRef.current = false
       }
     }
     void run()
     // applySourceToVideo 是 useCallback，依赖已固定；pendingViewerSourceReload 是触发信号
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingViewerSourceReload])
+
+  // 观众：切换影片后清除本地 CLI 清晰度覆盖，避免旧影片的覆盖应用到新影片。
+  useEffect(() => {
+    const override = useRoomStore.getState().viewerCliResolvedSource
+    if (override && override.movieId !== currentMovieId) {
+      useRoomStore.getState().setViewerCliResolvedSource(null)
+    }
+  }, [currentMovieId])
 
   // 观众：清晰度切换通过 watch-together-state.currentQn 同步。
   // 旧版使用独立的 quality-change 事件，但后端无转发 handler 导致功能失效；

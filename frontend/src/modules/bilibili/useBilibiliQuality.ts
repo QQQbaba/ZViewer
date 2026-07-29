@@ -126,7 +126,9 @@ export function useBilibiliQuality(ctx: BilibiliQualityContext) {
                 proxyUrl,
                 bvid,
                 movie.cid,
-                qn
+                qn,
+                false,
+                true
               )
             } else {
               throw new Error('无法提取 BV 号或 cid，无法使用 CLI 代理')

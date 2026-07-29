@@ -14,13 +14,19 @@ export function extractBvid(url: string): string | null {
 /**
  * 将任意 URL 包装为 CLI 本地代理 URL。
  * CLI 代理会注入正确的 Referer/Origin/User-Agent 头，绕过 B站 CDN 防盗链。
+ *
+ * 若 targetUrl 本身已是该 CLI 代理地址，则直接返回避免双重包装。
  */
 export function buildCliProxyUrl(
   proxyUrl: string,
   targetUrl: string
 ): string {
   const base = proxyUrl.replace(/\/$/, '')
-  return `${base}/proxy?url=${encodeURIComponent(targetUrl)}`
+  const proxyPrefix = `${base}/proxy?url=`
+  if (targetUrl.startsWith(proxyPrefix)) {
+    return targetUrl
+  }
+  return `${proxyPrefix}${encodeURIComponent(targetUrl)}`
 }
 
 /**
@@ -83,13 +89,15 @@ interface CliResolveResponse {
  * @param cid 视频分 P 的 cid
  * @param qn 清晰度 qn（可选）
  * @param preferMp4 是否优先 MP4（可选，默认 false）
+ * @param forceDash 是否强制使用 DASH 并禁用 MP4 降级（CLI 代理已连接时使用）
  */
 export async function resolveBilibiliViaCli(
   proxyUrl: string,
   bvid: string,
   cid: number,
   qn?: number,
-  preferMp4?: boolean
+  preferMp4?: boolean,
+  forceDash?: boolean
 ): Promise<ResolvedSource> {
   const base = proxyUrl.replace(/\/$/, '')
   const params = new URLSearchParams({
@@ -101,6 +109,9 @@ export async function resolveBilibiliViaCli(
   }
   if (preferMp4) {
     params.set('preferMp4', 'true')
+  }
+  if (forceDash) {
+    params.set('forceDash', 'true')
   }
 
   const res = await fetch(`${base}/resolve?${params.toString()}`, {
@@ -130,5 +141,6 @@ export async function resolveBilibiliViaCli(
     currentPage: data.currentPage,
   }
 
-  return resolved
+  // CLI /resolve 已返回代理 URL，但本地包装可确保旧版 CLI 与兜底场景也走代理。
+  return wrapResolvedSourceWithCliProxy(proxyUrl, resolved)
 }

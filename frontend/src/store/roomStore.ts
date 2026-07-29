@@ -178,6 +178,14 @@ interface RoomState {
   movies: Movie[]
   currentMovieId: number | null
   pendingQualityChange: { movieId: number; resolved: ResolvedSource } | null
+  /**
+   * 观众端通过本地 CLI 自主切换的清晰度解析结果。
+   * 仅影响当前客户端播放，不写入影片列表也不广播给房主/其他观众。
+   */
+  viewerCliResolvedSource: { movieId: number; resolved: ResolvedSource } | null
+  setViewerCliResolvedSource: (
+    value: { movieId: number; resolved: ResolvedSource } | null
+  ) => void
   /** 待处理的预览播放请求（由 MoviePushPanel 触发，useWatchTogether 消费） */
   pendingPreviewPlay: PreviewPlayRequest | null
   /**
@@ -351,6 +359,7 @@ const defaultState = {
   movies: [],
   currentMovieId: null,
   pendingQualityChange: null,
+  viewerCliResolvedSource: null,
   pendingPreviewPlay: null,
   pendingReloadBilibili: 0,
   pendingViewerSourceReload: 0,
@@ -451,6 +460,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   setMovies: (movies) => set({ movies }),
   setCurrentMovieId: (id) => set({ currentMovieId: id }),
   setPendingQualityChange: (value) => set({ pendingQualityChange: value }),
+  setViewerCliResolvedSource: (value) =>
+    set({ viewerCliResolvedSource: value }),
   setPendingPreviewPlay: (value) => set({ pendingPreviewPlay: value }),
   triggerReloadBilibili: () =>
     set((state) => ({

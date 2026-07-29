@@ -311,22 +311,21 @@ export function RoomLayout({
         backfaceVisibility: 'hidden',
       }}
     >
-      {/* 移动端 fixed drawer 顶部关闭条 */}
-      {!isNativeFullscreen && (
-        <div className="flex items-center justify-between border-b border-[var(--md-sys-color-outline-variant)]/50 px-4 py-3 md:hidden">
-          <span className="text-sm font-medium text-[var(--md-sys-color-on-surface)]">
-            房间面板
-          </span>
-          <button
-            type="button"
-            onClick={() => setIsRightPanelOpen(false)}
-            aria-label="收起侧栏"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
-          >
-            <X size={18} />
-          </button>
-        </div>
-      )}
+      {/* 侧栏关闭条：所有端/所有场景下都提供显式关闭按钮 */}
+      <div className="flex items-center justify-between border-b border-[var(--md-sys-color-outline-variant)]/50 px-4 py-3">
+        <span className="text-sm font-medium text-[var(--md-sys-color-on-surface)]">
+          房间面板
+        </span>
+        <button
+          type="button"
+          onClick={() => setIsRightPanelOpen(false)}
+          aria-label="收起侧栏"
+          title="收起侧栏"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
+        >
+          <X size={18} />
+        </button>
+      </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {effectiveRightPanel}
       </div>

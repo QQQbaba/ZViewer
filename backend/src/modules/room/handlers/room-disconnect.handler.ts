@@ -22,8 +22,12 @@ export class RoomDisconnectHandler implements SocketEventHandler {
   readonly name = 'room-disconnect';
 
   register(socket: Socket, io: SocketIOServer): void {
-    socket.on('disconnect', async () => {
-      try {
+    socket.on('disconnect', (reason: string) => {
+      if (socket.data.isCliAgent) {
+        console.log(`[cli] socket disconnected: ${socket.id}, reason: ${reason}`);
+      }
+      void (async () => {
+        try {
         // 结束当前 socket 的活跃 session（可能是 sharer 或 viewer）
         const session = await roomSessionService.endSession(socket.id);
         if (!session) return;
@@ -56,6 +60,7 @@ export class RoomDisconnectHandler implements SocketEventHandler {
       } catch (err) {
         console.error('[disconnect] handler error:', err);
       }
+      })();
     });
   }
 }

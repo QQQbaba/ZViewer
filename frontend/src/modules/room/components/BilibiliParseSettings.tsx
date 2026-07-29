@@ -11,7 +11,7 @@
  * 房主可操作全部选项；观众端仅可查看房主选择的播放模式 / 缓冲模式，
  * 并独立开启自己的 CLI 高画质代理以降低服务器带宽和提升画质。
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Settings2,
   ChevronDown,
@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/Button'
 import {
   useBilibiliParsePreferences,
   setBilibiliParseOptions,
+  getBilibiliParseOptions,
 } from '@/modules/bilibili/parseOptions'
 import {
   useP2PStatsStore,
@@ -47,6 +48,7 @@ export function BilibiliParseSettings({
   isHost,
 }: BilibiliParseSettingsProps) {
   const [expanded, setExpanded] = useState(false)
+  const [pendingCliReload, setPendingCliReload] = useState(false)
   const { preferMp4, bufferMode, p2pEnabled, cliEnabled } =
     useBilibiliParsePreferences(movieId)
   const cliAgent = useCliAgent(roomId)
@@ -68,7 +70,8 @@ export function BilibiliParseSettings({
     state.movies.find((m) => m.id === movieId)
   )
 
-  // 生效的播放模式：房主侧 CLI 未连接时强制降级为 MP4；观众侧显示房主当前广播的格式
+  // 生效的播放模式：CLI 代理启用后强制走 DASH（高画质由本地 CLI 提供），仅房主可决定；
+  // 若 CLI 未连接则实际解析降级为 MP4。观众侧显示房主当前广播的格式。
   const cliUnavailable = cliEnabled && !cliAgent.available
   const hostEffectivePreferMp4 = cliUnavailable ? true : preferMp4
   const viewerDisplayPreferMp4 =
@@ -146,12 +149,31 @@ export function BilibiliParseSettings({
 
   const handleCliChange = useCallback(
     (next: boolean) => {
-      // CLI 代理与 P2P 互斥；观众端开启/关闭 CLI 后需要重新 attach 当前源
-      setBilibiliParseOptions(movieId, {
-        cliEnabled: next,
-        p2pEnabled: next ? false : undefined,
-      })
+      // CLI 代理与 P2P 互斥；启用 CLI 后强制使用 DASH 模式（本地 CLI 提供高画质），
+      // 关闭 CLI 时恢复启用前保存的 DASH/MP4 模式。
+      // 观众端开启/关闭 CLI 后需要重新 attach 当前源。
+      const current = getBilibiliParseOptions(movieId)
+      if (next) {
+        setBilibiliParseOptions(movieId, {
+          cliEnabled: true,
+          p2pEnabled: false,
+          preferMp4: false,
+          cliPrevPreferMp4: current.preferMp4,
+        })
+      } else {
+        setBilibiliParseOptions(movieId, {
+          cliEnabled: false,
+          p2pEnabled: undefined,
+          preferMp4: current.cliPrevPreferMp4 ?? true,
+          cliPrevPreferMp4: undefined,
+        })
+      }
       if (!isCurrentMovie) return
+      if (next && !cliAgent.available) {
+        // CLI 启用但未就绪：标记待重载，等代理上线后由 effect 触发
+        setPendingCliReload(true)
+        return
+      }
       if (isHost) {
         triggerReloadBilibili()
       } else {
@@ -162,10 +184,36 @@ export function BilibiliParseSettings({
       movieId,
       isHost,
       isCurrentMovie,
+      cliAgent.available,
       triggerReloadBilibili,
       triggerViewerSourceReload,
     ]
   )
+
+  // CLI 启用后等待代理上线，一旦可用立即触发重载以切换到本地代理。
+  // 10 秒内未上线则自动放弃，避免状态悬挂。
+  useEffect(() => {
+    if (!pendingCliReload) return
+    if (cliAgent.available) {
+      setPendingCliReload(false)
+      if (isHost) {
+        triggerReloadBilibili()
+      } else {
+        triggerViewerSourceReload()
+      }
+      return
+    }
+    const timer = setTimeout(() => {
+      setPendingCliReload(false)
+    }, 10000)
+    return () => clearTimeout(timer)
+  }, [
+    pendingCliReload,
+    cliAgent.available,
+    isHost,
+    triggerReloadBilibili,
+    triggerViewerSourceReload,
+  ])
 
   const handleOpenCliSetup = useCallback(() => {
     const url = new URL('http://127.0.0.1:9333/')
@@ -206,12 +254,11 @@ export function BilibiliParseSettings({
             <div className="grid grid-cols-2 gap-1">
               <button
                 type="button"
-                disabled={!isHost || cliUnavailable}
+                disabled={!isHost || cliEnabled}
                 onClick={() => handlePreferMp4Change(false)}
                 className={cn(
                   'rounded-md py-0.5 text-[10px] font-medium transition-all',
-                  (!isHost || cliUnavailable) &&
-                    'cursor-not-allowed opacity-40',
+                  (!isHost || cliEnabled) && 'cursor-not-allowed opacity-40',
                   !displayPreferMp4
                     ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
                     : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
@@ -221,12 +268,11 @@ export function BilibiliParseSettings({
               </button>
               <button
                 type="button"
-                disabled={!isHost || cliUnavailable}
+                disabled={!isHost || cliEnabled}
                 onClick={() => handlePreferMp4Change(true)}
                 className={cn(
                   'rounded-md py-0.5 text-[10px] font-medium transition-all',
-                  (!isHost || cliUnavailable) &&
-                    'cursor-not-allowed opacity-40',
+                  (!isHost || cliEnabled) && 'cursor-not-allowed opacity-40',
                   displayPreferMp4
                     ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
                     : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
@@ -243,8 +289,10 @@ export function BilibiliParseSettings({
                 ? displayPreferMp4
                   ? '房主当前使用 MP4 直链，seek 流畅，清晰度通常 480P/720P'
                   : '房主当前使用 DASH 高清，支持 1080P/4K，seek 需缓冲'
-                : cliUnavailable
-                  ? '已启用 CLI 但未连接本地代理，已自动降级为 MP4；连接后可切换 DASH 获取高画质'
+                : cliEnabled
+                  ? cliAgent.available
+                    ? 'CLI 代理已启用，当前使用本地 DASH 高画质解析'
+                    : '已启用 CLI 但未连接本地代理，解析时将自动降级为 MP4；连接后恢复 DASH 高画质'
                   : displayPreferMp4
                     ? 'MP4 直链，seek 流畅，清晰度通常 480P/720P'
                     : 'DASH 分离流，支持 1080P/4K，seek 需缓冲'}
@@ -255,7 +303,7 @@ export function BilibiliParseSettings({
           <div
             className={cn(
               'rounded-md p-1.5 transition-opacity',
-              displayPreferMp4 && 'pointer-events-none opacity-40'
+              hostEffectivePreferMp4 && 'pointer-events-none opacity-40'
             )}
           >
             <div
@@ -267,11 +315,11 @@ export function BilibiliParseSettings({
             <div className="grid grid-cols-2 gap-1">
               <button
                 type="button"
-                disabled={!isHost || displayPreferMp4}
+                disabled={!isHost || hostEffectivePreferMp4}
                 onClick={() => handleBufferModeChange(false)}
                 className={cn(
                   'rounded-md py-0.5 text-[10px] font-medium transition-all',
-                  (!isHost || displayPreferMp4) &&
+                  (!isHost || hostEffectivePreferMp4) &&
                     'cursor-not-allowed opacity-40',
                   !displayBufferMode
                     ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
@@ -282,11 +330,11 @@ export function BilibiliParseSettings({
               </button>
               <button
                 type="button"
-                disabled={!isHost || displayPreferMp4}
+                disabled={!isHost || hostEffectivePreferMp4}
                 onClick={() => handleBufferModeChange(true)}
                 className={cn(
                   'rounded-md py-0.5 text-[10px] font-medium transition-all',
-                  (!isHost || displayPreferMp4) &&
+                  (!isHost || hostEffectivePreferMp4) &&
                     'cursor-not-allowed opacity-40',
                   displayBufferMode
                     ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
@@ -302,7 +350,7 @@ export function BilibiliParseSettings({
             >
               {!isHost
                 ? '缓冲模式由房主统一管理'
-                : displayPreferMp4
+                : hostEffectivePreferMp4
                   ? 'MP4 模式不支持缓冲，请切换到 DASH'
                   : displayBufferMode
                     ? '进入房间先缓存完整视频到本地，避免 URL 过期与卡顿'
@@ -317,7 +365,7 @@ export function BilibiliParseSettings({
             className={cn(
               'rounded-md p-1.5 transition-opacity',
               (!isHost ||
-                displayPreferMp4 ||
+                hostEffectivePreferMp4 ||
                 displayBufferMode ||
                 displayCliEnabled) &&
                 'pointer-events-none opacity-40'
@@ -334,7 +382,7 @@ export function BilibiliParseSettings({
                 type="button"
                 disabled={
                   !isHost ||
-                  displayPreferMp4 ||
+                  hostEffectivePreferMp4 ||
                   displayBufferMode ||
                   displayCliEnabled
                 }
@@ -352,7 +400,7 @@ export function BilibiliParseSettings({
                 type="button"
                 disabled={
                   !isHost ||
-                  displayPreferMp4 ||
+                  hostEffectivePreferMp4 ||
                   displayBufferMode ||
                   displayCliEnabled
                 }
@@ -373,7 +421,7 @@ export function BilibiliParseSettings({
             >
               {!isHost
                 ? 'P2P 传输由房主统一管理'
-                : displayPreferMp4
+                : hostEffectivePreferMp4
                   ? 'MP4 模式不支持 P2P，请切换到 DASH'
                   : displayCliEnabled
                     ? 'CLI 代理与 P2P 互斥，请关闭 CLI 后再启用 P2P'

@@ -115,6 +115,26 @@ export function useCliAgent(roomId: string | undefined) {
     }
   }, [roomId, checkHealth, reset])
 
+  // 1b. 定期向后端刷新代理列表，避免 CLI 重连或前端挂载时机导致 agents 为空。
+  // 同时用户启用 CLI 后也能更快感知到代理上线。
+  const agentsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    if (!socket || !connected || !roomId) return
+
+    // 立即拉取一次，再启动 3 秒轮询
+    listAgents()
+    agentsTimerRef.current = setInterval(() => {
+      listAgents()
+    }, 3000)
+
+    return () => {
+      if (agentsTimerRef.current) {
+        clearInterval(agentsTimerRef.current)
+        agentsTimerRef.current = null
+      }
+    }
+  }, [socket, connected, roomId, listAgents])
+
   // 2. socket 事件监听：代理上线/下线/列表
   useEffect(() => {
     if (!socket || !roomId) return

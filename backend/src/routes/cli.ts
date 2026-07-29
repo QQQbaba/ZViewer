@@ -58,6 +58,9 @@ router.get('/resolve', async (req, res) => {
       qn,
       preferMp4,
       page: undefined,
+      // CLI 使用本地代理播放，实际视频流由用户本机浏览器→CLI 拉取，
+      // 后端无需校验 B站 CDN 可达性，避免远程服务器网络差异导致错误降级为 MP4。
+      skipCdnCheck: true,
       onProgress: () => {
         // CLI 解析不需要进度推送，静默处理
       },
