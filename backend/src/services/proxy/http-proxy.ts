@@ -9,11 +9,20 @@
  * - 上游超时控制（默认 30s，可配置），超时返回 504；
  * - 客户端断连时通过 AbortController 中断上游请求，避免无效带宽消耗；
  * - 错误分类：超时 504 / 上游非 2xx 透传状态码 / 网络异常 502；
- * - 响应头透传收敛为白名单，逐一处理。
+ * - 响应头透传收敛为白名单，逐一处理；
+ * - 流量日志：记录每次代理的 URL / 传输字节数 / 耗时，便于排查带宽来源。
  */
 
 import { Request, Response } from 'express';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
+
+/** 将字节数格式化为人类可读单位 */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)}MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)}GB`;
+}
 
 /** 上游请求默认 UA（桌面 Chrome），防盗链场景使用 */
 export const DEFAULT_PROXY_UA =
@@ -122,6 +131,11 @@ export async function proxyHttpUpstream(
   } = opts;
   const h = opts.headers ?? {};
 
+  // 流量追踪：记录传输字节数与耗时
+  const startTime = Date.now();
+  let bytesSent = 0;
+  const rangeHeader = req.headers.range as string | undefined;
+
   // 客户端断连 / 超时统一中断上游
   const controller = new AbortController();
   // 超时只覆盖「连接 + 等待响应头」阶段：fetch resolve 后即取消，
@@ -144,6 +158,9 @@ export async function proxyHttpUpstream(
     }
 
     if (!upstream.ok) {
+      console.log(
+        `[${logTag}] proxy ${upstream.status} ${formatBytes(bytesSent)} ${Date.now() - startTime}ms range=${rangeHeader || '-'} ${url.slice(0, 100)}`,
+      );
       res.status(upstream.status);
       res.end();
       return;
@@ -175,6 +192,9 @@ export async function proxyHttpUpstream(
     if (cacheControl) res.setHeader('Cache-Control', cacheControl);
 
     if (!upstream.body) {
+      console.log(
+        `[${logTag}] proxy 204 ${formatBytes(0)} ${Date.now() - startTime}ms range=${rangeHeader || '-'} ${url.slice(0, 100)}`,
+      );
       res.status(204).end();
       return;
     }
@@ -182,21 +202,39 @@ export async function proxyHttpUpstream(
     const stream = Readable.fromWeb(
       upstream.body as unknown as import('node:stream/web').ReadableStream,
     );
+    // 追踪实际传输给客户端的字节数
+    const byteCounter = new Transform({
+      transform(chunk, _encoding, callback) {
+        bytesSent += chunk.length;
+        callback(null, chunk);
+      },
+    });
     stream.on('error', (err) => {
       console.error(`[${logTag}] proxy upstream stream error:`, err);
+      console.log(
+        `[${logTag}] proxy ERROR ${formatBytes(bytesSent)} ${Date.now() - startTime}ms range=${rangeHeader || '-'} ${url.slice(0, 100)}`,
+      );
       if (!res.headersSent) {
         res.status(502).json({ success: false, message: errorMessage });
       } else {
         res.destroy();
       }
     });
-    stream.pipe(res);
+    // 响应结束时输出流量日志
+    res.on('finish', () => {
+      console.log(
+        `[${logTag}] proxy ${res.statusCode} ${formatBytes(bytesSent)} ${Date.now() - startTime}ms range=${rangeHeader || '-'} ${url.slice(0, 100)}`,
+      );
+    });
+    stream.pipe(byteCounter).pipe(res);
   } catch (err) {
     const isAbort = err instanceof Error && err.name === 'AbortError';
     if (isAbort && res.writableEnded) return; // 客户端主动断连，无需响应
     if (isAbort) {
       // 超时触发的中断
-      console.warn(`[${logTag}] proxy upstream timeout after ${timeoutMs}ms`);
+      console.warn(
+        `[${logTag}] proxy TIMEOUT ${formatBytes(bytesSent)} ${Date.now() - startTime}ms range=${rangeHeader || '-'} ${url.slice(0, 100)}`,
+      );
       if (!res.headersSent) {
         res.status(504).json({ success: false, message: '上游请求超时' });
       } else {
@@ -205,6 +243,9 @@ export async function proxyHttpUpstream(
       return;
     }
     console.error(`[${logTag}] proxy error:`, err);
+    console.log(
+      `[${logTag}] proxy ERR ${formatBytes(bytesSent)} ${Date.now() - startTime}ms range=${rangeHeader || '-'} ${url.slice(0, 100)}`,
+    );
     if (!res.headersSent) {
       res.status(502).json({ success: false, message: errorMessage });
     } else {

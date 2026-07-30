@@ -196,9 +196,7 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
     const qn = Number(value)
     if (!Number.isFinite(qn) || qn === movie.currentQn) return
 
-    const proxyUrl = useCliAgentStore
-      .getState()
-      .agents.find((a) => a.proxyUrl)?.proxyUrl
+    const proxyUrl = getActiveCliProxyUrl()
     if (!proxyUrl) {
       message.error('CLI 代理未连接')
       return

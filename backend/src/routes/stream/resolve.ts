@@ -119,7 +119,10 @@ router.get('/resolve-bilibili', async (req: AuthenticatedRequest, res) => {
 
   const writer = new NdjsonWriter(res);
   const cookie = (await getUserCookie(userId)) || undefined;
-  console.log('[bilibili] resolve-bilibili, cookie present:', !!cookie);
+  const resolveStartTime = Date.now();
+  console.log(
+    `[bilibili] resolve-bilibili start preferMp4=${preferMp4} forceDash=${forceDash} qn=${qn ?? 'auto'} cookie=${!!cookie} url=${url.slice(0, 60)}`,
+  );
 
   try {
     const result = await resolveBilibiliVideo({
@@ -135,6 +138,10 @@ router.get('/resolve-bilibili', async (req: AuthenticatedRequest, res) => {
         writer.send({ status: msg.status, step: msg.step, message: msg.message });
       },
     });
+
+    console.log(
+      `[bilibili] resolve-bilibili done format=${result.format} qn=${result.currentQn} ${Date.now() - resolveStartTime}ms url=${url.slice(0, 60)}`,
+    );
 
     writer.send({
       success: true,
