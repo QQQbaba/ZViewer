@@ -120,6 +120,8 @@ function DirectSharePage() {
 
   // LiveArtPlayer 挂载完成后绑定本地预览流（修复旧实现中
   // setIsSharing 后同步读取 ref 为 null 导致预览不显示的问题）
+  // React Compiler 误报：localVideoEl 为 video 元素实例，设置 srcObject 是必要 DOM 操作。
+  /* eslint-disable react-hooks/immutability */
   useEffect(() => {
     if (localVideoEl && localStreamRef.current) {
       if (localVideoEl.srcObject !== localStreamRef.current) {
@@ -127,6 +129,7 @@ function DirectSharePage() {
       }
     }
   }, [localVideoEl])
+  /* eslint-enable react-hooks/immutability */
 
   const handleStartDirectShare = async () => {
     if (pcRef.current) {

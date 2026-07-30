@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Tag } from '@/components/ui/Tag'
 import { message } from '@/components/ui/message'
 import { useConnectionStats } from '@/modules/screen-sharing/hooks/useConnectionStats'
+import { useVideoIntrinsicSize } from '@/hooks/useVideoIntrinsicSize'
 
 export interface VideoStatsMenuProps {
   videoElement: HTMLVideoElement | null
@@ -215,6 +216,9 @@ export function VideoStatsMenu({
 
   const isWebRtc = sourceType === 'webrtc'
 
+  // 实时监听 video 固有分辨率（videoWidth / videoHeight）
+  const intrinsicSize = useVideoIntrinsicSize(videoElement)
+
   // 复用现有 useConnectionStats，仅在 WebRTC 时启用
   const {
     stats: connStats,
@@ -226,6 +230,37 @@ export function VideoStatsMenu({
   const mseFramesRef = useRef<{ frames: number; time: number } | null>(null)
   // MSE 码率采样（按 webkitVideoDecodedByteCount 增量 × 8 估算）
   const mseBytesRef = useRef<{ bytes: number; time: number } | null>(null)
+
+  /**
+   * 解析最终展示的分辨率。
+   *
+   * 优先级：
+   * 1. video 元素实时固有尺寸（videoWidth / videoHeight），最准确
+   * 2. B站 当前清晰度对应的 resolution 字段（从 availableQualities 取）
+   * 3. 当前清晰度 qn 数字本身
+   * 4. 未就绪时返回 '-'
+   *
+   * 不使用任何硬编码 qn→分辨率映射表。
+   */
+  const resolveResolution = useCallback((): string => {
+    if (intrinsicSize && intrinsicSize.width > 0 && intrinsicSize.height > 0) {
+      return `${intrinsicSize.width} × ${intrinsicSize.height}`
+    }
+    if (
+      currentQuality != null &&
+      availableQualities &&
+      availableQualities.length > 0
+    ) {
+      const match = availableQualities.find((q) => q.id === currentQuality)
+      if (match?.resolution) {
+        return match.resolution
+      }
+      if (match?.label) {
+        return match.label
+      }
+    }
+    return '-'
+  }, [intrinsicSize, currentQuality, availableQualities])
 
   const computeStats = useCallback(async (): Promise<VideoStats | null> => {
     const video = videoElement
@@ -251,20 +286,13 @@ export function VideoStatsMenu({
     if (isWebRtc) {
       const extras = await readWebRtcExtras(pc ?? null)
 
-      let width = connStats.resolution?.width ?? 0
-      let height = connStats.resolution?.height ?? 0
-      if ((!width || !height) && video.videoWidth && video.videoHeight) {
-        width = video.videoWidth
-        height = video.videoHeight
-      }
-
       const bufferedEnd = getBufferedEnd(video)
       const bufferHealth =
         bufferedEnd > 0 ? bufferedEnd - video.currentTime : null
 
       return {
         codec: extras?.codec ?? 'unknown',
-        resolution: width && height ? `${width} × ${height}` : '-',
+        resolution: resolveResolution(),
         frameRate:
           connStats.frameRate != null
             ? `${connStats.frameRate.toFixed(1)} fps`
@@ -285,8 +313,6 @@ export function VideoStatsMenu({
     // MSE (bilibili / custom)
     // 优先使用调用方传入的 codec（来自解析结果），避免依赖非标准 videoTracks[0].codec
     const codec = videoCodec || getVideoCodec(video)
-    const width = video.videoWidth
-    const height = video.videoHeight
 
     // 帧率：通过 getVideoPlaybackQuality 的 totalVideoFrames 采样
     let frameRateStr = '-'
@@ -340,7 +366,7 @@ export function VideoStatsMenu({
 
     return {
       codec,
-      resolution: width && height ? `${width} × ${height}` : '-',
+      resolution: resolveResolution(),
       frameRate: frameRateStr,
       bitrate: bitrateStr,
       packetLossRate: '-',
@@ -363,8 +389,9 @@ export function VideoStatsMenu({
     formatPacketLoss,
     videoCodec,
     sourceUrl,
-    currentQuality,
+    resolveResolution,
     availableQualities,
+    currentQuality,
   ])
 
   // 始终持有最新 computeStats 引用，避免频繁重建监听器

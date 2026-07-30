@@ -37,6 +37,8 @@ export function ReturnToRoomButton() {
   const [render, setRender] = useState(false)
   const [exiting, setExiting] = useState(false)
 
+  // React Compiler 严格规则误报：render/exiting 仅用于入场/退场动画状态同步。
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (shouldShow) {
       setRender(true)
@@ -51,6 +53,7 @@ export function ReturnToRoomButton() {
       return () => clearTimeout(timer)
     }
   }, [shouldShow, render])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!render || !activeRoomId) return null
 

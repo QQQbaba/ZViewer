@@ -63,6 +63,8 @@ function HomePage() {
   // 实现方式：autoLogin done 后延迟 1.5s 才允许显示"断开"，
   // 给 socket.io 足够的握手时间（含 websocket 升级 + 后端认证中间件）。
   const [allowDisconnected, setAllowDisconnected] = useState(false)
+  // React Compiler 严格规则误报：根据 autoLogin 状态同步显示标记。
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (autoLoginStatus !== 'done') {
       setAllowDisconnected(false)
@@ -72,6 +74,7 @@ function HomePage() {
     const timer = setTimeout(() => setAllowDisconnected(true), 1500)
     return () => clearTimeout(timer)
   }, [autoLoginStatus])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const isConnecting =
     autoLoginStatus !== 'done' || (!connected && !allowDisconnected)

@@ -24,7 +24,7 @@
 import dashjs from 'dashjs'
 import type { MediaPlayerClass } from 'dashjs'
 import type { PlayerController, SeekResult } from '../../types'
-import { resolveProxyUrl } from '../../services/url-proxy'
+import { resolveProxyUrl, isCliProxyUrl } from '../../services/url-proxy'
 import { findAllSidxInBuffer, findMoovRange } from './mp4-box-parser'
 import { useP2PStatsStore } from '../../services/p2p-stats-store'
 
@@ -238,13 +238,21 @@ export class DashPlayer implements PlayerController {
       // 5. 让 dash.js 所有 XHR 请求携带凭证（cookie）
       //    B站 CDN URL 经后端 /api/stream/proxy 代理，该接口要求登录态。
       //    dash.js 默认 XHR 不带 credentials，会导致 401 拒绝。
+      //    CLI 代理场景：URL 是 http://127.0.0.1:xxxx/proxy?url=...（跨域），
+      //    CLI 不需要 Cookie 认证，且 setXHRWithCredentials=true 会导致
+      //    CORS 凭证策略冲突（Access-Control-Allow-Origin: * 与 credentials 不兼容），
+      //    浏览器拒绝所有视频段请求，视频无法播放。
       //    缓冲模式：BaseURL 是 blob: URL，dash.js 不会发起跨域请求，
       //    credentials 设置不影响 Blob URL 加载，但为保持一致仍启用。
-      player.setXHRWithCredentialsForType('MPD', true)
-      player.setXHRWithCredentialsForType('MediaSegment', true)
-      player.setXHRWithCredentialsForType('InitializationSegment', true)
-      player.setXHRWithCredentialsForType('XLink', true)
-      player.setXHRWithCredentialsForType('mtime', true)
+      const useCredentials = !isCliProxyUrl(this.videoUrl)
+      player.setXHRWithCredentialsForType('MPD', useCredentials)
+      player.setXHRWithCredentialsForType('MediaSegment', useCredentials)
+      player.setXHRWithCredentialsForType(
+        'InitializationSegment',
+        useCredentials
+      )
+      player.setXHRWithCredentialsForType('XLink', useCredentials)
+      player.setXHRWithCredentialsForType('mtime', useCredentials)
 
       // 6. 初始化 dash.js 并加载 MPD
       //    initialize(view, source, AutoPlay, startTime)
@@ -573,6 +581,11 @@ export class DashPlayer implements PlayerController {
     // 统一代理策略：DASH m4s 流始终走代理（有防盗链 + 无 CORS）
     const proxyUrl = resolveProxyUrl(url, undefined, 'dash')
     const info: DashPlayerInitInfo = {}
+    // CLI 代理是跨域地址，不需要 credentials（Cookie），
+    // credentials: 'include' 会导致 CORS 凭证策略冲突
+    const credentialsMode: RequestCredentials = isCliProxyUrl(proxyUrl)
+      ? 'omit'
+      : 'include'
 
     try {
       const controller = new AbortController()
@@ -580,7 +593,7 @@ export class DashPlayer implements PlayerController {
         headers: {
           Range: `bytes=0-${INIT_SEGMENT_PRELOAD_BYTES - 1}`,
         },
-        credentials: 'include',
+        credentials: credentialsMode,
         signal: controller.signal,
       })
 
@@ -722,7 +735,7 @@ export class DashPlayer implements PlayerController {
         headers: {
           Range: `bytes=0-${SIDX_SCAN_BYTES - 1}`,
         },
-        credentials: 'include',
+        credentials: isCliProxyUrl(proxyUrl) ? 'omit' : 'include',
         signal: controller.signal,
       })
 

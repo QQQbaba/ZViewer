@@ -39,16 +39,12 @@ export interface ResolveProgress {
 }
 
 /**
- * B站 MP4 直链（fnval=1 + platform=html5 + high_quality=1）支持的最高清晰度 qn。
+ * B站 MP4 直链（fnval=1 + platform=html5 + high_quality=1）实际最高清晰度。
  *
- * 根据 B站 官方 API 文档（SocialSisterYi/bilibili-API-collect）:
- * - platform=html5 + high_quality=1 时,MP4 格式最高支持 1080P(qn=80)
- * - 1080P+(qn=112) / 1080P60(qn=116) / 4K(qn=120) / HDR(qn=125) / 杜比视界(qn=126) / 8K(qn=127)
- *   全部仅 DASH 格式支持,MP4 无法获取
- * 参考: synctv/vendors/vendors/bilibili/movie.go GetVideoURL 默认请求 Q1080PP(112),
- *       B站 会自动降级返回 1080P(80)
+ * 实测：B站 对 MP4 格式有硬性限制，无论是否会员，html5 接口最高仅返回 720P(qn=64)。
+ * 1080P / 1080P+ / 4K / HDR / 杜比视界 / 8K 仅 DASH 格式支持，MP4 无法获取。
  */
-const MP4_MAX_QN = 80; // 1080P
+const MP4_MAX_QN = 64; // 720P
 
 /**
  * 收窄清晰度列表到 MP4 支持的范围（qn ≤ MP4_MAX_QN）。
@@ -104,6 +100,12 @@ export interface ResolveOptions {
    * 跳过可省去 3.5s 超时等待，显著提升解析速度。
    */
   skipCdnCheck?: boolean;
+  /**
+   * 强制使用 DASH 格式并禁用 MP4 降级。
+   * - 用于 CLI 高画质代理场景：用户明确选择 DASH 后，即使 CDN 不可达
+   *   也不应自动降级为 MP4，避免画质/格式与用户预期不符。
+   */
+  forceDash?: boolean;
 }
 
 /** 分集信息（前端用于展示分P列表和切换） */
@@ -252,7 +254,7 @@ async function fallbackToMp4(
   qn: number | undefined,
   isVip: boolean,
   skipCdnCheck: boolean = false,
-): Promise<{ videoUrl: string; currentQn?: number } | null> {
+): Promise<{ videoUrl: string; currentQn?: number; acceptQuality?: { id: number; label: string; resolution?: string }[] } | null> {
   const mp4PlayUrl = await getPlayUrl(bvid, cid, cookie, {
     qn,
     fnval: 1,
@@ -263,13 +265,13 @@ async function fallbackToMp4(
   if (mp4PlayUrl?.format === 'mp4' && mp4PlayUrl.durl?.[0]?.url) {
     // skipCdnCheck=true 时直接使用 baseUrl，避免 HEAD 探测延迟（下载场景）
     if (skipCdnCheck) {
-      return { videoUrl: mp4PlayUrl.durl[0].url, currentQn: mp4PlayUrl.currentQn };
+      return { videoUrl: mp4PlayUrl.durl[0].url, currentQn: mp4PlayUrl.currentQn, acceptQuality: mp4PlayUrl.acceptQuality };
     }
     const mp4Url = await findReachableMediaUrl({
       baseUrl: mp4PlayUrl.durl[0].url,
     });
     if (mp4Url) {
-      return { videoUrl: mp4Url, currentQn: mp4PlayUrl.currentQn };
+      return { videoUrl: mp4Url, currentQn: mp4PlayUrl.currentQn, acceptQuality: mp4PlayUrl.acceptQuality };
     }
   }
   return null;
@@ -281,7 +283,7 @@ async function fallbackToMp4(
 export async function resolveBilibiliVideo(
   opts: ResolveOptions,
 ): Promise<ResolveResult> {
-  const { url, cookie, qn, codec, onProgress, preferMp4, page, skipCdnCheck } = opts;
+  const { url, cookie, qn, codec, onProgress, preferMp4, page, skipCdnCheck, forceDash } = opts;
 
   const bvid = extractBvid(url);
   if (!bvid) {
@@ -339,6 +341,42 @@ export async function resolveBilibiliVideo(
   const hasCookie = !!cookie;
   const defaultQn = getDefaultQn(isVip, hasCookie);
   const requestedQn = qn ?? defaultQn;
+
+  // preferMp4 优先路径：直接请求 MP4 单流（fnval=1 + platform=html5），浏览器原生播放无需 MSE
+  // MP4 模式最高支持 720P(qn=64)，失败时不再回退 DASH，避免用户明确选择 MP4 后仍被切换到 DASH
+  if (preferMp4) {
+    emit('cdn', '正在获取 MP4 直链（直连模式）...');
+    const mp4 = await fallbackToMp4(
+      info.bvid,
+      effectiveCid,
+      cookie,
+      Math.min(requestedQn, MP4_MAX_QN),
+      isVip,
+      skipCdnCheck,
+    );
+    if (mp4) {
+      // MP4 模式收窄清晰度列表：B站 MP4 直链最高支持 720P(qn=64)，
+      // 不应展示 1080P+/4K/HDR 等 DASH 专属选项，避免前端误导用户
+      const mp4AcceptQuality = narrowAcceptQualityForMp4(mp4.acceptQuality ?? []);
+      return {
+        title: info.title,
+        duration: getCurrentPageDuration(info, effectiveCid),
+        cid: effectiveCid,
+        videoUrl: mp4.videoUrl,
+        format: 'mp4',
+        loggedIn: !!cookie,
+        vipStatus: isVip ? 1 : 0,
+        currentQn: Math.min(mp4.currentQn ?? MP4_MAX_QN, MP4_MAX_QN),
+        acceptQuality: mp4AcceptQuality,
+        pages: pagesInfo,
+        currentPage,
+      };
+    }
+    throw new ResolveError(
+      '该视频不支持 MP4 直链播放，请切换到 DASH 高清模式',
+      'MP4_NOT_AVAILABLE',
+    );
+  }
 
   // 播放地址（使用 effectiveCid 对应的分集 cid 请求 playurl）
   emit('playurl', '正在获取播放地址...');
@@ -407,32 +445,6 @@ export async function resolveBilibiliVideo(
 
   emit('finish', '解析完成，正在加载播放器...');
 
-  // preferMp4 优先路径：请求 MP4 单流（fnval=1 + platform=html5），浏览器原生播放无需 MSE
-  // MP4 模式最高支持 1080P(qn=80),失败时回退 DASH
-  if (preferMp4) {
-    emit('cdn', '正在获取 MP4 直链（直连模式）...');
-    const mp4 = await fallbackToMp4(info.bvid, effectiveCid, cookie, effectiveQn, isVip, skipCdnCheck);
-    if (mp4) {
-      // MP4 模式收窄清晰度列表：B站 MP4 直链最高支持 1080P(qn=80),
-      // 不应展示 1080P+/4K/HDR 等 DASH 专属选项,避免前端误导用户
-      const mp4AcceptQuality = narrowAcceptQualityForMp4(acceptQuality);
-      return {
-        title: info.title,
-        duration: getCurrentPageDuration(info, effectiveCid),
-        cid: effectiveCid,
-        videoUrl: mp4.videoUrl,
-        format: 'mp4',
-        loggedIn: !!cookie,
-        vipStatus: isVip ? 1 : 0,
-        currentQn: mp4.currentQn ?? playUrl.currentQn,
-        acceptQuality: mp4AcceptQuality,
-        pages: pagesInfo,
-        currentPage,
-      };
-    }
-    emit('fallback', 'MP4 直链不可用，回退到 DASH 格式...');
-  }
-
   // DASH 路径：选择可达视频/音频 URL
   if (playUrl.format === 'dash' && playUrl.bestVideo) {
     emit('cdn', '正在选择可用 CDN...');
@@ -460,11 +472,27 @@ export async function resolveBilibiliVideo(
     }
 
     if (!videoUrl) {
+      if (forceDash) {
+        // 强制 DASH 模式：禁用 MP4 降级，直接报错
+        throw new ResolveError(
+          '当前网络无法访问 B站 媒体服务器，请稍后重试',
+          'CDN_UNREACHABLE',
+        );
+      }
       emit('fallback', 'DASH 地址不可用，尝试 MP4 直链...');
-      const mp4 = await fallbackToMp4(info.bvid, effectiveCid, cookie, effectiveQn, isVip, skipCdnCheck);
+      const mp4 = await fallbackToMp4(
+        info.bvid,
+        effectiveCid,
+        cookie,
+        Math.min(effectiveQn ?? requestedQn, MP4_MAX_QN),
+        isVip,
+        skipCdnCheck,
+      );
       if (mp4) {
         // DASH 降级 MP4 时同样收窄清晰度列表
-        const mp4AcceptQuality = narrowAcceptQualityForMp4(acceptQuality);
+        const mp4AcceptQuality = narrowAcceptQualityForMp4(
+          mp4.acceptQuality ?? acceptQuality,
+        );
         return {
           title: info.title,
           duration: getCurrentPageDuration(info, effectiveCid),
@@ -473,7 +501,7 @@ export async function resolveBilibiliVideo(
           format: 'mp4',
           loggedIn: !!cookie,
           vipStatus: isVip ? 1 : 0,
-          currentQn: mp4.currentQn ?? playUrl.currentQn,
+          currentQn: Math.min(mp4.currentQn ?? MP4_MAX_QN, MP4_MAX_QN),
           acceptQuality: mp4AcceptQuality,
           pages: pagesInfo,
           currentPage,
@@ -504,7 +532,14 @@ export async function resolveBilibiliVideo(
   }
 
   // MP4 直链路径（B站 在请求 DASH 时仍返回 MP4 的边缘场景）
+  // 强制 DASH 模式下禁用该回退，避免返回 MP4 格式
   if (playUrl.format === 'mp4' && playUrl.durl?.length) {
+    if (forceDash) {
+      throw new ResolveError(
+        '该视频不支持 DASH 高清播放',
+        'DASH_NOT_AVAILABLE',
+      );
+    }
     emit('cdn', '正在选择可用 CDN...');
     // skipCdnCheck=true 时直接使用 baseUrl（下载场景）
     const mp4Url = skipCdnCheck

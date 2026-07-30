@@ -24,6 +24,7 @@ import {
   setBilibiliParseOptions,
   getBilibiliParseOptions,
 } from '@/modules/bilibili/parseOptions'
+import { getEffectivePreferMp4 } from '@/modules/room/watch-together/movie-source-resolver'
 import {
   useP2PStatsStore,
   formatKBytes,
@@ -48,7 +49,7 @@ export function BilibiliParseSettings({
 }: BilibiliParseSettingsProps) {
   const [expanded, setExpanded] = useState(false)
   const [pendingCliReload, setPendingCliReload] = useState(false)
-  const { preferMp4, bufferMode, p2pEnabled, cliEnabled } =
+  const { bufferMode, p2pEnabled, cliEnabled } =
     useBilibiliParsePreferences(movieId)
   const cliAgent = useCliAgent(roomId)
   const triggerReloadBilibili = useRoomStore(
@@ -58,24 +59,12 @@ export function BilibiliParseSettings({
     (state) => state.triggerViewerSourceReload
   )
   const currentMovieId = useRoomStore((state) => state.currentMovieId)
-  const watchTogetherFormat = useRoomStore(
-    (state) => state.watchTogether.format
-  )
   const watchTogetherBufferMode = useRoomStore(
     (state) => state.watchTogether.bufferMode
   )
-  const movie = useRoomStore((state) =>
-    state.movies.find((m) => m.id === movieId)
-  )
-
   const cliUnavailable = cliEnabled && !cliAgent.available
-  const hostEffectivePreferMp4 = cliUnavailable ? true : preferMp4
-  const viewerDisplayPreferMp4 =
-    movie?.format === 'mp4' ||
-    (movieId === currentMovieId && watchTogetherFormat === 'mp4')
-  const displayPreferMp4 = isHost
-    ? hostEffectivePreferMp4
-    : viewerDisplayPreferMp4
+  const effectivePreferMp4 = getEffectivePreferMp4(movieId)
+  const displayPreferMp4 = effectivePreferMp4
 
   const viewerDisplayBufferMode =
     movieId === currentMovieId ? watchTogetherBufferMode : false
@@ -174,6 +163,9 @@ export function BilibiliParseSettings({
     ]
   )
 
+  // React Compiler 严格规则误报：本 effect 根据外部 CLI 代理状态变化触发重载，
+  // setPendingCliReload 用于清除一次性等待标记，不存在级联渲染问题。
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!pendingCliReload) return
     if (cliAgent.available) {
@@ -196,6 +188,7 @@ export function BilibiliParseSettings({
     triggerReloadBilibili,
     triggerViewerSourceReload,
   ])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleOpenCliSetup = useCallback(() => {
     const url = new URL('http://127.0.0.1:9333/')
@@ -296,17 +289,14 @@ export function BilibiliParseSettings({
               className="mt-1 text-[10px] leading-snug"
               style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
             >
-              {!isHost
-                ? displayPreferMp4
-                  ? '房主当前使用 MP4 直链，seek 流畅，清晰度通常 480P/720P'
-                  : '房主当前使用 DASH 高清，支持 1080P/4K，seek 需缓冲'
-                : cliEnabled
-                  ? cliAgent.available
-                    ? 'CLI 代理已启用，当前使用本地 DASH 高画质解析'
-                    : '已启用 CLI 但未连接本地代理，解析时将自动降级为 MP4；连接后恢复 DASH 高画质'
-                  : displayPreferMp4
-                    ? 'MP4 直链，seek 流畅，清晰度通常 480P/720P'
-                    : 'DASH 分离流，支持 1080P/4K，seek 需缓冲'}
+              {' '}
+              {cliEnabled
+                ? cliAgent.available
+                  ? 'CLI 代理已启用，当前使用本地 DASH 高画质解析（不再自动降级 MP4）'
+                  : '已启用 CLI 但未连接本地代理，请先启动本地 zcontrol-cli 以播放 DASH 高画质'
+                : displayPreferMp4
+                  ? 'MP4 直链，seek 流畅，清晰度通常 480P/720P'
+                  : 'DASH 分离流，支持 1080P/4K，seek 需缓冲'}
             </div>
           </div>
 
@@ -314,7 +304,7 @@ export function BilibiliParseSettings({
           <div
             className={cn(
               'transition-opacity',
-              hostEffectivePreferMp4 && 'pointer-events-none opacity-40'
+              effectivePreferMp4 && 'pointer-events-none opacity-40'
             )}
           >
             <div
@@ -328,7 +318,7 @@ export function BilibiliParseSettings({
               handleBufferModeChange,
               '关闭',
               '开启',
-              !isHost || hostEffectivePreferMp4
+              !isHost || effectivePreferMp4
             )}
             <div
               className="mt-1 text-[10px] leading-snug"
@@ -336,7 +326,7 @@ export function BilibiliParseSettings({
             >
               {!isHost
                 ? '缓冲模式由房主统一管理'
-                : hostEffectivePreferMp4
+                : effectivePreferMp4
                   ? 'MP4 模式不支持缓冲，请切换到 DASH'
                   : displayBufferMode
                     ? '进入房间先缓存完整视频到本地，避免 URL 过期与卡顿'
@@ -349,7 +339,7 @@ export function BilibiliParseSettings({
             className={cn(
               'transition-opacity',
               (!isHost ||
-                hostEffectivePreferMp4 ||
+                effectivePreferMp4 ||
                 displayBufferMode ||
                 displayCliEnabled) &&
                 'pointer-events-none opacity-40'
@@ -367,7 +357,7 @@ export function BilibiliParseSettings({
               '关闭',
               '开启',
               !isHost ||
-                hostEffectivePreferMp4 ||
+                effectivePreferMp4 ||
                 displayBufferMode ||
                 displayCliEnabled
             )}
@@ -377,7 +367,7 @@ export function BilibiliParseSettings({
             >
               {!isHost
                 ? 'P2P 传输由房主统一管理'
-                : hostEffectivePreferMp4
+                : effectivePreferMp4
                   ? 'MP4 模式不支持 P2P，请切换到 DASH'
                   : displayCliEnabled
                     ? 'CLI 代理与 P2P 互斥，请关闭 CLI 后再启用 P2P'
@@ -550,7 +540,7 @@ export function BilibiliParseSettings({
                 : displayCliEnabled
                   ? cliAgent.available
                     ? `已连接本地代理 ${cliAgent.agentInfo?.version ?? ''}`
-                    : `已启用但未检测到本地 CLI，${isHost ? '已自动降级为 MP4 模式' : '当前源将走服务器代理直到连接成功'}`
+                    : '已启用但未检测到本地 CLI，请先启动本地代理以播放 DASH 高画质'
                   : '使用本地 zcontrol-cli 获取大会员等高画质'}
             </div>
 

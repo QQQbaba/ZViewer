@@ -185,16 +185,18 @@ export function useCliAgent(roomId: string | undefined) {
     }
   }, [connected, roomId, listAgents])
 
-  // 计算当前可用代理：本地健康检查通过，且房间内至少有一个代理
-  const available = localOnline && agents.length > 0
+  // 房间内有已注册的 CLI 代理即视为可用。
+  // 不再强制要求 localOnline：健康检查可能因 CORS/浏览器策略暂时失败，
+  // 但 CLI HTTP 服务实际可用。实际不可用时 fetch 会自然报错。
   const selectedAgent = agents[0] ?? null
+  const available = agents.length > 0
 
   return {
     /** 本地 CLI 是否在线 */
     localOnline,
     /** 房间内是否有已注册的 CLI 代理 */
     hasAgent: agents.length > 0,
-    /** 本地在线且房间内有代理，可投入使用 */
+    /** 房间内有代理即可投入使用（不再强制要求本地健康检查通过） */
     available,
     /** 推荐使用的代理 URL（取第一个可用代理） */
     proxyUrl: selectedAgent?.proxyUrl ?? null,

@@ -12,7 +12,7 @@
     "dev:backend": "npm run dev -w backend",
     "dev:frontend": "npm run dev -w frontend",
     "build": "npm run build -ws",
-    "lint": "npm run lint -w frontend"
+    "lint": "npm run lint -ws"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",

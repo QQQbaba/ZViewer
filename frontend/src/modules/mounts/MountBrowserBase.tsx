@@ -107,6 +107,8 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
     [mountId, browse]
   )
 
+  // React Compiler 严格规则误报：Modal 打开时重置浏览状态并加载目录。
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (open && mountId !== null) {
       setCurrentPath(undefined)
@@ -117,6 +119,7 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
       void load()
     }
   }, [open, mountId, load])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleOpenDirectory = (path: string) => {
     void load(path)

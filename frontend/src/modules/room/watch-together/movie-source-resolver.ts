@@ -68,28 +68,30 @@ export interface ResolveMovieSourceOptions {
 
 /**
  * 获取当前可用的 CLI 代理 URL。
- * 仅当本地健康检查通过且房间内至少有一个代理时返回有效地址。
+ *
+ * 当房间内至少有一个 CLI 代理注册（通过 socket）时返回其 proxyUrl。
+ * 不再强制要求 localOnline（本地健康检查通过）：健康检查可能因 CORS、
+ * 网络抖动或浏览器安全策略暂时失败，但 CLI 的 HTTP 服务实际可用。
+ * 如果 HTTP 服务确实不可用，resolveBilibiliViaCli 的 fetch 会失败并报错。
  */
 export function getActiveCliProxyUrl(): string | null {
-  const { localOnline, agents } = useCliAgentStore.getState()
-  if (!localOnline || agents.length === 0) return null
+  const { agents } = useCliAgentStore.getState()
+  if (agents.length === 0) return null
   return agents[0].proxyUrl
 }
 
 /**
  * 获取影片实际生效的 MP4 偏好。
  *
- * 当用户启用 CLI 高画质代理且本地 CLI 已连接时，强制走 DASH 代理路径，
- * 不再降级到 MP4；CLI 启用但未连接时，强制降级为 MP4 模式，避免 DASH
- * 高画质地址因无大会员 Cookie 而无法播放。
+ * 当用户启用 CLI 高画质代理后，强制走 DASH 代理路径，不再降级到 MP4；
+ * 即使本地 CLI 暂时未连接，也保持 DASH 请求，由调用方提示连接代理，
+ * 避免用户开启 CLI 后因网络问题被自动切回 MP4。
  */
 export function getEffectivePreferMp4(movieId: number): boolean {
   const { preferMp4, cliEnabled } = getBilibiliParseOptions(movieId)
   if (cliEnabled) {
-    // CLI 已连接：强制使用 DASH，不再降级 MP4
-    if (getActiveCliProxyUrl()) return false
-    // CLI 启用但未连接：强制降级为 MP4
-    return true
+    // CLI 已启用：强制使用 DASH，不再降级 MP4
+    return false
   }
   return preferMp4
 }
@@ -140,10 +142,14 @@ export async function resolveBilibiliOnline(
 ): Promise<ResolvedMovieSource> {
   const parsePrefs = getBilibiliParseOptions(movie.id)
   const proxyUrl = parsePrefs.cliEnabled ? getActiveCliProxyUrl() : null
-  // CLI 已连接时强制使用 DASH 代理，不再降级 MP4；未连接时强制 MP4
+  // CLI 已启用时强制使用 DASH 代理，不再降级 MP4；未连接时直接报错，避免回退
   const effectivePreferMp4 =
     options?.preferMp4 ?? getEffectivePreferMp4(movie.id)
   const forceDash = parsePrefs.cliEnabled && !!proxyUrl
+
+  if (parsePrefs.cliEnabled && !proxyUrl) {
+    throw new Error('CLI 代理未连接，请先启动本地 zcontrol-cli')
+  }
 
   if (proxyUrl) {
     const bvid = extractBvid(movie.url)
@@ -187,6 +193,15 @@ export async function resolveMovieSource({
   if (sourceType === 'bilibili') {
     // 恢复场景且旧 URL 可用：直接复用，跳过在线解析
     if (recovery?.sourceUrl) {
+      // B站 源的防盗链由服务器代理（m4s）或直连（MP4）处理，不需要前端 headers。
+      // recovery.headers 可能来自旧的非 B站 源（如 anime），复用时必须清除，
+      // 否则 resolveProxyUrl 会因 hasHeaders=true 将 MP4 直链包装为服务器代理 URL。
+      if (recovery.headers && Object.keys(recovery.headers).length > 0) {
+        console.warn(
+          '[movie-source-resolver] B站 recovery 路径中清除非 B站 headers:',
+          recovery.headers
+        )
+      }
       return {
         sourceUrl: recovery.sourceUrl,
         audioUrl: recovery.audioUrl,
@@ -197,7 +212,7 @@ export async function resolveMovieSource({
         duration: recovery.duration ?? movie.duration ?? 0,
         currentQn: recovery.currentQn ?? movie.currentQn,
         acceptQuality: recovery.acceptQuality ?? movie.acceptQuality,
-        headers: recovery.headers,
+        headers: undefined,
         reusedRecoveryUrl: true,
       }
     }

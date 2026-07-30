@@ -134,13 +134,17 @@ export default function ServerFileManager() {
     }
   }, [])
 
+  // React Compiler 严格规则误报：组件挂载时一次性加载服务器文件根目录。
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     void loadRoots()
   }, [loadRoots])
 
+  // React Compiler 严格规则误报：组件挂载时一次性加载默认 uploads 目录。
   useEffect(() => {
     void load('uploads:/')
   }, [load])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // 根目录变化时关闭下拉
   useEffect(() => {

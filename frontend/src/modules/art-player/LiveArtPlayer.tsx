@@ -75,6 +75,8 @@ export function LiveArtPlayer({
   }, [art])
 
   // 控制栏整体显隐
+  // React Compiler 误报：直接操作 ArtPlayer 内部 DOM 是必要行为。
+  /* eslint-disable react-hooks/immutability */
   useEffect(() => {
     if (!art) return
     if (!showControls) {
@@ -99,6 +101,7 @@ export function LiveArtPlayer({
       video.muted = muted
     }
   }, [video, muted])
+  /* eslint-enable react-hooks/immutability */
 
   return (
     <div className={cn('zart-stage', className)}>

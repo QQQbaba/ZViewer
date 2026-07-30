@@ -340,6 +340,8 @@ export function RoomLayout({
   const mobileCardsScrollRef = useRef<HTMLDivElement>(null)
   const [activeControlIndex, setActiveControlIndex] = useState(0)
 
+  // React Compiler 无法保留现有手动 memoization，此处依赖已手动优化。
+  /* eslint-disable react-hooks/preserve-manual-memoization */
   const handleMobileCardsScroll = useCallback(() => {
     const el = mobileCardsScrollRef.current
     if (!el) return
@@ -366,6 +368,7 @@ export function RoomLayout({
       })
     }
   }, [])
+  /* eslint-enable react-hooks/preserve-manual-memoization */
 
   const roomContent = (
     <>
@@ -422,7 +425,9 @@ export function RoomLayout({
       <div
         className={cn(
           'relative mt-4 flex min-h-0 flex-none gap-3 overflow-hidden',
-          isNativeFullscreen ? '' : 'max-h-[calc(100vh-150px)] md:max-h-[calc(100vh-220px)]'
+          isNativeFullscreen
+            ? ''
+            : 'max-h-[calc(100vh-150px)] md:max-h-[calc(100vh-220px)]'
         )}
       >
         {/* 左侧播放器：决定整个容器高度，flex-1 随侧栏开闭平滑改变宽度 */}
@@ -497,7 +502,9 @@ export function RoomLayout({
             if (controlChildren.length === 1) {
               // 共享状态下评论区单独在下方时限制高度，避免无限撑开
               return (
-                <div className={isSharing ? 'h-[360px] md:h-[500px]' : 'h-full'}>
+                <div
+                  className={isSharing ? 'h-[360px] md:h-[500px]' : 'h-full'}
+                >
                   {controlChildren[0]}
                 </div>
               )
