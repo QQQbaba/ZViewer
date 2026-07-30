@@ -455,11 +455,18 @@ pid_running() {
 }
 
 # 通过端口查找真正监听的进程 PID
+# 参数：端口 超时毫秒 [监视PID]
+# 当指定监视PID时，若该PID退出则立即停止等待（避免进程已崩溃仍空等超时）
 get_pid_by_port() {
   local port="$1"
   local timeout_ms="${2:-4000}"
+  local watch_pid="${3:-}"
   local deadline=$(( $(date +%s%3N) + timeout_ms ))
   while [[ $(date +%s%3N) -lt $deadline ]]; do
+    # 如果指定了监视PID且已退出，立即停止等待
+    if [[ -n "$watch_pid" ]] && ! kill -0 "$watch_pid" 2>/dev/null; then
+      return 1
+    fi
     local pid=""
     if command -v lsof &> /dev/null; then
       pid=$(lsof -t -i:"$port" -sTCP:LISTEN 2>/dev/null | head -n1 || true)
@@ -473,6 +480,50 @@ get_pid_by_port() {
     sleep 0.2
   done
   return 1
+}
+
+# 打印启动失败时的诊断信息：同时显示 stdout 和 stderr 日志
+# 参数：进程标签 stub_pid stdout_log stderr_log
+print_startup_failure_diag() {
+  local label="$1"
+  local stub_pid="$2"
+  local stdout_log="$3"
+  local stderr_log="$4"
+
+  echo "  ---- 诊断信息 ----" >&2
+
+  # 进程状态
+  if kill -0 "$stub_pid" 2>/dev/null; then
+    echo "  进程状态: PID $stub_pid 仍在运行（启动超时，可能正在初始化）" >&2
+  else
+    wait "$stub_pid" 2>/dev/null
+    local exit_code=$?
+    echo "  进程状态: PID $stub_pid 已退出（退出码 $exit_code）" >&2
+  fi
+
+  # 日志文件大小
+  local stdout_size=0 stderr_size=0
+  [[ -f "$stdout_log" ]] && stdout_size=$(wc -c < "$stdout_log" 2>/dev/null || echo 0)
+  [[ -f "$stderr_log" ]] && stderr_size=$(wc -c < "$stderr_log" 2>/dev/null || echo 0)
+  echo "  日志大小: stdout=${stdout_size}字节 stderr=${stderr_size}字节" >&2
+  echo "" >&2
+
+  # 显示 stderr（错误日志优先）
+  if [[ -f "$stderr_log" ]] && [[ "$stderr_size" -gt 0 ]]; then
+    echo "  --- stderr（$label.err.log 最后 30 行）---" >&2
+    tail -n 30 "$stderr_log" >&2 2>/dev/null || true
+    echo "" >&2
+  else
+    echo "  --- stderr 为空 ---" >&2
+    echo "" >&2
+  fi
+
+  # 同时显示 stdout（启动日志可能包含关键信息，如 TypeORM 初始化进度）
+  if [[ -f "$stdout_log" ]] && [[ "$stdout_size" -gt 0 ]]; then
+    echo "  --- stdout（$label.log 最后 30 行）---" >&2
+    tail -n 30 "$stdout_log" >&2 2>/dev/null || true
+    echo "" >&2
+  fi
 }
 
 resolve_vite_js() {
@@ -703,9 +754,13 @@ do_start() {
   echo "  后端 stub PID: $STUB_PID (等待端口监听...)"
 
   # nohup 后台启动可能 PID 不准，通过端口查找真实 PID
-  if ! BACKEND_PID=$(get_pid_by_port "$PORT" 6000); then
-    echo "  后端启动失败（端口 $PORT 未监听），查看日志 $BACKEND_ERR_LOG" >&2
-    [[ -f "$BACKEND_ERR_LOG" ]] && tail -n 20 "$BACKEND_ERR_LOG" >&2
+  # 同时监视 STUB_PID：若进程已崩溃（如 MODULE_NOT_FOUND），立即停止等待
+  if ! BACKEND_PID=$(get_pid_by_port "$PORT" 15000 "$STUB_PID"); then
+    echo "  后端启动失败（端口 $PORT 未监听）" >&2
+    print_startup_failure_diag "backend" "$STUB_PID" "$BACKEND_LOG" "$BACKEND_ERR_LOG"
+    echo "  日志文件：" >&2
+    echo "    $BACKEND_LOG" >&2
+    echo "    $BACKEND_ERR_LOG" >&2
     kill -KILL "$STUB_PID" 2>/dev/null || true
     exit 1
   fi
@@ -732,9 +787,12 @@ do_start() {
   FRONTEND_STUB=$!
   echo "  前端 stub PID: $FRONTEND_STUB (等待端口监听...)"
 
-  if ! FRONTEND_PID=$(get_pid_by_port "$FRONTEND_PORT" 8000); then
-    echo "  前端启动失败（端口 $FRONTEND_PORT 未监听），查看日志 $FRONTEND_ERR_LOG" >&2
-    [[ -f "$FRONTEND_ERR_LOG" ]] && tail -n 20 "$FRONTEND_ERR_LOG" >&2
+  if ! FRONTEND_PID=$(get_pid_by_port "$FRONTEND_PORT" 15000 "$FRONTEND_STUB"); then
+    echo "  前端启动失败（端口 $FRONTEND_PORT 未监听）" >&2
+    print_startup_failure_diag "frontend" "$FRONTEND_STUB" "$FRONTEND_LOG" "$FRONTEND_ERR_LOG"
+    echo "  日志文件：" >&2
+    echo "    $FRONTEND_LOG" >&2
+    echo "    $FRONTEND_ERR_LOG" >&2
     kill -KILL "$FRONTEND_STUB" 2>/dev/null || true
     echo "  回滚：停止已启动的后端 PID $BACKEND_PID ..." >&2
     stop_by_pid_or_port "$BACKEND_PID" "$PORT"
