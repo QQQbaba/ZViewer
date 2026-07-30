@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 #Requires -Version 5.1
 
 <#
@@ -1054,8 +1054,8 @@ function Show-Help {
     Write-Host "选项："
     Write-Host "  -ForceDeps          强制重新安装依赖（默认按需自动安装）"
     Write-Host "  -SkipBuild          跳过自动构建（仅使用已有产物启动）"
-    Write-Host "  -Port <int>         后端端口（默认 3333，优先级高于配置文件）"
-    Write-Host "  -FrontendPort <int> 前端端口（默认 4173，优先级高于配置文件）"
+    Write-Host "  -Port <int>         后端端口（默认 3333，优先级高于环境变量/配置文件）"
+    Write-Host "  -FrontendPort <int> 前端端口（默认 4173，优先级高于环境变量/配置文件）"
     Write-Host "  -Database <url>     数据库 URL"
     Write-Host ""
     Write-Host "一键启动说明："
@@ -1070,7 +1070,7 @@ function Show-Help {
     Write-Host "  可通过 http://<IPv4> 或 http://<IPv6> 访问，兼容纯 IPv6 网络环境。"
     Write-Host ""
     Write-Host "端口优先级："
-    Write-Host "  命令行参数 > .prod.ports.json 配置文件 > 默认值"
+    Write-Host "  命令行参数 > 环境变量（PORT / FRONTEND_PORT）> .prod.ports.json 配置文件 > 默认值"
     Write-Host "  使用 port 子命令或菜单第 7 项可交互式修改并持久化端口"
     Write-Host ""
     Write-Host "示例："
@@ -1218,15 +1218,22 @@ function Invoke-Port {
 # ============ 主入口 ============
 
 try {
-    # 端口优先级：命令行参数 > .prod.ports.json 配置文件 > 默认值
+    # 端口优先级：命令行参数 > 环境变量 > .prod.ports.json 配置文件 > 默认值
     # 在进入子命令前统一解析（port 子命令除外，它自己管理配置文件）
     if ($Command -in @('start', 'restart', 'status')) {
         $savedPorts = Read-PortsFile
-        if ($savedPorts) {
-            if (-not $PSBoundParameters.ContainsKey('Port')) {
+
+        if (-not $PSBoundParameters.ContainsKey('Port')) {
+            if ($env:PORT -match '^\d+$') {
+                $Port = [int]$env:PORT
+            } elseif ($savedPorts) {
                 $Port = $savedPorts.backend
             }
-            if (-not $PSBoundParameters.ContainsKey('FrontendPort')) {
+        }
+        if (-not $PSBoundParameters.ContainsKey('FrontendPort')) {
+            if ($env:FRONTEND_PORT -match '^\d+$') {
+                $FrontendPort = [int]$env:FRONTEND_PORT
+            } elseif ($savedPorts) {
                 $FrontendPort = $savedPorts.frontend
             }
         }

@@ -78,7 +78,7 @@ IPv6 兼容：
   可通过 http://<IPv4> 或 http://<IPv6> 访问，兼容纯 IPv6 网络环境。
 
 端口优先级：
-  命令行参数 > .prod.ports.json 配置文件 > 默认值
+  命令行参数 > 环境变量（PORT / FRONTEND_PORT）> .prod.ports.json 配置文件 > 默认值
 
 示例：
   $0 start                       # 一键启动（自动安装+构建）
@@ -335,6 +335,38 @@ deps_installed() {
   return 0
 }
 
+# 检测 better-sqlite3 原生二进制是否存在
+# node_modules 可能从其他平台（如 Windows）拷贝过来，目录存在但 .node 缺失或不兼容
+native_module_ok() {
+  local bsq="$ROOT_DIR/node_modules/better-sqlite3"
+  [[ -d "$bsq" ]] || return 1
+  # 查找已编译的 .node 文件（Release / Debug / build 等路径）
+  local found
+  found=$(find "$bsq/build" "$bsq/out" "$bsq/Release" "$bsq/Debug" \
+    -name 'better_sqlite3.node' -type f 2>/dev/null | head -1)
+  [[ -n "$found" ]]
+}
+
+# 重新编译 better-sqlite3 原生模块（跨平台部署 / .node 缺失时调用）
+rebuild_native_modules() {
+  echo "  重新编译原生模块 better-sqlite3 ..."
+  (cd "$ROOT_DIR" && npm rebuild better-sqlite3) || {
+    echo "" >&2
+    echo "  ============================================" >&2
+    echo "  better-sqlite3 原生模块编译失败！" >&2
+    echo "  原因：node_modules 可能从其他平台拷贝，缺少当前平台的二进制" >&2
+    echo "  解决方法：" >&2
+    echo "    1. 安装编译工具：" >&2
+    echo "       Debian/Ubuntu:  apt install -y python3 make g++" >&2
+    echo "       CentOS/RHEL:    yum install -y python3 make gcc-c++" >&2
+    echo "       Alpine:         apk add python3 make g++" >&2
+    echo "    2. 重新运行: $0 start --force-deps" >&2
+    echo "  ============================================" >&2
+    return 1
+  }
+  echo "  原生模块编译完成。"
+}
+
 # 检测 FFmpeg 是否可用（可选依赖，用于 B站视频下载 DASH 模式合并 m4s 流）
 # 未安装时仅影响高画质下载（1080P+/4K/HDR/杜比视界/8K），不影响其他功能
 check_ffmpeg() {
@@ -402,6 +434,12 @@ install_deps() {
     exit 1
   fi
   echo "  依赖安装完成，关键模块验证通过。"
+
+  # 原生模块二次校验：npm install 可能因编译工具缺失导致 .node 未生成
+  if ! native_module_ok; then
+    echo "  [警告] 依赖已安装但 better-sqlite3 原生二进制缺失，尝试重新编译 ..."
+    rebuild_native_modules || exit 1
+  fi
 }
 
 # 智能构建跳过：检测构建产物是否新于所有源代码文件
@@ -700,6 +738,12 @@ do_start() {
   else
     echo "[2/5] 检查依赖 ... node_modules 缺失，自动安装"
     install_deps
+  fi
+
+  # 原生模块校验：node_modules 可能从其他平台拷贝，目录在但 .node 缺失
+  if ! native_module_ok; then
+    echo "  [警告] better-sqlite3 原生二进制缺失或平台不匹配"
+    rebuild_native_modules || exit 1
   fi
 
   # 构建阶段：支持 --skip-build / --no-auto-build / 智能跳过
@@ -1105,15 +1149,27 @@ do_menu() {
 
 # ============ 端口优先级解析 ============
 
-# 端口优先级：命令行参数 > .prod.ports.json 配置文件 > 默认值
+# 端口优先级：命令行参数 > 环境变量 > .prod.ports.json 配置文件 > 默认值
 # 在进入子命令前统一解析（port/menu 除外，它们自己管理配置文件）
 if [[ "$COMMAND" != "port" && "$COMMAND" != "menu" ]]; then
   saved_ports=$(read_ports_file || true)
   if [[ -n "$saved_ports" ]]; then
     saved_backend=$(echo "$saved_ports" | awk '{print $1}')
     saved_frontend=$(echo "$saved_ports" | awk '{print $2}')
-    if [[ "$PORT_CLI_SET" -eq 0 ]]; then PORT="$saved_backend"; fi
-    if [[ "$FRONTEND_PORT_CLI_SET" -eq 0 ]]; then FRONTEND_PORT="$saved_frontend"; fi
+  fi
+  if [[ "$PORT_CLI_SET" -eq 0 ]]; then
+    if [[ -n "$PORT" ]]; then
+      : # 环境变量已提供，直接使用
+    elif [[ -n "$saved_backend" ]]; then
+      PORT="$saved_backend"
+    fi
+  fi
+  if [[ "$FRONTEND_PORT_CLI_SET" -eq 0 ]]; then
+    if [[ -n "$FRONTEND_PORT" ]]; then
+      : # 环境变量已提供，直接使用
+    elif [[ -n "$saved_frontend" ]]; then
+      FRONTEND_PORT="$saved_frontend"
+    fi
   fi
 fi
 
