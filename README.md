@@ -6,7 +6,7 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 
 <p align="left">
   <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/Zero-wyc/ZViewer?style=flat-square&logo=github&label=LICENSE&labelColor=333&color=orange" alt="License">
+    <img src="https://img.shields.io/github/license/Zero-wyc/ZViewer?style=flat-square&logo=github&label=LICENSE&labelColor=333&color=orange" alt="GPL">
   </a>
   <img src="https://img.shields.io/github/stars/Zero-wyc/ZViewer?style=flat-square&logo=github&label=Stars&labelColor=333&color=blue" alt="Stars">
   <a href="https://github.com/Zero-wyc/ZViewer/releases">
@@ -23,6 +23,7 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
     <img src="https://img.shields.io/badge/QQ-12B7F5?style=flat-square&logo=tencentqq&logoColor=white" alt="QQ">
   </a>
 </p>
+
 
 ---
 
