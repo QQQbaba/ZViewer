@@ -189,7 +189,18 @@ export async function proxyHttpUpstream(
       const value = upstream.headers.get(name);
       if (value) res.setHeader(name, value);
     }
-    if (cacheControl) res.setHeader('Cache-Control', cacheControl);
+    // 视频/媒体流代理：提示反向代理不要缓冲整个响应体。
+    // Nginx 默认会先把上游响应缓冲到临时文件再发给客户端，对于大体积、
+    // 长连接的 Range 流会导致延迟、超时或内存/磁盘耗尽。
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('X-Proxy-Buffering', 'no');
+
+    // Cache-Control：优先使用调用方传入的缓存策略，并追加 no-transform
+    // 禁止中间代理转换/压缩响应体（如把 video/mp4 当文本处理）。
+    const finalCacheControl = cacheControl
+      ? `${cacheControl}, no-transform`
+      : 'no-transform';
+    res.setHeader('Cache-Control', finalCacheControl);
 
     if (!upstream.body) {
       console.log(

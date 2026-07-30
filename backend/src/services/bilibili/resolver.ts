@@ -26,7 +26,7 @@ import {
   VIP_ONLY_QNS,
   QN_QUALITY_MAP,
 } from './permission';
-import { findReachableMediaUrl } from './cdn';
+import { findReachableMediaUrl, upgradeBilibiliUrlToHttps } from './cdn';
 import {
   getCachedVideoInfo,
   setCachedVideoInfo,
@@ -265,7 +265,11 @@ async function fallbackToMp4(
   if (mp4PlayUrl?.format === 'mp4' && mp4PlayUrl.durl?.[0]?.url) {
     // skipCdnCheck=true 时直接使用 baseUrl，避免 HEAD 探测延迟（下载场景）
     if (skipCdnCheck) {
-      return { videoUrl: mp4PlayUrl.durl[0].url, currentQn: mp4PlayUrl.currentQn, acceptQuality: mp4PlayUrl.acceptQuality };
+      return {
+        videoUrl: upgradeBilibiliUrlToHttps(mp4PlayUrl.durl[0].url),
+        currentQn: mp4PlayUrl.currentQn,
+        acceptQuality: mp4PlayUrl.acceptQuality,
+      };
     }
     const mp4Url = await findReachableMediaUrl({
       baseUrl: mp4PlayUrl.durl[0].url,
@@ -454,8 +458,10 @@ export async function resolveBilibiliVideo(
     let videoUrl: string | null;
     let audioUrl: string | null = null;
     if (skipCdnCheck) {
-      videoUrl = playUrl.bestVideo.baseUrl;
-      audioUrl = playUrl.bestAudio?.baseUrl ?? null;
+      videoUrl = upgradeBilibiliUrlToHttps(playUrl.bestVideo.baseUrl);
+      audioUrl = playUrl.bestAudio
+        ? upgradeBilibiliUrlToHttps(playUrl.bestAudio.baseUrl)
+        : null;
     } else {
       [videoUrl, audioUrl] = await Promise.all([
         findReachableMediaUrl({
@@ -543,7 +549,7 @@ export async function resolveBilibiliVideo(
     emit('cdn', '正在选择可用 CDN...');
     // skipCdnCheck=true 时直接使用 baseUrl（下载场景）
     const mp4Url = skipCdnCheck
-      ? playUrl.durl[0].url
+      ? upgradeBilibiliUrlToHttps(playUrl.durl[0].url)
       : await findReachableMediaUrl({ baseUrl: playUrl.durl[0].url });
     if (!mp4Url) {
       throw new ResolveError(
