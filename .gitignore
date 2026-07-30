@@ -16,7 +16,6 @@ coverage/
 .trae/
 .update-temp/
 apply-update.bat
-cli/
 # 数据库文件（含 B 站 cookie、用户密码哈希等敏感数据，禁止提交/打包）
 *.sqlite
 *.sqlite-journal
