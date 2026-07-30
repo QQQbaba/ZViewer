@@ -136,6 +136,16 @@ check_command() {
   fi
 }
 
+# 可用的 stdbuf 命令（GNU coreutils），用于取消 stdout/stderr 行缓冲，
+# 避免 Node.js 生产环境日志因缓冲延迟写入文件。
+resolve_stdbuf() {
+  if command -v stdbuf &> /dev/null; then
+    echo "stdbuf -oL -eL"
+  else
+    echo ""
+  fi
+}
+
 # 获取本机所有可对外访问的 IPv4 / IPv6 地址（排除回环、链路本地）
 # 输出两行：第一行 IPv4 空格分隔，第二行 IPv6 空格分隔
 get_network_addresses() {
@@ -747,15 +757,23 @@ do_start() {
 
   echo "  启动后端 (PORT=$PORT) ..."
   cd "$BACKEND_DIR"
+
+  # 使用 stdbuf 取消 Node.js 输出缓冲，避免启动失败时日志仍驻留内存缓冲。
+  # stdbuf 不存在时回退到普通 node（多数 Linux 发行版都自带 coreutils）。
+  local stdbuf_cmd
+  stdbuf_cmd=$(resolve_stdbuf)
+
   # HOST=:: 让后端绑定到 IPv6 双栈（同时接受 IPv4/IPv6 连接），兼容纯 IPv6 网络
+  # Node.js 环境下 HOST=:: 等价于 IPv6 双栈监听，可同时接收 IPv4/IPv6。
   PORT="$PORT" NODE_ENV=production HOST="::" ${DATABASE:+DATABASE_URL="$DATABASE"} \
-    nohup node dist/index.js > "$BACKEND_LOG" 2> "$BACKEND_ERR_LOG" &
+    nohup $stdbuf_cmd node dist/index.js > "$BACKEND_LOG" 2> "$BACKEND_ERR_LOG" &
   STUB_PID=$!
   echo "  后端 stub PID: $STUB_PID (等待端口监听...)"
 
   # nohup 后台启动可能 PID 不准，通过端口查找真实 PID
   # 同时监视 STUB_PID：若进程已崩溃（如 MODULE_NOT_FOUND），立即停止等待
-  if ! BACKEND_PID=$(get_pid_by_port "$PORT" 15000 "$STUB_PID"); then
+  # 后端初始化可能较慢（TypeORM + SQLite），超时放宽到 45 秒。
+  if ! BACKEND_PID=$(get_pid_by_port "$PORT" 45000 "$STUB_PID"); then
     echo "  后端启动失败（端口 $PORT 未监听）" >&2
     print_startup_failure_diag "backend" "$STUB_PID" "$BACKEND_LOG" "$BACKEND_ERR_LOG"
     echo "  日志文件：" >&2
@@ -783,7 +801,7 @@ do_start() {
   cd "$FRONTEND_DIR"
   # --host :: 让 Vite preview 绑定到 IPv6 双栈（同时接受 IPv4/IPv6 连接）
   NODE_ENV=production \
-    nohup node "$VITE_JS" preview --port "$FRONTEND_PORT" --host :: > "$FRONTEND_LOG" 2> "$FRONTEND_ERR_LOG" &
+    nohup $stdbuf_cmd node "$VITE_JS" preview --port "$FRONTEND_PORT" --host :: > "$FRONTEND_LOG" 2> "$FRONTEND_ERR_LOG" &
   FRONTEND_STUB=$!
   echo "  前端 stub PID: $FRONTEND_STUB (等待端口监听...)"
 
