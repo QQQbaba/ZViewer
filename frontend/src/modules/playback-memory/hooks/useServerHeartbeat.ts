@@ -53,7 +53,9 @@ export function useServerHeartbeat({
   const lastErrorSignatureRef = useRef<string | null>(null)
   // 缓存最新的 watchTogether 供 callback 读取
   const watchTogetherRef = useRef(watchTogether)
-  watchTogetherRef.current = watchTogether
+  useEffect(() => {
+    watchTogetherRef.current = watchTogether
+  }, [watchTogether])
 
   // 处理服务器心跳：更新本地状态
   const handleServerHeartbeat = useCallback(
@@ -200,5 +202,5 @@ export function useServerHeartbeat({
     return () => {
       video.removeEventListener('error', handleError)
     }
-  }, [videoRef])
+  }, [videoRef, suppressEventsRef])
 }

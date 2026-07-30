@@ -202,7 +202,7 @@ export async function resolveBilibili(
   url: string,
   qn?: number,
   onProgress?: (step: string, message: string) => void,
-  options?: { preferMp4?: boolean; page?: number }
+  options?: { preferMp4?: boolean; forceDash?: boolean; page?: number }
 ): Promise<ResolvedSource> {
   let fetchUrl = `${API_URL}/api/stream/resolve-bilibili?url=${encodeURIComponent(url)}`
   if (qn != null && Number.isFinite(qn)) {
@@ -210,6 +210,9 @@ export async function resolveBilibili(
   }
   if (options?.preferMp4) {
     fetchUrl += `&preferMp4=true`
+  }
+  if (options?.forceDash) {
+    fetchUrl += `&forceDash=true`
   }
   if (
     options?.page != null &&
@@ -242,7 +245,7 @@ export async function resolveBilibili(
     return mapResolvedBilibili(data)
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('解析 B站 视频超时，请稍后重试')
+      throw new Error('解析 B站 视频超时，请稍后重试', { cause: err })
     }
     throw err
   } finally {
@@ -261,10 +264,11 @@ export async function resolveBilibiliWithOptions(
   url: string,
   qn?: number,
   onProgress?: (step: string, message: string) => void,
-  extraOptions?: { preferMp4?: boolean; page?: number }
+  extraOptions?: { preferMp4?: boolean; forceDash?: boolean; page?: number }
 ): Promise<ResolvedSource> {
   return resolveBilibili(url, qn, onProgress, {
     preferMp4: extraOptions?.preferMp4,
+    forceDash: extraOptions?.forceDash,
     page: extraOptions?.page,
   })
 }

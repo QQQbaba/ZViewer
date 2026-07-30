@@ -62,8 +62,8 @@ import type {
 
 /** 需要大会员的清晰度 qn 列表 */
 const VIP_ONLY_QNS = [112, 116, 120, 125, 126, 127]
-/** MP4 模式最高 qn */
-const MP4_MAX_QN = 80
+/** MP4 模式最高 qn（B站 html5 MP4 接口实际最高仅 720P） */
+const MP4_MAX_QN = 64
 
 /** Popup 动画时长 */
 const POPUP_DURATION = 220
@@ -135,6 +135,8 @@ export function BilibiliDownloadModal({
   const canUseDash = !!ffmpegStatus?.available
   const mode: 'mp4' | 'dash' = requiresDash && canUseDash ? 'dash' : 'mp4'
 
+  // React Compiler 严格规则误报：visible/exiting 仅用于入场/退场动画状态同步。
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (open) {
       setVisible(true)
@@ -149,6 +151,7 @@ export function BilibiliDownloadModal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // 加载根列表
   const loadRoots = useCallback(async () => {
@@ -179,6 +182,8 @@ export function BilibiliDownloadModal({
     }
   }, [])
 
+  // React Compiler 严格规则误报：Modal 可见时一次性加载根目录与 FFmpeg 状态。
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (visible) {
       if (roots.length === 0) void loadRoots()
@@ -186,6 +191,7 @@ export function BilibiliDownloadModal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // 关闭根目录下拉
   useEffect(() => {
@@ -270,11 +276,11 @@ export function BilibiliDownloadModal({
       )
       setResolved(result)
       setSelectedPage(result.currentPage ?? 1)
-      // 默认选中最高可用清晰度（优先 1080P，无则取列表第一个）
+      // 默认选中最高可用清晰度（优先 720P，无则取列表第一个）
       const accept = result.acceptQuality ?? []
       const preferred = accept.find((q) => q.id === MP4_MAX_QN) ??
-        accept[0] ?? { id: MP4_MAX_QN, label: '1080P' }
-      // 如果默认选中的是高画质但 FFmpeg 不可用，回退到 1080P
+        accept[0] ?? { id: MP4_MAX_QN, label: '720P' }
+      // 如果默认选中的是高画质但 FFmpeg 不可用，回退到 720P
       const fallback =
         preferred.id > MP4_MAX_QN && !canUseDash
           ? (accept.find((q) => q.id <= MP4_MAX_QN) ?? preferred)
@@ -323,7 +329,7 @@ export function BilibiliDownloadModal({
       return
     }
     if (requiresDash && !canUseDash) {
-      message.warning('该清晰度需要 FFmpeg，请先安装或选择 1080P 及以下')
+      message.warning('该清晰度需要 FFmpeg，请先安装或选择 720P 及以下')
       return
     }
     setStep('downloading')

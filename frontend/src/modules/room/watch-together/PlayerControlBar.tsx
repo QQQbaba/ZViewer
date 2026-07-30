@@ -455,6 +455,8 @@ export function PlayerControlBar({
     }
   }, [videoRef])
 
+  // React Compiler 推断依赖与手动指定不一致，但 videoRef 为稳定 ref，无需重创建。
+  /* eslint-disable react-hooks/preserve-manual-memoization */
   const handleRateSelect = useCallback(
     (rate: number) => {
       if (!isHost) return
@@ -466,6 +468,7 @@ export function PlayerControlBar({
     },
     [isHost, videoRef]
   )
+  /* eslint-enable react-hooks/preserve-manual-memoization */
 
   const VolumeIcon =
     muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2

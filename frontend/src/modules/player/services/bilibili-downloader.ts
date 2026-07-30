@@ -195,7 +195,7 @@ export async function downloadBilibiliDashStreams(
   const [videoResult, audioResult] = await Promise.all([
     downloadM4sStream(
       videoUrl,
-      (d, _t) => {
+      (d) => {
         videoDownloaded = d
         reportProgress()
       },
@@ -203,7 +203,7 @@ export async function downloadBilibiliDashStreams(
     ),
     downloadM4sStream(
       audioUrl,
-      (d, _t) => {
+      (d) => {
         audioDownloaded = d
         reportProgress()
       },

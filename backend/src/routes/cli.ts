@@ -18,6 +18,7 @@ const router = Router()
  *   cid:  视频分 P 的 cid
  *   qn:   清晰度 qn（可选）
  *   preferMp4: 是否优先 MP4（可选，默认 false）
+ *   forceDash: 是否强制 DASH 并禁用 MP4 降级（可选，默认 false）
  *
  * 请求头：
  *   Cookie: 用户自己的 B站 Cookie（需含 SESSDATA）
@@ -30,6 +31,7 @@ router.get('/resolve', async (req, res) => {
   const cid = req.query.cid
   const qnRaw = req.query.qn
   const preferMp4 = req.query.preferMp4 === 'true' || req.query.preferMp4 === '1'
+  const forceDash = req.query.forceDash === 'true' || req.query.forceDash === '1'
 
   if (typeof bvid !== 'string' || !bvid.trim()) {
     res.status(400).json({ success: false, message: '缺少 bvid 参数' })
@@ -57,6 +59,7 @@ router.get('/resolve', async (req, res) => {
       cookie,
       qn,
       preferMp4,
+      forceDash,
       page: undefined,
       // CLI 使用本地代理播放，实际视频流由用户本机浏览器→CLI 拉取，
       // 后端无需校验 B站 CDN 可达性，避免远程服务器网络差异导致错误降级为 MP4。

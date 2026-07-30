@@ -73,6 +73,17 @@ export function isRelativeUrl(url: string): boolean {
 }
 
 /**
+ * 判断 URL 是否为本地 CLI 代理地址（如 http://127.0.0.1:9333/proxy?url=...）。
+ *
+ * CLI 代理是跨域地址，不需要 credentials（Cookie），
+ * 且 dash.js 的 setXHRWithCredentials 会导致 CORS 拒绝。
+ */
+export function isCliProxyUrl(url: string): boolean {
+  if (!url) return false
+  return url.startsWith('http://127.0.0.1:') && url.includes('/proxy?url=')
+}
+
+/**
  * 将 URL 包装为后端代理 URL。
  * 后端代理会自动添加 Referer/User-Agent 头绕过防盗链，并透传 Range 请求支持断点续传。
  */
@@ -91,6 +102,9 @@ export function buildProxyUrl(url: string): string {
  * | 带防盗链 headers        | 服务器代理             | 服务器代理           |
  * | B站 CDN URL            | 直连（HTML5 接口无防盗链）| 服务器代理（m4s 有防盗链）|
  * | 其他跨域 URL            | 直连                  | 直连                |
+ *
+ * 注意：format 已知时直接按 format 判断，不使用 URL 特征 fallback。
+ * 避免 MP4 URL 中碰巧包含 /dash/ 或 .m4s 时被误判为 DASH 流走服务器代理。
  *
  * @param url 原始视频流 URL
  * @param headers 可选的防盗链 headers（由后端 resolve 返回）
@@ -115,16 +129,25 @@ export function resolveProxyUrl(
 
   // 带防盗链 headers：浏览器无法设置 forbidden header，必须走服务器代理
   if (hasHeaders) {
+    console.warn('[url-proxy] 走服务器代理(headers):', {
+      url: url.slice(0, 80),
+      format,
+      hasHeaders,
+    })
     return buildProxyUrl(url)
   }
 
   // B站 DASH m4s 流：有防盗链 + 无 CORS，必须走服务器代理
   if (isBili) {
+    // format 已知时直接按 format 判断，不使用 URL 特征 fallback，
+    // 避免 MP4 URL 中碰巧包含 /dash/ 或 .m4s 时被误判为 DASH 流走服务器代理。
+    // 仅在 format 未知时 fallback 到 URL 特征判断。
     const isDashStream =
       format === 'dash' ||
       format === 'm4s' ||
-      url.toLowerCase().includes('.m4s') ||
-      url.toLowerCase().includes('/dash/')
+      (!format &&
+        (url.toLowerCase().includes('.m4s') ||
+          url.toLowerCase().includes('/dash/')))
 
     if (isDashStream) {
       return buildProxyUrl(url)

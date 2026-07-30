@@ -46,6 +46,7 @@ export {
   resolveProxyUrl,
   isLocalUrl,
   isRelativeUrl,
+  isCliProxyUrl,
 } from './services/url-proxy'
 export {
   appendBuffer,

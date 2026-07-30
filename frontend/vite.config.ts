@@ -16,17 +16,17 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3333',
+        target: process.env.VITE_API_TARGET || 'http://localhost:3333',
         changeOrigin: true,
       },
       '/socket.io': {
-        target: 'http://localhost:3333',
+        target: process.env.VITE_API_TARGET || 'http://localhost:3333',
         changeOrigin: true,
         ws: true,
       },
       // 开发环境代理 NMS HTTP-FLV 拉流，匹配 /live/<streamKey>.flv
       '/live': {
-        target: 'http://localhost:3335',
+        target: process.env.VITE_LIVE_TARGET || 'http://localhost:3335',
         changeOrigin: true,
       },
     },

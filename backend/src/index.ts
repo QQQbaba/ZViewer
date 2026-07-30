@@ -161,8 +161,9 @@ function parseCorsOrigin(
     if (value === '*') return true;
     return value.split(',').map((s) => s.trim());
   }
-  // 开发环境默认允许所有来源（反射 Origin），生产环境未配置则禁止跨域
-  return process.env.NODE_ENV === 'production' ? false : true;
+  // 默认允许所有来源（反射 Origin），兼容 localhost / 127.0.0.1 / 内网 IP / 公网域名访问。
+  // 公网部署时建议显式设置 CORS_ORIGIN 为具体域名，避免开放跨域。
+  return true;
 }
 
 const CORS_ORIGIN = parseCorsOrigin(process.env.CORS_ORIGIN);
@@ -377,6 +378,11 @@ async function bootstrap() {
   httpServer.listen(listenOptions, () => {
     const displayHost = HOST === '::' ? '[::]' : HOST ?? '*';
     console.log(`Server is running on http://${displayHost}:${PORT}`);
+    if (process.env.NODE_ENV === 'production' && !process.env.CORS_ORIGIN) {
+      console.warn(
+        '警告：未设置 CORS_ORIGIN，当前允许所有来源跨域访问。公网部署请设置 CORS_ORIGIN 为具体域名。',
+      );
+    }
   });
 
   // 主进程退出时停止 NMS

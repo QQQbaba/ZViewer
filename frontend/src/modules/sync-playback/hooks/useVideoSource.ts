@@ -25,11 +25,96 @@ import type { PlayerSource } from '@/modules/player'
 import { waitForMetadata } from '@/modules/player/utils'
 import { getBilibiliParseOptions } from '@/modules/bilibili/parseOptions'
 import { buildCliProxyUrl } from '@/modules/bilibili/cliApi'
-import { getActiveCliProxyUrl } from '@/modules/room/watch-together/movie-source-resolver'
+import {
+  getActiveCliProxyUrl,
+  resolveBilibiliOnline,
+  getEffectivePreferMp4,
+} from '@/modules/room/watch-together/movie-source-resolver'
+import { isCliProxyUrl } from '@/modules/player/services/url-proxy'
 import type { WatchTogetherState } from '../types'
+import type { ResolvedSource } from '@/modules/bilibili/types'
 import { safePlay } from '../safePlay'
 import { executeSeek } from '../services'
 import type { SeekToResult } from '../services'
+
+interface ViewerLocalOverride {
+  movieId: number
+  resolved: ResolvedSource
+}
+
+/**
+ * 确保观众端按本地解析偏好获得独立的 B站 源。
+ *
+ * 当房主广播的源格式/地址与观众本地偏好不一致时（例如房主使用 CLI DASH，
+ * 而观众默认 MP4），观众端按自己的偏好重新解析，避免被迫使用房主的 CLI 代理
+ * 或被切换到自己不期望的格式。
+ *
+ * 若本地偏好与房主一致且房主源不是本地 CLI 代理地址，则返回 null，直接使用房主源。
+ * 本地已启用 CLI 时同样会按 DASH 偏好解析并覆盖。
+ */
+async function ensureViewerLocalOverride(
+  state: WatchTogetherState
+): Promise<ViewerLocalOverride | null> {
+  const storeState = useRoomStore.getState()
+  const movieId = storeState.currentMovieId
+  if (movieId == null || state.sourceType !== 'bilibili' || !state.sourceUrl) {
+    return null
+  }
+  const movie = storeState.movies.find((m) => m.id === movieId)
+  if (!movie?.url || !movie.cid) {
+    return null
+  }
+
+  const effectivePreferMp4 = getEffectivePreferMp4(movieId)
+  const hostIsMp4 = state.format === 'mp4'
+  const existing = storeState.viewerCliResolvedSource
+  const existingIsMp4 = existing?.resolved.format === 'mp4'
+
+  // 本地偏好与房主一致且房主源不是 CLI 代理地址：直接使用房主广播源
+  if (effectivePreferMp4 === hostIsMp4 && !isCliProxyUrl(state.sourceUrl)) {
+    if (existing?.movieId === movieId) {
+      storeState.setViewerCliResolvedSource(null)
+    }
+    return null
+  }
+
+  // 已有匹配的本地覆盖时直接复用，避免重复解析
+  if (existing?.movieId === movieId && existingIsMp4 === effectivePreferMp4) {
+    return existing
+  }
+
+  // 按本地偏好独立解析
+  try {
+    const resolved = await resolveBilibiliOnline(movie, undefined, {
+      preferMp4: effectivePreferMp4,
+    })
+    const resolvedSource: ResolvedSource = {
+      videoUrl: resolved.sourceUrl,
+      audioUrl: resolved.audioUrl,
+      videoCodec: resolved.videoCodec,
+      audioCodec: resolved.audioCodec,
+      duration: resolved.duration,
+      format: resolved.format ?? 'mp4',
+      cid: resolved.cid,
+      currentQn: resolved.currentQn,
+      acceptQuality: resolved.acceptQuality,
+      title: movie.title,
+    }
+    const override: ViewerLocalOverride = {
+      movieId: movie.id,
+      resolved: resolvedSource,
+    }
+    storeState.setViewerCliResolvedSource(override)
+    return override
+  } catch (err) {
+    console.error('[useVideoSource] 观众本地解析失败:', err)
+    // 失败后清除旧覆盖，回退到房主源（可能无法播放，由上层提示）
+    if (existing?.movieId === movieId) {
+      storeState.setViewerCliResolvedSource(null)
+    }
+    return null
+  }
+}
 
 export interface UseVideoSourceOptions {
   videoRef: RefObject<HTMLVideoElement | null>
@@ -189,8 +274,8 @@ export function useVideoSource({
   // 所有源类型（包括 bilibili）统一逻辑：
   //   - DASH / 含 audioUrl：使用 MSE 合并 videoUrl + audioUrl
   //   - 其他格式（如 mp4）：直接设置 video.src
-  // 观众端不再独立调用 B站 解析接口，直接复用房主广播的地址。
-  // 例外：观众端启用了本地 CLI 并自主切换了清晰度时，使用自己解析的源覆盖房主源。
+  // 观众端：当本地解析偏好与房主广播源不一致时，按本地偏好独立解析，
+  // 避免被迫使用房主的 CLI 代理或被切换为不期望的格式。
   const applySourceToVideo = useCallback(
     async (
       video: HTMLVideoElement,
@@ -203,18 +288,34 @@ export function useVideoSource({
       let effectiveState = state
       if (!isHostRef.current) {
         const storeState = useRoomStore.getState()
-        const override = storeState.viewerCliResolvedSource
         const currentMovieId = storeState.currentMovieId
-        if (override && override.movieId === currentMovieId) {
+        // 优先使用已有的本地覆盖（CLI 清晰度覆盖或本地偏好解析结果）
+        const existingOverride = storeState.viewerCliResolvedSource
+        if (existingOverride && existingOverride.movieId === currentMovieId) {
           effectiveState = {
             ...state,
-            sourceUrl: override.resolved.videoUrl,
-            audioUrl: override.resolved.audioUrl,
-            format: override.resolved.format,
-            videoCodec: override.resolved.videoCodec,
-            audioCodec: override.resolved.audioCodec,
-            duration: override.resolved.duration ?? state.duration,
-            currentQn: override.resolved.currentQn,
+            sourceUrl: existingOverride.resolved.videoUrl,
+            audioUrl: existingOverride.resolved.audioUrl,
+            format: existingOverride.resolved.format,
+            videoCodec: existingOverride.resolved.videoCodec,
+            audioCodec: existingOverride.resolved.audioCodec,
+            duration: existingOverride.resolved.duration ?? state.duration,
+            currentQn: existingOverride.resolved.currentQn,
+          }
+        } else {
+          // 没有覆盖且本地偏好与房主不一致时，尝试独立解析
+          const localOverride = await ensureViewerLocalOverride(state)
+          if (localOverride && localOverride.movieId === currentMovieId) {
+            effectiveState = {
+              ...state,
+              sourceUrl: localOverride.resolved.videoUrl,
+              audioUrl: localOverride.resolved.audioUrl,
+              format: localOverride.resolved.format,
+              videoCodec: localOverride.resolved.videoCodec,
+              audioCodec: localOverride.resolved.audioCodec,
+              duration: localOverride.resolved.duration ?? state.duration,
+              currentQn: localOverride.resolved.currentQn,
+            }
           }
         }
       }

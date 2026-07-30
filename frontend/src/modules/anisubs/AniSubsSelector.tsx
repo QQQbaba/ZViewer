@@ -140,7 +140,7 @@ export function AniSubsSelector({
     } finally {
       setSearching(false)
     }
-  }, [selectedSource, keyword])
+  }, [selectedSource, keyword, selectedSourceLabel])
 
   const handleToggleExpand = useCallback(
     async (result: AniSubsSearchResult) => {

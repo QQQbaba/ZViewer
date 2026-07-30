@@ -138,6 +138,9 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
     try {
       const parsePrefs = getBilibiliParseOptions(movie.id)
       const proxyUrl = parsePrefs.cliEnabled ? getActiveCliProxyUrl() : null
+      if (parsePrefs.cliEnabled && !proxyUrl) {
+        throw new Error('CLI 代理未连接，请先启动本地 zcontrol-cli')
+      }
       let resolved: ResolvedSource
 
       if (proxyUrl) {
@@ -244,6 +247,9 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
     try {
       const parsePrefs = getBilibiliParseOptions(movie.id)
       const proxyUrl = parsePrefs.cliEnabled ? getActiveCliProxyUrl() : null
+      if (parsePrefs.cliEnabled && !proxyUrl) {
+        throw new Error('CLI 代理未连接，请先启动本地 zcontrol-cli')
+      }
       const targetPage = movie.pages?.find((p) => p.page === page)
       let resolved: ResolvedSource
 

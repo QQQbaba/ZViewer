@@ -472,7 +472,11 @@ export function useWatchTogether({
       try {
         // 未显式传入 options 时，从 localStorage 读取该影片的播放模式偏好
         // （BilibiliParseSettings 中切换播放模式触发 triggerReloadBilibili 走此路径）
-        // CLI 未连接时 getEffectivePreferMp4 会强制返回 true（MP4 降级）。
+        // CLI 已启用但未连接时直接报错，不再降级为 MP4。
+        const parsePrefs = getBilibiliParseOptions(movie.id)
+        if (parsePrefs.cliEnabled && !getActiveCliProxyUrl()) {
+          throw new Error('CLI 代理未连接，请先启动本地 zcontrol-cli')
+        }
         const resolvedOptions = options ?? {
           preferMp4: getEffectivePreferMp4(movie.id),
         }
@@ -546,7 +550,14 @@ export function useWatchTogether({
         isReloadingBilibiliRef.current = false
       }
     },
-    [videoRef, quality, applySourceToVideo, setWatchTogether, broadcastState]
+    [
+      videoRef,
+      quality,
+      applySourceToVideo,
+      setWatchTogether,
+      broadcastState,
+      fetchBlobsForBufferModeLocal,
+    ]
   )
 
   // 响应 BilibiliParseSettings 中 codec / CDN 偏好变更触发的重新解析请求。
@@ -729,6 +740,10 @@ export function useWatchTogether({
     const resolveOnline = async (): Promise<ResolvedMovieSource> => {
       setIsResolving(true)
       try {
+        const parsePrefs = getBilibiliParseOptions(movie.id)
+        if (parsePrefs.cliEnabled && !getActiveCliProxyUrl()) {
+          throw new Error('CLI 代理未连接，请先启动本地 zcontrol-cli')
+        }
         return await resolveBilibiliOnline(movie, undefined, {
           preferMp4: getEffectivePreferMp4(movie.id),
         })
@@ -942,6 +957,7 @@ export function useWatchTogether({
     sendControl,
     quality,
     suppressEventsRef,
+    fetchBlobsForBufferModeLocal,
   ])
 
   // 组件卸载或切换房间时释放 MSE blob URL 与音频同步资源

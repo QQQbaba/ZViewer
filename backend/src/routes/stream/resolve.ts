@@ -108,6 +108,7 @@ router.get('/resolve-bilibili', async (req: AuthenticatedRequest, res) => {
       : undefined;
 
   const preferMp4 = req.query.preferMp4 === 'true' || req.query.preferMp4 === '1';
+  const forceDash = req.query.forceDash === 'true' || req.query.forceDash === '1';
 
   // page 参数：指定播放分集（P），从 1 开始
   // 多 P 视频每个分集有独立的 cid，必须用对应 cid 请求 playurl 才能获取正确的播放地址
@@ -128,6 +129,7 @@ router.get('/resolve-bilibili', async (req: AuthenticatedRequest, res) => {
       qn,
       codec,
       preferMp4,
+      forceDash,
       page,
       onProgress: (msg: ResolveProgress) => {
         writer.send({ status: msg.status, step: msg.step, message: msg.message });

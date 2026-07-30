@@ -72,11 +72,15 @@ function writeAllOptions(map: ParseOptionsMap): void {
 function normalizeOptions(
   opts: BilibiliParseOptions | undefined
 ): NormalizedParseOptions {
+  // 未配置的字段使用 DEFAULT_PARSE_OPTIONS 的默认值，
+  // 确保与 useBilibiliParsePreferences 的 fallback 行为一致。
+  // 注意：必须用 ?? 而非 === true，否则 undefined 会被当作 false，
+  // 导致未配置的影片 preferMp4=false（DASH），与默认 MP4 模式不一致。
   return {
-    preferMp4: opts?.preferMp4 === true,
-    bufferMode: opts?.bufferMode === true,
-    p2pEnabled: opts?.p2pEnabled === true,
-    cliEnabled: opts?.cliEnabled === true,
+    preferMp4: opts?.preferMp4 ?? DEFAULT_PARSE_OPTIONS.preferMp4,
+    bufferMode: opts?.bufferMode ?? DEFAULT_PARSE_OPTIONS.bufferMode,
+    p2pEnabled: opts?.p2pEnabled ?? DEFAULT_PARSE_OPTIONS.p2pEnabled,
+    cliEnabled: opts?.cliEnabled ?? DEFAULT_PARSE_OPTIONS.cliEnabled,
     cliPrevPreferMp4: opts?.cliPrevPreferMp4,
   }
 }

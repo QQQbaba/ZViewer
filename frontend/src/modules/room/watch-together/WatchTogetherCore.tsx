@@ -21,8 +21,11 @@ import { message } from '@/components/ui/message'
 import { Spinner } from '@/components/ui/Spinner'
 import { useSocket } from '@/hooks/useSocket'
 import { useSubtitles } from '@/hooks/useSubtitles'
+import { useCliAgent } from '@/hooks/useCliAgent'
 import { useRoomStore } from '@/store/roomStore'
 import { useDanmakuStore } from '@/store/danmakuStore'
+import { useCliAgentStore } from '@/store/cliAgentStore'
+import { getBilibiliParseOptions } from '@/modules/bilibili/parseOptions'
 import {
   DanmakuLayer,
   type DanmakuLayerHandle,
@@ -94,6 +97,14 @@ export function WatchTogetherCore({
   initialPlayback,
 }: WatchTogetherCoreProps) {
   const { socket } = useSocket()
+  // CLI 代理健康检查与 socket 事件监听提升到全局级别，
+  // 确保 localOnline/agents 始终更新，不依赖 BilibiliParseSettings 是否渲染。
+  useCliAgent(roomId)
+  const cliAgentsCount = useCliAgentStore((s) => s.agents.length)
+  const triggerReloadBilibili = useRoomStore((s) => s.triggerReloadBilibili)
+  const triggerViewerSourceReload = useRoomStore(
+    (s) => s.triggerViewerSourceReload
+  )
   const setMode = useRoomStore((state) => state.setMode)
   const isReloading = useRoomStore((state) => state.isReloading)
   // 缓冲模式下载进度（房主/观众共享，由 useWatchTogether/useViewerStateSync 写入）
@@ -121,6 +132,35 @@ export function WatchTogetherCore({
 
   // 字幕状态：房主操作广播同步，观众监听应用
   const subtitles = useSubtitles({ roomId, isHost })
+
+  // ── CLI 代理上线后自动重新加载 ──────────────────────────
+  // 页面刷新时 loadMovie 在 cliAgentStore.agents 填充之前就执行了，
+  // 导致 CLI 代理 URL 未被包装到视频源上（getActiveCliProxyUrl 返回 null）。
+  // 当 agents 从空变为非空时，若当前影片已启用 CLI 但视频源尚未走 CLI 代理，
+  // 自动触发重新加载以应用 CLI 代理。
+  const prevCliAgentsCountRef = useRef(0)
+  useEffect(() => {
+    const prev = prevCliAgentsCountRef.current
+    prevCliAgentsCountRef.current = cliAgentsCount
+    // 仅在 agents 从 0 变为 >0 时触发（CLI 代理刚上线）
+    if (prev !== 0 || cliAgentsCount === 0) return
+    if (currentMovieId == null) return
+    const { cliEnabled } = getBilibiliParseOptions(currentMovieId)
+    if (!cliEnabled) return
+    const state = useRoomStore.getState().watchTogether
+    if (state.sourceType !== 'bilibili' || !state.sourceUrl) return
+    if (isHost) {
+      triggerReloadBilibili()
+    } else {
+      triggerViewerSourceReload()
+    }
+  }, [
+    cliAgentsCount,
+    currentMovieId,
+    isHost,
+    triggerReloadBilibili,
+    triggerViewerSourceReload,
+  ])
 
   // ── 观众申请状态（与重构前一致）─────────────────────────
   const [confirmJoin, setConfirmJoin] = useState<{
@@ -860,6 +900,9 @@ export function WatchTogetherCore({
   const isPlaying = useVideoPlayingState(video)
 
   // ── 房主端申请审批通知列表（与重构前一致）─────────────────
+  // React Compiler 误报：以下 push 操作构建的是纯渲染数据（通知列表），
+  // 回调在后续事件处理中执行，不存在 render 期间读取 ref 的问题。
+  /* eslint-disable react-hooks/refs */
   const requestNotifications: RequestNotificationItem[] = []
   if (confirmJoin) {
     requestNotifications.push({
@@ -947,6 +990,7 @@ export function WatchTogetherCore({
       ),
     })
   }
+  /* eslint-enable react-hooks/refs */
 
   const handleCloseNotification = (id: string) => {
     if (id === 'join') setConfirmJoin(null)
