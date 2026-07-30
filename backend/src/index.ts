@@ -224,6 +224,32 @@ async function bootstrap() {
   );
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
+
+  // 轻量请求流量日志：记录所有 /api/ 请求的方法、路径、状态码、响应大小、耗时
+  // 用于排查带宽来源（区分代理流量 /api/stream/proxy vs 解析流量 /api/stream/resolve-bilibili）
+  app.use((req, res, next) => {
+    // 跳过健康检查和静态资源，减少噪音
+    if (req.path === '/health' || req.path.startsWith('/uploads/')) {
+      return next();
+    }
+    const start = Date.now();
+    res.on('finish', () => {
+      if (!req.path.startsWith('/api/')) return;
+      const elapsed = Date.now() - start;
+      // 从 Content-Length 响应头读取响应大小（proxyHttpUpstream 会透传上游的 Content-Length）
+      const contentLength = res.getHeader('content-length');
+      const bytes = contentLength ? Number(contentLength) : 0;
+      const size = bytes > 0
+        ? bytes < 1024 * 1024
+          ? `${(bytes / 1024).toFixed(1)}KB`
+          : `${(bytes / (1024 * 1024)).toFixed(2)}MB`
+        : '-';
+      console.log(
+        `[req] ${req.method} ${res.statusCode} ${size} ${elapsed}ms ${req.path}`,
+      );
+    });
+    next();
+  });
   // 前端浏览器控制台日志上报（不强制鉴权，便于收集 guest/未登录用户日志）
   app.use('/api/client-logs', clientLogsRoutes);
   // 头像静态文件服务（无需鉴权，头像通过 URL 公开访问）

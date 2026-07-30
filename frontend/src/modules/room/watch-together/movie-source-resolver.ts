@@ -67,6 +67,23 @@ export interface ResolveMovieSourceOptions {
 }
 
 /**
+ * 将 CLI 代理 URL 归一化为本地 127.0.0.1 地址。
+ *
+ * 本地 CLI 的 HTTP 服务始终运行在当前机器上，浏览器应直接请求 127.0.0.1。
+ * 某些旧版 CLI 或网络环境下，后端下发的 proxyUrl 可能携带公网/内网 host，
+ * 统一替换 hostname 为 127.0.0.1 可防止浏览器跨域拦截。
+ */
+function normalizeLocalCliProxyUrl(proxyUrl: string): string {
+  try {
+    const url = new URL(proxyUrl)
+    url.hostname = '127.0.0.1'
+    return url.toString()
+  } catch {
+    return proxyUrl
+  }
+}
+
+/**
  * 获取当前可用的 CLI 代理 URL。
  *
  * 当房间内至少有一个 CLI 代理注册（通过 socket）时返回其 proxyUrl。
@@ -77,7 +94,7 @@ export interface ResolveMovieSourceOptions {
 export function getActiveCliProxyUrl(): string | null {
   const { agents } = useCliAgentStore.getState()
   if (agents.length === 0) return null
-  return agents[0].proxyUrl
+  return normalizeLocalCliProxyUrl(agents[0].proxyUrl)
 }
 
 /**

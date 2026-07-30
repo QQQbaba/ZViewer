@@ -31,6 +31,23 @@ interface CliRegisterPayload {
 }
 
 /**
+ * 将 CLI 上报的 proxyUrl 归一化为本地 127.0.0.1 地址。
+ *
+ * 本地 CLI 的 HTTP 代理服务始终运行在当前机器上，浏览器应直接请求 127.0.0.1。
+ * 某些旧版 CLI 会误将页面 host 或后端 host 作为 proxyUrl 上报，导致前端跨域失败，
+ * 因此在此处统一把 hostname 替换为 127.0.0.1 并保留端口与路径。
+ */
+function normalizeLocalCliProxyUrl(proxyUrl: string): string {
+  try {
+    const url = new URL(proxyUrl);
+    url.hostname = '127.0.0.1';
+    return url.toString();
+  } catch {
+    return proxyUrl;
+  }
+}
+
+/**
  * CLI 代理事件处理器。
  */
 export class CliHandler implements SocketEventHandler {
@@ -57,10 +74,13 @@ export class CliHandler implements SocketEventHandler {
           return;
         }
 
+        // 本地 CLI 代理必须指向 127.0.0.1，避免 CLI 上报公网/内网 host 导致前端 CORS 失败
+        const normalizedProxyUrl = normalizeLocalCliProxyUrl(proxyUrl);
+
         // 存储代理信息到 socket.data，供 cli-list-agents 聚合查询
         const agentInfo: CliAgentInfo = {
           socketId: socket.id,
-          proxyUrl,
+          proxyUrl: normalizedProxyUrl,
           agent,
           version,
         };
@@ -77,7 +97,7 @@ export class CliHandler implements SocketEventHandler {
         io.to(roomId).emit('cli-agent-available', agentInfo);
 
         console.log(
-          `[CLI] 代理注册: socketId=${socket.id} roomId=${roomId} proxyUrl=${proxyUrl}`,
+          `[CLI] 代理注册: socketId=${socket.id} roomId=${roomId} proxyUrl=${normalizedProxyUrl}`,
         );
       },
     );
