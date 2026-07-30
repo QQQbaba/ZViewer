@@ -13,11 +13,11 @@ import type {
   KazumiResolvedSource,
 } from './types'
 
-const BASE_URL = `${API_URL}/api/stream/kazumi`
+const getBaseUrl = () => `${API_URL}/api/stream/kazumi`
 
 /** 列出可用数据源 */
 export async function getKazumiSources(): Promise<KazumiSource[]> {
-  const res = await apiFetch(`${BASE_URL}/sources`)
+  const res = await apiFetch(`${getBaseUrl()}/sources`)
   const data = (await res.json()) as {
     success: boolean
     message?: string
@@ -35,7 +35,7 @@ export async function searchKazumi(
   keyword: string
 ): Promise<KazumiSearchResult[]> {
   const res = await apiFetch(
-    `${BASE_URL}/search?source=${encodeURIComponent(source)}&keyword=${encodeURIComponent(keyword)}`
+    `${getBaseUrl()}/search?source=${encodeURIComponent(source)}&keyword=${encodeURIComponent(keyword)}`
   )
   const data = (await res.json()) as {
     success: boolean
@@ -54,7 +54,7 @@ export async function getKazumiEpisodes(
   identifier: string
 ): Promise<KazumiEpisode[]> {
   const res = await apiFetch(
-    `${BASE_URL}/episodes?source=${encodeURIComponent(source)}&identifier=${encodeURIComponent(identifier)}`
+    `${getBaseUrl()}/episodes?source=${encodeURIComponent(source)}&identifier=${encodeURIComponent(identifier)}`
   )
   const data = (await res.json()) as {
     success: boolean
@@ -72,7 +72,7 @@ export async function resolveKazumiEpisode(
   source: string,
   episode: KazumiEpisode
 ): Promise<KazumiResolvedSource> {
-  const res = await apiFetch(`${BASE_URL}/resolve`, {
+  const res = await apiFetch(`${getBaseUrl()}/resolve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source, episode }),
@@ -108,7 +108,7 @@ export function buildKazumiProxyUrl(
   if (headers['User-Agent']) params.set('userAgent', headers['User-Agent'])
   if (headers.Origin) params.set('origin', headers.Origin)
   if (headers.Cookie) params.set('cookie', headers.Cookie)
-  return `${BASE_URL}/proxy?${params.toString()}`
+  return `${getBaseUrl()}/proxy?${params.toString()}`
 }
 
 /**

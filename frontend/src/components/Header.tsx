@@ -52,6 +52,7 @@ import {
   FLV_BASE_URL,
   RTMP_PORT,
 } from '@/lib/api'
+import { resetSocket } from '@/hooks/useSocket'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
@@ -97,6 +98,17 @@ export function Header() {
     getCustomFlvBaseUrl()
   )
   const [customRtmpPort, setCustomRtmpPortState] = useState(getCustomRtmpPort())
+
+  // 打开「自定义后端地址」弹窗时从 localStorage 重新同步，
+  // 避免同一页面会话中保存后再次打开仍显示旧值。
+  const openServerModal = useCallback(() => {
+    setCustomApiUrlState(getCustomApiUrl())
+    setCustomSocketUrlState(getCustomSocketUrl())
+    setCustomFlvBaseUrlState(getCustomFlvBaseUrl())
+    setCustomRtmpPortState(getCustomRtmpPort())
+    setServerModalOpen(true)
+  }, [])
+
   // 按钮与菜单分别 ref：菜单通过 createPortal 渲染到 document.body，
   // 脱离 Header(fixed + backdrop-filter) 的合成层，使二级菜单的 backdrop-filter 能看到真实页面内容。
   const themeBtnRef = useRef<HTMLButtonElement>(null)
@@ -322,7 +334,7 @@ export function Header() {
 
           <button
             type="button"
-            onClick={() => setServerModalOpen(true)}
+            onClick={openServerModal}
             className="p-2 rounded-[var(--md-sys-shape-corner)] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]"
             style={{
               border: '1px solid var(--md-sys-color-outline)',
@@ -830,8 +842,12 @@ export function Header() {
                 setCustomSocketUrl(customSocketUrl)
                 setCustomFlvBaseUrl(customFlvBaseUrl)
                 setCustomRtmpPort(customRtmpPort)
-                message.success('后端地址已更新，刷新页面后生效')
+                // 地址变化后，旧的 socket 实例仍指向原 SOCKET_URL，强制重建。
+                resetSocket()
+                message.success('后端地址已保存，即将刷新页面生效')
                 setServerModalOpen(false)
+                // 刷新页面确保所有模块级 API_URL 缓存重新计算
+                setTimeout(() => window.location.reload(), 600)
               }}
             >
               保存
@@ -895,7 +911,7 @@ export function Header() {
             </p>
           </div>
           <div className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
-            提示：留空将使用环境变量或页面默认值，保存后刷新页面生效。
+            提示：留空将使用环境变量或页面默认值，保存后会自动刷新页面使配置生效。
           </div>
         </div>
       </Modal>

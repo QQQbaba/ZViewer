@@ -37,21 +37,45 @@ const rawSocketUrl = normalizeUrl(import.meta.env.VITE_SOCKET_URL || '')
 const rawFlvBaseUrl = normalizeUrl(import.meta.env.VITE_FLV_BASE_URL || '')
 const rawRtmpPort = (import.meta.env.VITE_RTMP_PORT || '3334').toString()
 
-const storedApiUrl = readStored(CUSTOM_API_URL_KEY)
-const storedSocketUrl = readStored(CUSTOM_SOCKET_URL_KEY)
-const storedFlvBaseUrl = readStored(CUSTOM_FLV_BASE_URL_KEY)
-const storedRtmpPort = readStored(CUSTOM_RTMP_PORT_KEY)
+/** 从 localStorage 实时读取自定义值，避免模块加载后取值陈旧 */
+function getStored(key: string): string | null {
+  return readStored(key)
+}
+
+function computeApiUrl(): string {
+  return normalizeUrl(
+    getStored(CUSTOM_API_URL_KEY) || rawApiUrl || window.location.origin
+  )
+}
+
+function computeSocketUrl(): string {
+  return normalizeUrl(
+    getStored(CUSTOM_SOCKET_URL_KEY) || rawSocketUrl || computeApiUrl()
+  )
+}
+
+function computeFlvBaseUrl(): string {
+  return (
+    getStored(CUSTOM_FLV_BASE_URL_KEY) ||
+    rawFlvBaseUrl ||
+    (window.location.protocol === 'https:'
+      ? ''
+      : `http://${window.location.hostname}:3335`)
+  )
+}
+
+function computeRtmpPort(): string {
+  return getStored(CUSTOM_RTMP_PORT_KEY) || rawRtmpPort
+}
 
 /** 当前生效的 REST API 地址（自定义 > 环境变量 > 当前页面 origin） */
-export let API_URL = normalizeUrl(
-  storedApiUrl || rawApiUrl || window.location.origin
-)
+export let API_URL = computeApiUrl()
 
 /**
  * 当前生效的 socket.io 信令地址。
  * 未单独设置时默认跟随 API_URL，保证大多数部署场景下无需额外配置。
  */
-export let SOCKET_URL = normalizeUrl(storedSocketUrl || rawSocketUrl || API_URL)
+export let SOCKET_URL = computeSocketUrl()
 
 /**
  * 当前生效的 HTTP-FLV 拉流基础地址。
@@ -59,15 +83,10 @@ export let SOCKET_URL = normalizeUrl(storedSocketUrl || rawSocketUrl || API_URL)
  * - HTTPS 生产环境默认使用相对路径 ''（由 Nginx/Caddy 反向代理到 Node Media Server）
  * - HTTP 开发环境默认直连 `http://host:3335`
  */
-export let FLV_BASE_URL =
-  storedFlvBaseUrl ||
-  rawFlvBaseUrl ||
-  (window.location.protocol === 'https:'
-    ? ''
-    : `http://${window.location.hostname}:3335`)
+export let FLV_BASE_URL = computeFlvBaseUrl()
 
 /** 当前生效的 RTMP 推流端口 */
-export let RTMP_PORT = storedRtmpPort || rawRtmpPort
+export let RTMP_PORT = computeRtmpPort()
 
 function setStored(key: string, value: string): void {
   try {
@@ -83,59 +102,52 @@ function setStored(key: string, value: string): void {
 
 /** 获取用户设置的自定义 API 地址（未设置返回空字符串） */
 export function getCustomApiUrl(): string {
-  return storedApiUrl || ''
+  return getStored(CUSTOM_API_URL_KEY) || ''
 }
 
 /** 设置自定义 API 地址；传入空字符串则清除自定义设置 */
 export function setCustomApiUrl(url: string): void {
   const normalized = url ? normalizeUrl(url) : ''
   setStored(CUSTOM_API_URL_KEY, normalized)
-  API_URL = normalized || rawApiUrl || window.location.origin
+  API_URL = computeApiUrl()
   // 当 socket 未单独配置时，跟随 API 地址变化
-  if (!storedSocketUrl && !rawSocketUrl) {
-    SOCKET_URL = API_URL
-  }
+  SOCKET_URL = computeSocketUrl()
 }
 
 /** 获取用户设置的自定义 socket.io 地址 */
 export function getCustomSocketUrl(): string {
-  return storedSocketUrl || ''
+  return getStored(CUSTOM_SOCKET_URL_KEY) || ''
 }
 
 /** 设置自定义 socket.io 地址；传入空字符串则恢复默认（跟随 API_URL） */
 export function setCustomSocketUrl(url: string): void {
   const normalized = url ? normalizeUrl(url) : ''
   setStored(CUSTOM_SOCKET_URL_KEY, normalized)
-  SOCKET_URL = normalized || rawSocketUrl || API_URL
+  SOCKET_URL = computeSocketUrl()
 }
 
 /** 获取用户设置的自定义 FLV 拉流基础地址 */
 export function getCustomFlvBaseUrl(): string {
-  return storedFlvBaseUrl || ''
+  return getStored(CUSTOM_FLV_BASE_URL_KEY) || ''
 }
 
 /** 设置自定义 FLV 拉流基础地址；传入空字符串则恢复默认推断 */
 export function setCustomFlvBaseUrl(url: string): void {
   const normalized = url ? normalizeUrl(url) : ''
   setStored(CUSTOM_FLV_BASE_URL_KEY, normalized)
-  FLV_BASE_URL =
-    normalized ||
-    rawFlvBaseUrl ||
-    (window.location.protocol === 'https:'
-      ? ''
-      : `http://${window.location.hostname}:3335`)
+  FLV_BASE_URL = computeFlvBaseUrl()
 }
 
 /** 获取用户设置的自定义 RTMP 推流端口 */
 export function getCustomRtmpPort(): string {
-  return storedRtmpPort || ''
+  return getStored(CUSTOM_RTMP_PORT_KEY) || ''
 }
 
 /** 设置自定义 RTMP 推流端口；传入空字符串则恢复默认 */
 export function setCustomRtmpPort(port: string): void {
   const normalized = port ? port.toString().trim() : ''
   setStored(CUSTOM_RTMP_PORT_KEY, normalized)
-  RTMP_PORT = normalized || rawRtmpPort
+  RTMP_PORT = computeRtmpPort()
 }
 
 type RequestOptions = Omit<RequestInit, 'headers'> & {

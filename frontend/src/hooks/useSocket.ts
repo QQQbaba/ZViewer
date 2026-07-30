@@ -47,6 +47,26 @@ function reconnectSocket() {
   }, 50)
 }
 
+/**
+ * 强制销毁全局 socket 实例。
+ * 当自定义后端地址变化时，旧实例仍指向原 SOCKET_URL，需要重建才能使用新地址。
+ */
+export function resetSocket(): void {
+  if (globalSocket) {
+    try {
+      globalSocket.disconnect()
+    } catch {
+      // ignore
+    }
+    globalSocket = null
+  }
+  refCount = 0
+  if (disconnectTimer) {
+    clearTimeout(disconnectTimer)
+    disconnectTimer = null
+  }
+}
+
 export function useSocket() {
   const logout = useAuthStore((s) => s.logout)
 
