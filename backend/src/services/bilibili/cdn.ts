@@ -13,6 +13,40 @@ const DEFAULT_USER_AGENT =
 /** 单条 URL 健康检查超时（毫秒）。 */
 const HEALTH_CHECK_TIMEOUT_MS = 3500;
 
+/** 已知支持 HTTPS 的 B站 CDN 域名。 */
+const HTTPS_CAPABLE_BILIBILI_DOMAINS = [
+  'bilivideo.com',
+  'hdslb.com',
+  'biliimg.com',
+  'bilibili.com',
+  'upos-hz-mirrorakam.akamaized.net',
+];
+
+/**
+ * 将 B站 CDN URL 的协议统一升级为 HTTPS。
+ *
+ * 在 HTTPS 页面中，浏览器会阻止 HTTP 媒体资源（Mixed Content）。
+ * B站 主 CDN 域名均支持 HTTPS，因此解析阶段直接升级协议，可让 MP4 直链
+ * 在 HTTPS 部署下也能被浏览器直接播放，避免全部流量压到服务器代理。
+ */
+export function upgradeBilibiliUrlToHttps(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:') return url;
+    const host = parsed.hostname.toLowerCase();
+    const isBilibiliCdn = HTTPS_CAPABLE_BILIBILI_DOMAINS.some(
+      (domain) => host === domain || host.endsWith(`.${domain}`),
+    );
+    if (!isBilibiliCdn) return url;
+    parsed.protocol = 'https:';
+    // 升级后默认使用 443 端口，显式移除 http 默认的 80 端口（如有）
+    if (parsed.port === '80') parsed.port = '';
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export interface MediaTrackCandidate {
   /** 主 URL。 */
   baseUrl: string;
@@ -50,13 +84,15 @@ async function checkUrlReachable(url: string): Promise<boolean> {
  * 并行检测所有候选 URL，返回第一个可达的 URL。
  * 使用 Promise.race 模式，先返回即可使用，整体最长耗时接近单条超时上限，
  * 而非按候选数量线性叠加。
+ *
+ * 返回前会统一将 B站 CDN URL 升级为 HTTPS，避免 HTTPS 页面出现 Mixed Content。
  */
 export async function findReachableMediaUrl(
   candidate: MediaTrackCandidate,
 ): Promise<string | null> {
   const candidates = [
-    candidate.baseUrl,
-    ...(candidate.backupUrl || []),
+    upgradeBilibiliUrlToHttps(candidate.baseUrl),
+    ...(candidate.backupUrl || []).map(upgradeBilibiliUrlToHttps),
   ].filter(Boolean);
   if (candidates.length === 0) return null;
 
