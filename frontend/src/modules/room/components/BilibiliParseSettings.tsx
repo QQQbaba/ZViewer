@@ -30,7 +30,7 @@ import {
   formatKBytes,
 } from '@/modules/player/services/p2p-stats-store'
 import { useCliAgent } from '@/hooks/useCliAgent'
-import { API_URL } from '@/lib/api'
+import { getApiUrl } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 export interface BilibiliParseSettingsProps {
@@ -192,7 +192,7 @@ export function BilibiliParseSettings({
 
   const handleOpenCliSetup = useCallback(() => {
     const url = new URL('http://127.0.0.1:9333/')
-    url.searchParams.set('server', API_URL)
+    url.searchParams.set('server', getApiUrl())
     url.searchParams.set('room', roomId)
     window.open(url.toString(), '_blank', 'noopener,noreferrer')
   }, [roomId])

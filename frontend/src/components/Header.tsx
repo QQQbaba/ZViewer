@@ -47,10 +47,10 @@ import {
   setCustomFlvBaseUrl,
   getCustomRtmpPort,
   setCustomRtmpPort,
-  API_URL,
-  SOCKET_URL,
-  FLV_BASE_URL,
-  RTMP_PORT,
+  getApiUrl,
+  getSocketUrl,
+  getFlvBaseUrl,
+  getRtmpPort,
 } from '@/lib/api'
 import { resetSocket } from '@/hooks/useSocket'
 import { Modal } from '@/components/ui/Modal'
@@ -227,7 +227,7 @@ export function Header() {
     setUserOpen(false)
     try {
       // 调用后端清除 httpOnly cookie（access_token / refresh_token）
-      await apiFetch(`${API_URL}/api/auth/logout`, {
+      await apiFetch('/api/auth/logout', {
         method: 'POST',
       })
     } catch (err) {
@@ -661,7 +661,7 @@ export function Header() {
                   alt={user.username}
                   src={
                     user.avatar
-                      ? `${API_URL}${user.avatar}`
+                      ? `${getApiUrl()}${user.avatar}`
                       : user.role === 'root'
                         ? '/root-avatar.jpg'
                         : undefined
@@ -709,7 +709,7 @@ export function Header() {
                         alt={user.username}
                         src={
                           user.avatar
-                            ? `${API_URL}${user.avatar}`
+                            ? `${getApiUrl()}${user.avatar}`
                             : user.role === 'root'
                               ? '/root-avatar.jpg'
                               : undefined
@@ -888,25 +888,25 @@ export function Header() {
             <p>
               当前 API 地址:{' '}
               <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
-                {API_URL}
+                {getApiUrl()}
               </code>
             </p>
             <p>
               当前 WebSocket 地址:{' '}
               <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
-                {SOCKET_URL}
+                {getSocketUrl()}
               </code>
             </p>
             <p>
               当前 FLV 基础地址:{' '}
               <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
-                {FLV_BASE_URL || '(相对路径 /live)'}
+                {getFlvBaseUrl() || '(相对路径 /live)'}
               </code>
             </p>
             <p>
               当前 RTMP 端口:{' '}
               <code className="bg-[var(--md-sys-color-surface-container)] px-1 py-0.5 rounded">
-                {RTMP_PORT}
+                {getRtmpPort()}
               </code>
             </p>
           </div>

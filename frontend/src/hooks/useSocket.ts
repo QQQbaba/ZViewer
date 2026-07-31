@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
 import { useAuthStore } from '@/store/authStore'
-import { SOCKET_URL } from '@/lib/api'
+import { getSocketUrl } from '@/lib/api'
 
 let globalSocket: Socket | null = null
 let refCount = 0
@@ -21,7 +21,7 @@ function getSocket(): Socket {
     return globalSocket
   }
 
-  globalSocket = io(SOCKET_URL, {
+  globalSocket = io(getSocketUrl(), {
     transports: ['websocket', 'polling'],
     autoConnect: false,
     withCredentials: true,
@@ -118,7 +118,7 @@ export function useSocket() {
       if (isAuthError && !isRefreshingRef.current) {
         isRefreshingRef.current = true
         try {
-          const res = await fetch(`${SOCKET_URL}/api/auth/refresh`, {
+          const res = await fetch(`${getSocketUrl()}/api/auth/refresh`, {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },

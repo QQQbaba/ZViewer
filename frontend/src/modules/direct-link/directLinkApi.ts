@@ -1,4 +1,4 @@
-import { API_URL } from '@/lib/api'
+import { getApiUrl } from '@/lib/api'
 import type { ProxyModule } from './types'
 
 /**
@@ -19,7 +19,7 @@ export function buildProxyUrl(
       {} as Record<string, string>
     )
   ).toString()
-  return `${API_URL}/api/${module}/proxy?${query}`
+  return `${getApiUrl()}/api/${module}/proxy?${query}`
 }
 
 /**

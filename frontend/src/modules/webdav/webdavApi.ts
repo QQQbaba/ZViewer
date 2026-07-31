@@ -1,4 +1,4 @@
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { buildProxyUrl } from '@/modules/direct-link/directLinkApi'
 import type {
   WebDAVMount,
@@ -19,7 +19,7 @@ function jsonHeaders(): Record<string, string> {
 }
 
 export async function getWebDAVMounts(): Promise<WebDAVMount[]> {
-  const res = await apiFetch(`${API_URL}/api/webdav/mounts`)
+  const res = await apiFetch('/api/webdav/mounts')
   const data = (await res.json()) as {
     success: boolean
     mounts?: WebDAVMount[]
@@ -34,7 +34,7 @@ export async function getWebDAVMounts(): Promise<WebDAVMount[]> {
 export async function createWebDAVMount(
   payload: WebDAVMountFormPayload
 ): Promise<WebDAVMount> {
-  const res = await apiFetch(`${API_URL}/api/webdav/mounts`, {
+  const res = await apiFetch('/api/webdav/mounts', {
     method: 'POST',
     headers: jsonHeaders(),
     body: JSON.stringify(payload),
@@ -54,7 +54,7 @@ export async function updateWebDAVMount(
   id: number,
   payload: WebDAVMountFormPayload
 ): Promise<WebDAVMount> {
-  const res = await apiFetch(`${API_URL}/api/webdav/mounts/${id}`, {
+  const res = await apiFetch(`/api/webdav/mounts/${id}`, {
     method: 'PUT',
     headers: jsonHeaders(),
     body: JSON.stringify(payload),
@@ -71,7 +71,7 @@ export async function updateWebDAVMount(
 }
 
 export async function deleteWebDAVMount(id: number): Promise<void> {
-  const res = await apiFetch(`${API_URL}/api/webdav/mounts/${id}`, {
+  const res = await apiFetch(`/api/webdav/mounts/${id}`, {
     method: 'DELETE',
   })
   const data = (await res.json()) as { success: boolean; message?: string }
@@ -83,7 +83,7 @@ export async function deleteWebDAVMount(id: number): Promise<void> {
 export async function testWebDAVMount(
   params: WebDAVConnectionParams
 ): Promise<WebDAVTestResult> {
-  const res = await apiFetch(`${API_URL}/api/webdav/mounts/test`, {
+  const res = await apiFetch('/api/webdav/mounts/test', {
     method: 'POST',
     headers: jsonHeaders(),
     body: JSON.stringify(params),
@@ -109,7 +109,7 @@ export async function browseWebDAVMount(
 ): Promise<WebDAVDirectoryEntry[]> {
   const query = path ? `?path=${encodeURIComponent(path)}` : ''
   const res = await apiFetch(
-    `${API_URL}/api/webdav/mounts/${id}/browse${query}`
+    `/api/webdav/mounts/${id}/browse${query}`
   )
   const data = (await res.json()) as {
     success: boolean
@@ -130,7 +130,7 @@ export async function resolveWebDAV(
     mountId: String(mountId),
     path,
   }).toString()
-  const res = await apiFetch(`${API_URL}/api/webdav/resolve?${query}`)
+  const res = await apiFetch(`/api/webdav/resolve?${query}`)
   const data = (await res.json()) as {
     success: boolean
     message?: string

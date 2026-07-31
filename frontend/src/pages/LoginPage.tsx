@@ -9,7 +9,7 @@ import { Space } from '@/components/ui/Space'
 import { Title, Paragraph } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 const Fade = ({
@@ -55,7 +55,7 @@ export default function LoginPage() {
   useEffect(() => {
     const fetchMode = async () => {
       try {
-        const res = await apiFetch(`${API_URL}/api/auth/registration-mode`)
+        const res = await apiFetch('/api/auth/registration-mode')
         const data = (await res.json()) as {
           success: boolean
           mode?: 'open' | 'approval' | 'closed'
@@ -85,7 +85,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register'
-      const res = await apiFetch(`${API_URL}${endpoint}`, {
+      const res = await apiFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),

@@ -1,4 +1,4 @@
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import type {
   BilibiliQrData,
   BilibiliUserInfo,
@@ -39,7 +39,7 @@ function normalizeBilibiliImageUrl(url: string): string {
 }
 
 export async function getBilibiliQrCode(): Promise<BilibiliQrData> {
-  const res = await apiFetch(`${API_URL}/api/stream/bilibili/qr`)
+  const res = await apiFetch('/api/stream/bilibili/qr')
   const data = (await res.json()) as {
     success: boolean
     message?: string
@@ -61,7 +61,7 @@ export async function pollBilibiliQrCode(
   qrcodeKey: string
 ): Promise<{ status: number; message: string; loggedIn: boolean }> {
   const res = await apiFetch(
-    `${API_URL}/api/stream/bilibili/qr/poll?qrcode_key=${encodeURIComponent(qrcodeKey)}`
+    `/api/stream/bilibili/qr/poll?qrcode_key=${encodeURIComponent(qrcodeKey)}`
   )
   const data = (await res.json()) as {
     success: boolean
@@ -81,7 +81,7 @@ export async function pollBilibiliQrCode(
 
 export async function getBilibiliLoginStatus(): Promise<boolean> {
   try {
-    const res = await apiFetch(`${API_URL}/api/stream/bilibili/login-status`)
+    const res = await apiFetch('/api/stream/bilibili/login-status')
     const data = (await res.json()) as { success: boolean; loggedIn?: boolean }
     return !!data.loggedIn
   } catch {
@@ -90,14 +90,14 @@ export async function getBilibiliLoginStatus(): Promise<boolean> {
 }
 
 export async function logoutBilibili(): Promise<void> {
-  await apiFetch(`${API_URL}/api/stream/bilibili/logout`, {
+  await apiFetch('/api/stream/bilibili/logout', {
     method: 'POST',
   })
 }
 
 export async function getBilibiliUserInfo(): Promise<BilibiliUserInfo | null> {
   try {
-    const res = await apiFetch(`${API_URL}/api/stream/bilibili/user-info`)
+    const res = await apiFetch('/api/stream/bilibili/user-info')
     const data = (await res.json()) as {
       success: boolean
       name?: string
@@ -204,7 +204,7 @@ export async function resolveBilibili(
   onProgress?: (step: string, message: string) => void,
   options?: { preferMp4?: boolean; forceDash?: boolean; page?: number }
 ): Promise<ResolvedSource> {
-  let fetchUrl = `${API_URL}/api/stream/resolve-bilibili?url=${encodeURIComponent(url)}`
+  let fetchUrl = `/api/stream/resolve-bilibili?url=${encodeURIComponent(url)}`
   if (qn != null && Number.isFinite(qn)) {
     fetchUrl += `&qn=${qn}`
   }

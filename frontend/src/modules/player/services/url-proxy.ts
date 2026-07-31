@@ -16,7 +16,7 @@
  * 且只有 B站 一种代理场景。集中到本模块后，引擎只需调用 `resolveProxyUrl(url, headers, format)`，
  * 策略变更只改本文件。
  */
-import { API_URL } from '@/lib/api'
+import { getApiUrl } from '@/lib/api'
 
 /**
  * 判断 URL 是否为 B站 CDN 媒体地址。
@@ -88,7 +88,7 @@ export function isCliProxyUrl(url: string): boolean {
  * 后端代理会自动添加 Referer/User-Agent 头绕过防盗链，并透传 Range 请求支持断点续传。
  */
 export function buildProxyUrl(url: string): string {
-  return `${API_URL}/api/stream/proxy?url=${encodeURIComponent(url)}`
+  return `${getApiUrl()}/api/stream/proxy?url=${encodeURIComponent(url)}`
 }
 
 /**

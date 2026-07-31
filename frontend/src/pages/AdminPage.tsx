@@ -30,7 +30,7 @@ import { AniSubsGithubBrowser } from '@/modules/admin/components/AniSubsGithubBr
 import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 
 interface AdminUser {
   id: number
@@ -127,7 +127,7 @@ export default function AdminPage() {
   }
 
   const fetchUsers = async () => {
-    const res = await apiFetch(`${API_URL}/api/admin/users`, {
+    const res = await apiFetch('/api/admin/users', {
       headers: authHeaders,
     })
     const data = (await res.json()) as {
@@ -143,7 +143,7 @@ export default function AdminPage() {
   }
 
   const fetchRooms = async () => {
-    const res = await apiFetch(`${API_URL}/api/admin/rooms`, {
+    const res = await apiFetch('/api/admin/rooms', {
       headers: authHeaders,
     })
     const data = (await res.json()) as {
@@ -160,7 +160,7 @@ export default function AdminPage() {
   }
 
   const fetchSettings = async () => {
-    const res = await apiFetch(`${API_URL}/api/admin/settings`, {
+    const res = await apiFetch('/api/admin/settings', {
       headers: authHeaders,
     })
     const data = (await res.json()) as {
@@ -208,7 +208,7 @@ export default function AdminPage() {
   const checkUpdate = async () => {
     setUpdateLoading(true)
     try {
-      const res = await apiFetch(`${API_URL}/api/system/update/check`, {
+      const res = await apiFetch('/api/system/update/check', {
         headers: authHeaders,
       })
       const data = (await res.json()) as {
@@ -237,7 +237,7 @@ export default function AdminPage() {
   const handleApplyUpdate = async () => {
     setApplyLoading(true)
     try {
-      const res = await apiFetch(`${API_URL}/api/system/update/apply`, {
+      const res = await apiFetch('/api/system/update/apply', {
         method: 'POST',
         headers: authHeaders,
       })
@@ -281,7 +281,7 @@ export default function AdminPage() {
     if (targetUser.role === nextRole) return
     try {
       const res = await apiFetch(
-        `${API_URL}/api/admin/users/${targetUser.id}/role`,
+        `/api/admin/users/${targetUser.id}/role`,
         {
           method: 'PATCH',
           headers: authHeaders,
@@ -313,7 +313,7 @@ export default function AdminPage() {
     if (!userApprove) return
     try {
       const res = await apiFetch(
-        `${API_URL}/api/admin/users/${userApprove.id}/approve`,
+        `/api/admin/users/${userApprove.id}/approve`,
         {
           method: 'POST',
           headers: authHeaders,
@@ -337,7 +337,7 @@ export default function AdminPage() {
     if (!userDelete) return
     try {
       const res = await apiFetch(
-        `${API_URL}/api/admin/users/${userDelete.id}`,
+        `/api/admin/users/${userDelete.id}`,
         {
           method: 'DELETE',
           headers: authHeaders,
@@ -361,7 +361,7 @@ export default function AdminPage() {
     if (!roomClose) return
     try {
       const res = await apiFetch(
-        `${API_URL}/api/admin/rooms/${roomClose.roomId}`,
+        `/api/admin/rooms/${roomClose.roomId}`,
         {
           method: 'DELETE',
           headers: authHeaders,
@@ -385,7 +385,7 @@ export default function AdminPage() {
     if (selectedRoomIds.size === 0) return
     setBatchDeleteLoading(true)
     try {
-      const res = await apiFetch(`${API_URL}/api/admin/rooms/batch-delete`, {
+      const res = await apiFetch('/api/admin/rooms/batch-delete', {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({ roomIds: Array.from(selectedRoomIds) }),
@@ -414,7 +414,7 @@ export default function AdminPage() {
   const handleDeleteAllRooms = async () => {
     setDeleteAllLoading(true)
     try {
-      const res = await apiFetch(`${API_URL}/api/admin/rooms/delete-all`, {
+      const res = await apiFetch('/api/admin/rooms/delete-all', {
         method: 'POST',
         headers: authHeaders,
       })
@@ -442,7 +442,7 @@ export default function AdminPage() {
   const handleSaveSettings = async () => {
     setSavingSettings(true)
     try {
-      const res = await apiFetch(`${API_URL}/api/admin/settings`, {
+      const res = await apiFetch('/api/admin/settings', {
         method: 'PUT',
         headers: authHeaders,
         body: JSON.stringify({
@@ -479,7 +479,7 @@ export default function AdminPage() {
   const handleCleanupUnusedRooms = async () => {
     setCleanupLoading(true)
     try {
-      const res = await apiFetch(`${API_URL}/api/admin/rooms/cleanup-unused`, {
+      const res = await apiFetch('/api/admin/rooms/cleanup-unused', {
         method: 'POST',
         headers: authHeaders,
       })
