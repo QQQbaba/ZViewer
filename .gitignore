@@ -2,6 +2,7 @@ node_modules/
 .DS_Store
 dist/
 build/
+dist-exe/
 .workbuddy/
 .env
 .env.local

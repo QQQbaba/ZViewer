@@ -113,9 +113,7 @@ export async function browseOpenListMount(
   path?: string
 ): Promise<OpenListDirectoryEntry[]> {
   const query = path ? `?path=${encodeURIComponent(path)}` : ''
-  const res = await apiFetch(
-    `/api/openlist/mounts/${id}/browse${query}`
-  )
+  const res = await apiFetch(`/api/openlist/mounts/${id}/browse${query}`)
   const data = (await res.json()) as {
     success: boolean
     entries?: OpenListDirectoryEntry[]

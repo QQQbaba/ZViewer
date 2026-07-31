@@ -3,7 +3,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
-import { createServer } from 'http';
+import { createServer as createHttpServer } from 'http';
+import { createServer as createHttpsServer } from 'https';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -19,6 +20,7 @@ import { Comment } from './entities/Comment';
 import { SystemSettings } from './entities/SystemSettings';
 import { Movie as MovieEntity } from './entities/Movie';
 import { PlaybackState } from './entities/PlaybackState';
+import { PROJECT_ROOT } from './services/paths';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
 import streamRoutes from './routes/stream';
@@ -282,7 +284,54 @@ async function bootstrap() {
     });
   });
 
-  const httpServer = createServer(app);
+  // ==================== HTTPS 模式 ====================
+  // 当 HTTPS=true 时，使用自签证书创建 HTTPS 服务器，同时提供前端静态文件服务。
+  const useHttps = process.env.HTTPS === 'true';
+
+  let httpServer: ReturnType<typeof createHttpServer>;
+  if (useHttps) {
+    const sslDir = path.resolve(PROJECT_ROOT, 'config/ssl');
+    const certPath = process.env.SSL_CERT_PATH || path.join(sslDir, 'cert.pem');
+    const keyPath = process.env.SSL_KEY_PATH || path.join(sslDir, 'key.pem');
+
+    if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+      console.error(
+        `[HTTPS] SSL 证书文件不存在: ${certPath}`,
+      );
+      console.error('[HTTPS] 请先运行 node scripts/generate-cert.js 生成证书');
+      process.exit(1);
+    }
+
+    console.log(`[HTTPS] 使用证书: ${certPath}`);
+    httpServer = createHttpsServer(
+      {
+        cert: fs.readFileSync(certPath),
+        key: fs.readFileSync(keyPath),
+      },
+      app,
+    );
+
+    // 在 HTTPS 模式下，后端同时提供前端静态文件服务，
+    // 避免浏览器混合内容（HTTPS 页面 → HTTP 请求）问题。
+    const frontendDist = path.resolve(PROJECT_ROOT, 'frontend/dist');
+    if (fs.existsSync(frontendDist)) {
+      console.log(`[HTTPS] 提供前端静态文件: ${frontendDist}`);
+      app.use(express.static(frontendDist));
+
+      // SPA 回退：所有非 API 路由返回 index.html
+      // 必须放在所有 API 路由之后，否则会覆盖 API 路由
+      // 使用 app.use 处理通配路由，避免 path-to-regexp v8+ 不支持 '*' 的问题
+      app.use((_req, res) => {
+        res.sendFile(path.join(frontendDist, 'index.html'));
+      });
+    } else {
+      console.warn(`[HTTPS] 警告：前端构建产物不存在: ${frontendDist}`);
+      console.warn('[HTTPS] HTTPS 模式下无法提供前端页面，请先构建前端');
+    }
+  } else {
+    httpServer = createHttpServer(app);
+  }
+
   const io = new SocketIOServer(httpServer, {
     cors: {
       origin: CORS_ORIGIN,
@@ -403,7 +452,8 @@ async function bootstrap() {
 
   httpServer.listen(listenOptions, () => {
     const displayHost = HOST === '::' ? '[::]' : HOST ?? '*';
-    console.log(`Server is running on http://${displayHost}:${PORT}`);
+    const protocol = useHttps ? 'https' : 'http';
+    console.log(`Server is running on ${protocol}://${displayHost}:${PORT}`);
     if (process.env.NODE_ENV === 'production' && !process.env.CORS_ORIGIN) {
       console.warn(
         '警告：未设置 CORS_ORIGIN，当前允许所有来源跨域访问。公网部署请设置 CORS_ORIGIN 为具体域名。',

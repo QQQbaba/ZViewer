@@ -72,6 +72,42 @@
   object-fit: contain !important;
 }
 
+/* 网页全屏：必须用 !important 强制 position:fixed。
+   原因：.zart-stage 基础样式中的 position:relative（第 9 行）与 Tailwind
+   的 .fixed 类特异性相同 (0,1,0)，而 art-overrides.css 在 Tailwind utilities
+   之后加载，因此 position:relative 会覆盖 .fixed，导致 .zart-stage 留在文档流中。
+   父级视频容器（aspect-ratio + overflow:hidden）会裁剪 stage 的底部，
+   使控制栏被截断、视频因容器约束而缩小。
+   使用 !important 确保 fixed 生效，使 stage 脱离文档流铺满整个视口。 */
+.zart-stage.zart-web-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100dvw !important;
+  height: 100dvh !important;
+  z-index: 100 !important;
+  overflow: hidden !important;
+}
+
+/* 网页全屏：视频容器与视频元素定位规则，与原生全屏一致，
+   确保 video 使用 absolute inset:0 而非文档流布局。 */
+.zart-stage.zart-web-fullscreen .zart-video-container {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+.zart-stage.zart-web-fullscreen .art-video-player {
+  width: 100% !important;
+  height: 100% !important;
+}
+.zart-stage.zart-web-fullscreen .art-video {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
 /* 原生控制栏已完全由 PlayerControlBar 替代，强制隐藏避免与自定义栏重叠 */
 .zart-stage .art-controls,
 .zart-stage .art-control,
@@ -141,4 +177,55 @@
    避免两套加载动画重叠 */
 .zart-stage .art-loading {
   display: none !important;
+}
+
+/* =====================================================
+   自定义控制栏显隐动画
+   设计原则（与 Header 下拉菜单一致）：
+   - backdrop-filter 和 transform 动画必须在同一个元素上。
+     若分开（外层 transform + 内层 backdrop-filter），外层会变成
+     Backdrop Root，内层 backdrop-filter 采样不到外部背景导致模糊丢失。
+   - 同一元素上，backdrop-filter 先采样元素背后的内容，transform 只
+     移动合成后的结果，因此过渡期间模糊不会丢失。
+   - enter 使用 backwards：动画结束后 transform 回到 none，元素不再是
+     Backdrop Root，backdrop-filter 始终正常工作。
+   - exit 使用 forwards：动画结束后保持隐藏状态（opacity:0），此时
+     不可见，是否为 Backdrop Root 无影响。
+   ===================================================== */
+
+.zart-controlbar-enter {
+  animation: zart-controlbar-enter 0.28s var(--ease-out-expo) backwards;
+}
+
+.zart-controlbar-exit {
+  animation: zart-controlbar-exit 0.22s var(--ease-in-expo) forwards;
+  will-change: transform, opacity;
+}
+
+@keyframes zart-controlbar-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes zart-controlbar-exit {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+/* 精简动画：缩短时长 */
+[data-reduced-motion='true'] .zart-controlbar-enter,
+[data-reduced-motion='true'] .zart-controlbar-exit {
+  animation-duration: 0.18s !important;
 }

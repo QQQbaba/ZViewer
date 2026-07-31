@@ -14,6 +14,7 @@ param(
     [string]$Target = '',
 
     [switch]$Build,            # 启动前构建
+    [switch]$Https,            # 使用自签 HTTPS
     [int]$Port = 3333,
     [int]$FrontendPort = 4173
 )
@@ -149,14 +150,19 @@ function Invoke-Start {
     Write-Host "========================================"
     Write-Host "  ZViewer 启动"
     Write-Host "  后端端口: $Port"
-    Write-Host "  前端端口: $FrontendPort"
+    if ($Https) {
+      Write-Host "  模式: HTTPS（自签证书）"
+      Write-Host "  前端: 由后端统一提供"
+    } else {
+      Write-Host "  前端端口: $FrontendPort"
+    }
     Write-Host "========================================"
 
     if (Test-PortInUse $Port) {
         Write-Host "  错误：后端端口 $Port 已被占用" -ForegroundColor Red
         exit 1
     }
-    if (Test-PortInUse $FrontendPort) {
+    if (-not $Https -and (Test-PortInUse $FrontendPort)) {
         Write-Host "  错误：前端端口 $FrontendPort 已被占用" -ForegroundColor Red
         exit 1
     }
@@ -175,19 +181,50 @@ function Invoke-Start {
     if (-not (Test-Path $backendArtifact)) {
         throw "后端构建产物缺失: $backendArtifact，请先执行 build 或加 -Build 启动"
     }
-    if (-not (Test-Path $frontendArtifact)) {
+    if ($Https) {
+      # HTTPS 模式：后端需要前端构建产物来提供静态文件服务
+      if (-not (Test-Path $frontendArtifact)) {
+        throw "前端构建产物缺失: $frontendArtifact，HTTPS 模式需要前端构建产物"
+      }
+    } else {
+      if (-not (Test-Path $frontendArtifact)) {
         throw "前端构建产物缺失: $frontendArtifact，请先执行 build 或加 -Build 启动"
+      }
+    }
+
+    # HTTPS 模式：生成自签证书
+    if ($Https) {
+      Write-Host "  生成自签 SSL 证书..."
+      $certScript = Join-Path $rootDir "scripts\generate-cert.js"
+      if (-not (Test-Path $certScript)) {
+        throw "证书生成脚本缺失: $certScript"
+      }
+      & node $certScript
+      if ($LASTEXITCODE -ne 0) {
+        throw "SSL 证书生成失败"
+      }
     }
 
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     "" | Set-Content "$logDir/backend.log" -Encoding UTF8
     "" | Set-Content "$logDir/backend.err.log" -Encoding UTF8
-    "" | Set-Content "$logDir/frontend.log" -Encoding UTF8
-    "" | Set-Content "$logDir/frontend.err.log" -Encoding UTF8
+    if (-not $Https) {
+      # 非 HTTPS 模式才需要启动前端
+      "" | Set-Content "$logDir/frontend.log" -Encoding UTF8
+      "" | Set-Content "$logDir/frontend.err.log" -Encoding UTF8
+    }
 
     $env:PORT = "$Port"
     $env:NODE_ENV = "production"
     $env:HOST = "::"
+
+    if ($Https) {
+      $env:HTTPS = "true"
+      # 证书路径使用默认值，由 generate-cert.js 生成
+      $sslDir = Join-Path $rootDir "config\ssl"
+      $env:SSL_CERT_PATH = Join-Path $sslDir "cert.pem"
+      $env:SSL_KEY_PATH = Join-Path $sslDir "key.pem"
+    }
 
     Write-Host "  启动后端..."
     $backend = Start-Process -FilePath "node" -ArgumentList "dist/index.js" `
@@ -195,19 +232,26 @@ function Invoke-Start {
         -RedirectStandardOutput "$logDir/backend.log" `
         -RedirectStandardError "$logDir/backend.err.log" -PassThru
 
-    Write-Host "  启动前端..."
-    $viteJs = Resolve-ViteJs
-    if (-not $viteJs) { throw "未找到 vite.js" }
-    $frontend = Start-Process -FilePath "node" -ArgumentList "`"$viteJs`" preview --port $FrontendPort --host" `
-        -WorkingDirectory $frontendDir -WindowStyle Hidden `
-        -RedirectStandardOutput "$logDir/frontend.log" `
-        -RedirectStandardError "$logDir/frontend.err.log" -PassThru
+    if ($Https) {
+      # HTTPS 模式：后端已提供前端静态文件服务，无需单独启动前端
+      Write-PidsFile -backendPid $backend.Id -frontendPid $null
+      Write-Host "  后端 PID: $($backend.Id)"
+      Write-Host "  HTTPS 访问: https://localhost:$Port"
+      Write-Host "  日志: $logDir/"
+    } else {
+      Write-Host "  启动前端..."
+      $viteJs = Resolve-ViteJs
+      if (-not $viteJs) { throw "未找到 vite.js" }
+      $frontend = Start-Process -FilePath "node" -ArgumentList "`"$viteJs`" preview --port $FrontendPort --host" `
+          -WorkingDirectory $frontendDir -WindowStyle Hidden `
+          -RedirectStandardOutput "$logDir/frontend.log" `
+          -RedirectStandardError "$logDir/frontend.err.log" -PassThru
 
-    Write-PidsFile -backendPid $backend.Id -frontendPid $frontend.Id
-
-    Write-Host "  后端 PID: $($backend.Id)"
-    Write-Host "  前端 PID: $($frontend.Id)"
-    Write-Host "  日志: $logDir/"
+      Write-PidsFile -backendPid $backend.Id -frontendPid $frontend.Id
+      Write-Host "  后端 PID: $($backend.Id)"
+      Write-Host "  前端 PID: $($frontend.Id)"
+      Write-Host "  日志: $logDir/"
+    }
 }
 
 function Invoke-Build {
@@ -229,7 +273,9 @@ function Invoke-Stop {
     }
     # 兜底：按端口清理
     Stop-ProcessByPort $Port
-    Stop-ProcessByPort $FrontendPort
+    if (-not $Https) {
+        Stop-ProcessByPort $FrontendPort
+    }
     Write-Host "  已停止"
 }
 
@@ -273,10 +319,14 @@ function Invoke-Status {
 
     Write-Host "  前端:"
     Write-Host "    配置端口: $frontendPort"
-    Write-Host "    端口监听: $(if ($frontendListen) { '是' } else { '否' })"
     if ($existing -and $existing.frontend -and $existing.frontend.pid) {
         $frontendState = if ($frontendRunning) { '运行中' } else { '未运行' }
+        Write-Host "    端口监听: $(if ($frontendListen) { '是' } else { '否' })"
         Write-Host "    记录 PID: $($existing.frontend.pid) ($frontendState)"
+    } elseif ($existing -and $existing.frontend -eq $null) {
+        Write-Host "    模式: HTTPS（后端统一提供服务）"
+    } else {
+        Write-Host "    端口监听: $(if ($frontendListen) { '是' } else { '否' })"
     }
 
     $backendArtifact = Join-Path $backendDir "dist/index.js"
@@ -313,6 +363,7 @@ function Show-Help {
     Write-Host "  -Port PORT                指定后端端口（默认 3333）"
     Write-Host "  -FrontendPort PORT        指定前端端口（默认 4173）"
     Write-Host "  -Build                    启动前执行构建"
+    Write-Host "  -Https                    使用自签 HTTPS（后端统一提供前端页面）"
 }
 
 # ==================== 入口 ====================

@@ -19,7 +19,8 @@ export interface UpdateInfo {
 
 function projectRoot(): string {
   // backend/src/services/updater -> project root
-  return path.resolve(__dirname, '..', '..', '..', '..');
+  // pkg 模式下 __dirname 为只读快照，改用 process.cwd()
+  return process.pkg ? process.cwd() : path.resolve(__dirname, '..', '..', '..', '..');
 }
 
 function httpsGetJson<T>(url: string): Promise<T> {

@@ -14,6 +14,7 @@ PORTS_FILE="$ROOT_DIR/.prod.ports.json"
 BACKEND_PORT=3333
 FRONTEND_PORT=4173
 DO_BUILD=0
+HTTPS_MODE=0
 
 # ==================== 工具函数 ====================
 
@@ -80,14 +81,19 @@ cmd_start() {
   echo "========================================"
   echo "  ZViewer 启动"
   echo "  后端端口: $BACKEND_PORT"
-  echo "  前端端口: $FRONTEND_PORT"
+  if [[ "$HTTPS_MODE" -eq 1 ]]; then
+    echo "  模式: HTTPS（自签证书）"
+    echo "  前端: 由后端统一提供"
+  else
+    echo "  前端端口: $FRONTEND_PORT"
+  fi
   echo "========================================"
 
   if port_in_use "$BACKEND_PORT"; then
     echo "  错误：后端端口 $BACKEND_PORT 已被占用" >&2
     exit 1
   fi
-  if port_in_use "$FRONTEND_PORT"; then
+  if [[ "$HTTPS_MODE" -eq 0 ]] && port_in_use "$FRONTEND_PORT"; then
     echo "  错误：前端端口 $FRONTEND_PORT 已被占用" >&2
     exit 1
   fi
@@ -101,36 +107,85 @@ cmd_start() {
     echo "  跳过构建（如需构建请加 --build）"
   fi
 
+  local backend_artifact="$BACKEND_DIR/dist/index.js"
+  local frontend_artifact="$FRONTEND_DIR/dist/index.html"
+  if [[ ! -f "$backend_artifact" ]]; then
+    echo "  错误：后端构建产物缺失: $backend_artifact" >&2
+    exit 1
+  fi
+  if [[ "$HTTPS_MODE" -eq 1 ]]; then
+    if [[ ! -f "$frontend_artifact" ]]; then
+      echo "  错误：前端构建产物缺失: $frontend_artifact，HTTPS 模式需要前端构建产物" >&2
+      exit 1
+    fi
+  else
+    if [[ ! -f "$frontend_artifact" ]]; then
+      echo "  错误：前端构建产物缺失: $frontend_artifact" >&2
+      exit 1
+    fi
+  fi
+
+  # HTTPS 模式：生成自签证书
+  if [[ "$HTTPS_MODE" -eq 1 ]]; then
+    echo "  生成自签 SSL 证书..."
+    node "$ROOT_DIR/scripts/generate-cert.js"
+    if [[ $? -ne 0 ]]; then
+      echo "  SSL 证书生成失败" >&2
+      exit 1
+    fi
+  fi
+
   mkdir -p "$LOG_DIR"
 
   # 启动前清空旧日志，避免混叠
   : > "$LOG_DIR/backend.log"
-  : > "$LOG_DIR/frontend.log"
+  if [[ "$HTTPS_MODE" -eq 0 ]]; then
+    : > "$LOG_DIR/frontend.log"
+  fi
 
   echo "  启动后端..."
   pushd "$BACKEND_DIR" >/dev/null
-  PORT="$BACKEND_PORT" nohup node dist/index.js > "$LOG_DIR/backend.log" 2>&1 &
+  PORT="$BACKEND_PORT" \
+    NODE_ENV="production" \
+    HOST="::" \
+    HTTPS="$([[ "$HTTPS_MODE" -eq 1 ]] && echo "true" || echo "")" \
+    nohup node dist/index.js > "$LOG_DIR/backend.log" 2>&1 &
   local backend_pid=$!
   popd >/dev/null
 
-  echo "  启动前端..."
-  pushd "$FRONTEND_DIR" >/dev/null
-  nohup npx vite preview --port "$FRONTEND_PORT" --host > "$LOG_DIR/frontend.log" 2>&1 &
-  local frontend_pid=$!
-  popd >/dev/null
+  if [[ "$HTTPS_MODE" -eq 1 ]]; then
+    # HTTPS 模式：后端提供前端静态文件，无需启动前端预览服务器
+    node -e "
+      const fs = require('fs');
+      fs.writeFileSync('$PIDS_FILE', JSON.stringify({
+        backend: { pid: $backend_pid },
+        frontend: null,
+        ports: { backend: $BACKEND_PORT, frontend: $FRONTEND_PORT }
+      }, null, 2));
+    "
+    echo "  后端 PID: $backend_pid"
+    echo "  HTTPS 访问: https://localhost:$BACKEND_PORT"
+    echo "  日志: $LOG_DIR/"
+  else
+    echo "  启动前端..."
+    pushd "$FRONTEND_DIR" >/dev/null
+    nohup npx vite preview --port "$FRONTEND_PORT" --host > "$LOG_DIR/frontend.log" 2>&1 &
+    local frontend_pid=$!
+    popd >/dev/null
 
-  node -e "
-    const fs = require('fs');
-    fs.writeFileSync('$PIDS_FILE', JSON.stringify({
-      backend: { pid: $backend_pid },
-      frontend: { pid: $frontend_pid },
-      ports: { backend: $BACKEND_PORT, frontend: $FRONTEND_PORT }
-    }, null, 2));
-  "
+    node -e "
+      const fs = require('fs');
+      fs.writeFileSync('$PIDS_FILE', JSON.stringify({
+        backend: { pid: $backend_pid },
+        frontend: { pid: $frontend_pid },
+        ports: { backend: $BACKEND_PORT, frontend: $FRONTEND_PORT }
+      }, null, 2));
+    "
 
-  echo "  后端 PID: $backend_pid"
-  echo "  前端 PID: $frontend_pid"
-  echo "  日志: $LOG_DIR/"
+    echo "  后端 PID: $backend_pid"
+    echo "  前端 PID: $frontend_pid"
+    echo "  日志: $LOG_DIR/"
+  fi
 }
 
 cmd_build() {
@@ -143,7 +198,7 @@ cmd_stop() {
   if [[ -f "$PIDS_FILE" ]]; then
     local backend_pid frontend_pid
     backend_pid=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PIDS_FILE','utf8')).backend.pid||'')}catch{}" 2>/dev/null || true)
-    frontend_pid=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PIDS_FILE','utf8')).frontend.pid||'')}catch{}" 2>/dev/null || true)
+    frontend_pid=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PIDS_FILE','utf8')).frontend?.pid||'')}catch{}" 2>/dev/null || true)
     [[ -n "$backend_pid" ]] && kill "$backend_pid" 2>/dev/null || true
     [[ -n "$frontend_pid" ]] && kill "$frontend_pid" 2>/dev/null || true
     rm -f "$PIDS_FILE"
@@ -201,6 +256,7 @@ start/restart 选项:
   -p, --port PORT         指定后端端口（默认 3333）
   -f, --frontend-port PORT 指定前端端口（默认 4173）
       --build             启动前执行构建
+      --https             使用自签 HTTPS（后端统一提供前端页面）
 EOF
 }
 
@@ -210,6 +266,7 @@ parse_args() {
       -p|--port) BACKEND_PORT="$2"; shift 2 ;;
       -f|--frontend-port) FRONTEND_PORT="$2"; shift 2 ;;
       --build) DO_BUILD=1; shift ;;
+      --https) HTTPS_MODE=1; shift ;;
       *) echo "  未知参数: $1" >&2; usage; exit 1 ;;
     esac
   done
