@@ -10,6 +10,7 @@ import { Title, Paragraph } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
 import { apiFetch } from '@/lib/api'
+import { reconnectSocket } from '@/hooks/useSocket'
 import { cn } from '@/lib/utils'
 
 const Fade = ({
@@ -113,6 +114,9 @@ export default function LoginPage() {
           role: data.user.role as import('@/store/authStore').UserRole,
           status: data.user.status,
         })
+        // 登录后 Socket 需要断开重连，以新的认证凭据重新握手，
+        // 否则后端 socket.data.role 仍为旧角色（如 guest），导致创建房间等操作被拒绝。
+        reconnectSocket()
         message.success(isLogin ? '登录成功' : '注册成功')
         navigate(from || '/', { replace: true })
       } else {
