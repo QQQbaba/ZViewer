@@ -28,12 +28,20 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 /**
- * 项目根目录（backend/ 的上一级）。
+ * 项目根目录。
  *
- * 编译后路径为 `backend/dist/services/paths.js`，
- * 上溯 3 层即可到达项目根。
+ * 常规运行（ts-node / node dist/index.js）时：
+ *   编译后路径为 `backend/dist/services/paths.js`，上溯 3 层即可到达项目根。
+ *
+ * pkg 打包后（exe 运行）：
+ *   __dirname 指向虚拟文件系统（只读），改用 process.cwd() 作为项目根。
+ *   用户需在 exe 所在目录（或通过 CONFIG_DIR 环境变量）放置 config/ 目录。
  */
-export const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+export const PROJECT_ROOT = process.env.PROJECT_ROOT
+  ? process.env.PROJECT_ROOT
+  : process.pkg
+    ? process.cwd()
+    : path.resolve(__dirname, '..', '..', '..');
 
 /**
  * 数据根目录：所有持久化数据的统一入口。

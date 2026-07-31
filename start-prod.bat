@@ -25,6 +25,7 @@ if not exist "%PS1%" (
 :: which breaks UTF-8 Chinese characters even with `chcp 65001`.
 :: This .bat is a pure forwarder - no Chinese here.
 
+:: Forward the -Https parameter
 if "%~1"=="" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" help
 ) else (

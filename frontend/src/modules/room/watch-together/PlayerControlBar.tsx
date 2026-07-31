@@ -22,6 +22,8 @@ import {
   Minimize,
   Check,
   MoreHorizontal,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { DanmakuInput } from '@/components/VideoPlayer/parts/DanmakuInput'
@@ -213,6 +215,9 @@ interface PlayerControlBarProps {
   onRequestPlay?: () => void
   pausePending?: boolean
   playPending?: boolean
+  controlBarVisible?: boolean
+  controlBarHideMode?: boolean
+  onToggleHideMode?: () => void
 }
 
 export function PlayerControlBar({
@@ -237,6 +242,9 @@ export function PlayerControlBar({
   onRequestPlay,
   pausePending,
   playPending,
+  controlBarVisible = true,
+  controlBarHideMode = false,
+  onToggleHideMode,
 }: PlayerControlBarProps) {
   const currentTime = useVideoCurrentTime(videoRef)
   const duration = useVideoDuration(videoRef, watchTogether.duration)
@@ -474,8 +482,18 @@ export function PlayerControlBar({
     muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2
 
   return (
-    <div className="pointer-events-auto absolute bottom-0 left-0 right-0 z-20 p-2 md:p-3">
-      <div className="glass-strong flex flex-col gap-1.5 md:gap-2 rounded-lg border border-[var(--glass-border)] p-1.5 md:p-2 shadow-lg">
+    <div
+      className={cn(
+        'absolute bottom-0 left-0 right-0 z-[80] p-2 md:p-3',
+        !controlBarVisible && 'pointer-events-none'
+      )}
+    >
+      <div
+        className={cn(
+          'glass-strong flex flex-col gap-1.5 md:gap-2 rounded-lg border border-[var(--glass-border)] p-1.5 md:p-2 shadow-lg',
+          controlBarVisible ? 'zart-controlbar-enter' : 'zart-controlbar-exit'
+        )}
+      >
         {/* 进度条：轨道 + 缓冲 + 已播放 + 服务器同步线 */}
         <div
           ref={progressRef}
@@ -682,6 +700,15 @@ export function PlayerControlBar({
               <RotateCw size={18} />
             </ControlButton>
           </div>
+
+          {/* 隐藏/显示控制栏 */}
+          <ControlButton
+            label={controlBarHideMode ? '显示控制栏' : '隐藏控制栏'}
+            active={controlBarHideMode}
+            onClick={onToggleHideMode}
+          >
+            {controlBarHideMode ? <Eye size={18} /> : <EyeOff size={18} />}
+          </ControlButton>
 
           {/* 设置 */}
           <ControlButton

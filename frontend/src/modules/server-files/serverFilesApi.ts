@@ -177,9 +177,7 @@ export async function browseSystemDirs(
   absPath?: string
 ): Promise<SystemDirBrowseResult> {
   const query = absPath ? `?absPath=${encodeURIComponent(absPath)}` : ''
-  const res = await apiFetch(
-    `/api/server-files/browse-system${query}`
-  )
+  const res = await apiFetch(`/api/server-files/browse-system${query}`)
   const data = (await res.json()) as {
     success: boolean
     entries?: { name: string; absPath: string }[]
@@ -310,15 +308,12 @@ export async function downloadBilibiliVideo(
   )
 
   try {
-    const res = await apiFetch(
-      '/api/server-files/bilibili-download',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-        signal: controller.signal,
-      }
-    )
+    const res = await apiFetch('/api/server-files/bilibili-download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+      signal: controller.signal,
+    })
 
     const contentType = res.headers.get('content-type') || ''
     if (!contentType.includes('application/x-ndjson')) {

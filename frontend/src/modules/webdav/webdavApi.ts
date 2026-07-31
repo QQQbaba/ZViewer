@@ -108,9 +108,7 @@ export async function browseWebDAVMount(
   path?: string
 ): Promise<WebDAVDirectoryEntry[]> {
   const query = path ? `?path=${encodeURIComponent(path)}` : ''
-  const res = await apiFetch(
-    `/api/webdav/mounts/${id}/browse${query}`
-  )
+  const res = await apiFetch(`/api/webdav/mounts/${id}/browse${query}`)
   const data = (await res.json()) as {
     success: boolean
     entries?: WebDAVDirectoryEntry[]

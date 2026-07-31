@@ -280,14 +280,11 @@ export default function AdminPage() {
   ) => {
     if (targetUser.role === nextRole) return
     try {
-      const res = await apiFetch(
-        `/api/admin/users/${targetUser.id}/role`,
-        {
-          method: 'PATCH',
-          headers: authHeaders,
-          body: JSON.stringify({ role: nextRole }),
-        }
-      )
+      const res = await apiFetch(`/api/admin/users/${targetUser.id}/role`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify({ role: nextRole }),
+      })
       const data = (await res.json()) as { success: boolean; message?: string }
       if (data.success) {
         const roleLabelMap: Record<AdminUser['role'], string> = {
@@ -312,13 +309,10 @@ export default function AdminPage() {
   const handleApproveUser = async () => {
     if (!userApprove) return
     try {
-      const res = await apiFetch(
-        `/api/admin/users/${userApprove.id}/approve`,
-        {
-          method: 'POST',
-          headers: authHeaders,
-        }
-      )
+      const res = await apiFetch(`/api/admin/users/${userApprove.id}/approve`, {
+        method: 'POST',
+        headers: authHeaders,
+      })
       const data = (await res.json()) as { success: boolean; message?: string }
       if (data.success) {
         message.success('已审核通过该用户')
@@ -336,13 +330,10 @@ export default function AdminPage() {
   const handleDeleteUser = async () => {
     if (!userDelete) return
     try {
-      const res = await apiFetch(
-        `/api/admin/users/${userDelete.id}`,
-        {
-          method: 'DELETE',
-          headers: authHeaders,
-        }
-      )
+      const res = await apiFetch(`/api/admin/users/${userDelete.id}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      })
       const data = (await res.json()) as { success: boolean; message?: string }
       if (data.success) {
         message.success('已删除用户')
@@ -360,13 +351,10 @@ export default function AdminPage() {
   const handleCloseRoom = async () => {
     if (!roomClose) return
     try {
-      const res = await apiFetch(
-        `/api/admin/rooms/${roomClose.roomId}`,
-        {
-          method: 'DELETE',
-          headers: authHeaders,
-        }
-      )
+      const res = await apiFetch(`/api/admin/rooms/${roomClose.roomId}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      })
       const data = (await res.json()) as { success: boolean; message?: string }
       if (data.success) {
         message.success('已关闭房间')

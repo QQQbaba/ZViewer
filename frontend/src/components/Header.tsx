@@ -10,6 +10,7 @@ import {
   Check,
   SlidersHorizontal,
   Shield,
+  ShieldAlert,
   UserCircle,
   LayoutDashboard,
   ChevronDown,
@@ -108,6 +109,13 @@ export function Header() {
     setCustomRtmpPortState(getCustomRtmpPort())
     setServerModalOpen(true)
   }, [])
+
+  // 混合内容检测：HTTPS 页面 → HTTP 后端（浏览器会阻止此类请求）
+  const isApiHttp = customApiUrl.startsWith('http://')
+  const isSocketHttp = customSocketUrl.startsWith('http://')
+  const isHttpsPage =
+    typeof window !== 'undefined' && window.location.protocol === 'https:'
+  const hasMixedContent = isHttpsPage && (isApiHttp || isSocketHttp)
 
   // 按钮与菜单分别 ref：菜单通过 createPortal 渲染到 document.body，
   // 脱离 Header(fixed + backdrop-filter) 的合成层，使二级菜单的 backdrop-filter 能看到真实页面内容。
@@ -844,7 +852,13 @@ export function Header() {
                 setCustomRtmpPort(customRtmpPort)
                 // 地址变化后，旧的 socket 实例仍指向原 SOCKET_URL，强制重建。
                 resetSocket()
-                message.success('后端地址已保存，即将刷新页面生效')
+                if (hasMixedContent) {
+                  message.warning(
+                    '已保存，但 HTTPS 页面无法访问 HTTP 后端。请配置反向代理或后端 HTTPS。'
+                  )
+                } else {
+                  message.success('后端地址已保存，即将刷新页面生效')
+                }
                 setServerModalOpen(false)
                 // 刷新页面确保所有模块级 API_URL 缓存重新计算
                 setTimeout(() => window.location.reload(), 600)
@@ -910,6 +924,38 @@ export function Header() {
               </code>
             </p>
           </div>
+
+          {hasMixedContent && (
+            <div
+              className="rounded-lg border p-3"
+              style={{
+                borderColor: 'var(--md-sys-color-error)',
+                backgroundColor:
+                  'rgba(var(--md-sys-color-error-container-rgb, 249, 233, 232), 0.95)',
+                color: 'var(--md-sys-color-on-error-container)',
+              }}
+            >
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <ShieldAlert className="h-4 w-4 shrink-0" />
+                <span>检测到混合内容（HTTPS → HTTP）</span>
+              </div>
+              <p className="mt-1.5 text-xs leading-relaxed">
+                当前页面为 HTTPS，但后端地址为 HTTP。浏览器会阻止 HTTPS
+                页面发起的 HTTP 请求，API 和 WebSocket 连接均无法正常工作。
+              </p>
+              <p className="mt-2 text-xs font-medium">推荐方案：</p>
+              <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs">
+                <li>
+                  使用反向代理（Nginx / Caddy）统一提供 HTTPS，后端通过反向代理访问
+                </li>
+                <li>或为后端 Express 服务直接配置 HTTPS 证书</li>
+                <li>
+                  或使用 Docker 部署，前端 Nginx 自动代理 /api 和 /socket.io 到后端
+                </li>
+              </ul>
+            </div>
+          )}
+
           <div className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
             提示：留空将使用环境变量或页面默认值，保存后会自动刷新页面使配置生效。
           </div>

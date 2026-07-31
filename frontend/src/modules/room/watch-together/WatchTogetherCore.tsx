@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type Artplayer from 'artplayer'
+import { cn } from '@/lib/utils'
 import { PlayerControlBar } from './PlayerControlBar'
 import { Text } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
@@ -212,6 +213,30 @@ export function WatchTogetherCore({
   // ── 面板开关 ─────────────────────────────────────────
   const [settingsOpen, setSettingsOpen] = useState(false)
 
+  // ── 播放器内通知（左上角文字提示）────────────────────────
+  const [playerNotices, setPlayerNotices] = useState<
+    { id: number; text: string; type: 'info' | 'success' | 'error' }[]
+  >([])
+  const noticeIdRef = useRef(0)
+  const addPlayerNotice = useCallback(
+    (text: string, type: 'info' | 'success' | 'error' = 'info') => {
+      const id = ++noticeIdRef.current
+      setPlayerNotices((prev) => [...prev, { id, text, type }])
+      setTimeout(() => {
+        setPlayerNotices((prev) => prev.filter((n) => n.id !== id))
+      }, 3500)
+    },
+    []
+  )
+
+  // ── 控制栏显隐状态 ────────────────────────────────────
+  const [controlBarVisible, setControlBarVisible] = useState(true)
+  const [controlBarHideMode, setControlBarHideMode] = useState(false)
+  const controlBarCooldownRef = useRef<number>(0)
+  const controlBarIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
+
   // ── 原生全屏状态跟踪 ────────────────────────────────
   const [isFullscreen, setIsFullscreen] = useState(false)
 
@@ -244,6 +269,86 @@ export function WatchTogetherCore({
       void stage.requestFullscreen()
     }
   }, [stageRef])
+
+  // ── 控制栏显隐逻辑 ────────────────────────────────────
+  // 默认：鼠标 2s 内无移动即自动隐藏，暂停时不强制显示。
+  // 开启“隐藏模式”后，点击按钮立即隐藏并进入 2s 冷却，冷却期间任何方式都无法显示，
+  // 冷却结束后仅当鼠标位于播放器底部时才显示。
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage) return
+
+    const BOTTOM_HEIGHT = 80
+
+    const clearIdleTimer = () => {
+      if (controlBarIdleTimerRef.current) {
+        clearTimeout(controlBarIdleTimerRef.current)
+        controlBarIdleTimerRef.current = null
+      }
+    }
+
+    const scheduleIdleHide = () => {
+      clearIdleTimer()
+      controlBarIdleTimerRef.current = setTimeout(() => {
+        setControlBarVisible(false)
+      }, 2000)
+    }
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (controlBarHideMode) {
+        const now = Date.now()
+        if (now < controlBarCooldownRef.current) {
+          // 冷却期间无视任何显示请求
+          scheduleIdleHide()
+          return
+        }
+        const rect = stage.getBoundingClientRect()
+        const inBottom = e.clientY >= rect.bottom - BOTTOM_HEIGHT
+        setControlBarVisible(inBottom)
+      } else {
+        setControlBarVisible(true)
+      }
+      scheduleIdleHide()
+    }
+
+    const handlePointerLeave = () => {
+      setControlBarVisible(false)
+      clearIdleTimer()
+    }
+
+    const handlePointerDown = (e: PointerEvent) => {
+      // 点击/触摸同样视为一次交互，触发与移动相同的显隐规则
+      handlePointerMove(e)
+    }
+
+    stage.addEventListener('pointermove', handlePointerMove)
+    stage.addEventListener('pointerleave', handlePointerLeave)
+    stage.addEventListener('pointerdown', handlePointerDown)
+
+    // 初始默认显示，随后按空闲逻辑自动隐藏
+    scheduleIdleHide()
+
+    return () => {
+      stage.removeEventListener('pointermove', handlePointerMove)
+      stage.removeEventListener('pointerleave', handlePointerLeave)
+      stage.removeEventListener('pointerdown', handlePointerDown)
+      clearIdleTimer()
+    }
+  }, [stageRef, controlBarHideMode])
+
+  const handleToggleHideMode = useCallback(() => {
+    setControlBarHideMode((prev) => {
+      const next = !prev
+      if (next) {
+        setControlBarVisible(false)
+        controlBarCooldownRef.current = Date.now() + 2000
+      } else {
+        setControlBarVisible(true)
+        controlBarCooldownRef.current = 0
+      }
+      return next
+    })
+  }, [])
 
   // 加载 B站 官方弹幕：缓存后通过 DanmakuLayer 时间轴弹幕接口加载
   useEffect(() => {
@@ -537,25 +642,28 @@ export function WatchTogetherCore({
     const handleSeekResponse = (data: { accept: boolean; time?: number }) => {
       setSeekPending(false)
       if (data?.accept) {
-        message.success(`房主已同意跳转到 ${formatSeekTime(data.time ?? 0)}`)
+        addPlayerNotice(
+          `房主已同意跳转到 ${formatSeekTime(data.time ?? 0)}`,
+          'success'
+        )
       } else {
-        message.info('房主拒绝了您的跳转申请')
+        addPlayerNotice('房主拒绝了您的跳转申请', 'info')
       }
     }
     const handlePauseResponse = (data: { accept: boolean }) => {
       setPausePending(false)
       if (data?.accept) {
-        message.success('房主已同意暂停')
+        addPlayerNotice('房主已同意暂停', 'success')
       } else {
-        message.info('房主拒绝了您的暂停申请')
+        addPlayerNotice('房主拒绝了您的暂停申请', 'info')
       }
     }
     const handlePlayResponse = (data: { accept: boolean }) => {
       setPlayPending(false)
       if (data?.accept) {
-        message.success('房主已同意继续播放')
+        addPlayerNotice('房主已同意继续播放', 'success')
       } else {
-        message.info('房主拒绝了您的继续播放申请')
+        addPlayerNotice('房主拒绝了您的继续播放申请', 'info')
       }
     }
 
@@ -567,6 +675,7 @@ export function WatchTogetherCore({
       socket.off('pause-response', handlePauseResponse)
       socket.off('play-response', handlePlayResponse)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, isHost])
 
   // 所有用户：监听房间模式切换
@@ -713,14 +822,14 @@ export function WatchTogetherCore({
         (response: { success: boolean; message?: string }) => {
           if (!response.success) {
             setSeekPending(false)
-            message.error(response.message || '申请跳转失败')
+            addPlayerNotice(response.message || '申请跳转失败', 'error')
           } else {
-            message.info('已发送跳转申请，等待房主确认')
+            addPlayerNotice('已发送跳转申请，等待房主确认', 'info')
           }
         }
       )
     },
-    [socket, isHost, roomId, seekPending]
+    [socket, isHost, roomId, seekPending, addPlayerNotice]
   )
 
   const handleRequestPause = useCallback(() => {
@@ -732,13 +841,13 @@ export function WatchTogetherCore({
       (response: { success: boolean; message?: string }) => {
         if (!response.success) {
           setPausePending(false)
-          message.error(response.message || '申请暂停失败')
+          addPlayerNotice(response.message || '申请暂停失败', 'error')
         } else {
-          message.info('已发送暂停申请，等待房主确认')
+          addPlayerNotice('已发送暂停申请，等待房主确认', 'info')
         }
       }
     )
-  }, [socket, isHost, roomId, pausePending])
+  }, [socket, isHost, roomId, pausePending, addPlayerNotice])
 
   const handleRequestPlay = useCallback(() => {
     if (!socket || isHost || playPending) return
@@ -749,13 +858,13 @@ export function WatchTogetherCore({
       (response: { success: boolean; message?: string }) => {
         if (!response.success) {
           setPlayPending(false)
-          message.error(response.message || '申请继续播放失败')
+          addPlayerNotice(response.message || '申请继续播放失败', 'error')
         } else {
-          message.info('已发送继续播放申请，等待房主确认')
+          addPlayerNotice('已发送继续播放申请，等待房主确认', 'info')
         }
       }
     )
-  }, [socket, isHost, roomId, playPending])
+  }, [socket, isHost, roomId, playPending, addPlayerNotice])
 
   // ── 控制栏操作 ─────────────────────────────────────────
   const handleToggleDanmaku = useCallback(() => {
@@ -1032,6 +1141,26 @@ export function WatchTogetherCore({
           slots.danmakuRoot
         )}
 
+      {/* 播放器内通知（左上角），使用 overlayRoot 让通知始终可见 */}
+      {createPortal(
+        <div className="pointer-events-none absolute left-4 top-4 z-50 flex flex-col gap-2">
+          {playerNotices.map((notice) => (
+            <div
+              key={notice.id}
+              className={cn(
+                'pointer-events-auto animate-in slide-in-from-left-2 fade-in rounded-lg px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-md transition-all duration-300',
+                notice.type === 'success' && 'bg-green-500/80 text-white',
+                notice.type === 'error' && 'bg-red-500/80 text-white',
+                notice.type === 'info' && 'bg-black/60 text-white'
+              )}
+            >
+              {notice.text}
+            </div>
+          ))}
+        </div>,
+        slots.overlayRoot
+      )}
+
       {/* 覆盖层：解析中 / 重载中加载动画。
           挂载到 panelRoot（z-index: 70，直接 append 到 $player），
           避免使用 ArtPlayer layer 系统导致 loading 状态下 layer 被隐藏 */}
@@ -1160,6 +1289,9 @@ export function WatchTogetherCore({
           onRequestPlay={handleRequestPlay}
           pausePending={pausePending}
           playPending={playPending}
+          controlBarVisible={controlBarVisible}
+          controlBarHideMode={controlBarHideMode}
+          onToggleHideMode={handleToggleHideMode}
         />
       )}
 

@@ -231,7 +231,9 @@ export function WatchTogetherPanel({
       className={cn(
         'zart-stage',
         !isHost && 'zart-viewer',
-        isWebFullscreen ? 'fixed inset-0 z-[100]' : 'relative h-full w-full'
+        isWebFullscreen
+          ? 'zart-web-fullscreen fixed inset-0 z-[100]'
+          : 'relative h-full w-full'
       )}
       style={
         isWebFullscreen ? { width: '100dvw', height: '100dvh' } : undefined

@@ -486,6 +486,7 @@ export function RoomLayout({
           ArtPlayer 重建而重新加载视频。通过 !important 覆盖 glass 样式，使内部 fixed
           定位的 .zart-stage 能相对于 viewport 铺满整个窗口。 */}
       <Card
+        disableAnimation={webFullscreen}
         className={cn(
           'relative flex flex-none flex-col overflow-hidden min-h-0 bg-transparent',
           webFullscreen
