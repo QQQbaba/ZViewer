@@ -110,12 +110,16 @@ cmd_start() {
   : > "$LOG_DIR/frontend.log"
 
   echo "  启动后端..."
-  (cd "$BACKEND_DIR" && PORT="$BACKEND_PORT" nohup node dist/index.js > "$LOG_DIR/backend.log" 2>&1 &)
+  pushd "$BACKEND_DIR" >/dev/null
+  PORT="$BACKEND_PORT" nohup node dist/index.js > "$LOG_DIR/backend.log" 2>&1 &
   local backend_pid=$!
+  popd >/dev/null
 
   echo "  启动前端..."
-  (cd "$FRONTEND_DIR" && nohup npx vite preview --port "$FRONTEND_PORT" --host > "$LOG_DIR/frontend.log" 2>&1 &)
+  pushd "$FRONTEND_DIR" >/dev/null
+  nohup npx vite preview --port "$FRONTEND_PORT" --host > "$LOG_DIR/frontend.log" 2>&1 &
   local frontend_pid=$!
+  popd >/dev/null
 
   node -e "
     const fs = require('fs');
