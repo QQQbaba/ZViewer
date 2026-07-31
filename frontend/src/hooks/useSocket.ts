@@ -36,7 +36,7 @@ function getSocket(): Socket {
  * （重新发送 cookie）。socket.io 4.x 的 disconnect+connect 不会重建底层实例，
  * 但会重新发起握手，所以可以复用同一个 Socket 实例。
  */
-function reconnectSocket() {
+export function reconnectSocket() {
   if (!globalSocket) return
   globalSocket.disconnect()
   // 微任务延迟避免 disconnect/connect 在同一事件循环中冲突
