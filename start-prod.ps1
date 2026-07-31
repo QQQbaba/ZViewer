@@ -2,11 +2,11 @@
 #Requires -Version 5.1
 
 # ZViewer 一键启动脚本
-# 命令：start | stop | restart | status | logs | build | help
+# 命令：start | backend | stop | restart | status | logs | build | help
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'status', 'logs', 'build', 'help', 'menu', '')]
+    [ValidateSet('start', 'backend', 'stop', 'restart', 'status', 'logs', 'build', 'help', 'menu', '')]
     [string]$Command = 'menu',
 
     [Parameter(Position = 1)]
@@ -14,9 +14,7 @@ param(
     [string]$Target = '',
 
     [switch]$Build,            # 启动前构建
-    [switch]$Https,            # 使用自签 HTTPS
-    [int]$Port = 3333,
-    [int]$FrontendPort = 4173
+    [switch]$Https             # 使用自签 HTTPS
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,19 +29,17 @@ $backendDir = Join-Path $rootDir "backend"
 $frontendDir = Join-Path $rootDir "frontend"
 $logDir = Join-Path $rootDir "log"
 $pidsFile = Join-Path $rootDir ".prod.pids.json"
-$portsFile = Join-Path $rootDir ".prod.ports.json"
+$envFile = Join-Path $rootDir ".env"
 
 # ==================== 工具函数 ====================
 
-function Read-PortsFile {
-    if (-not (Test-Path $portsFile)) { return $null }
-    try {
-        $obj = Get-Content $portsFile -Raw | ConvertFrom-Json
-        return @{
-            backend = if ($null -ne $obj.backend) { [int]$obj.backend } else { $null }
-            frontend = if ($null -ne $obj.frontend) { [int]$obj.frontend } else { $null }
-        }
-    } catch { return $null }
+function Read-EnvPort {
+    if (-not (Test-Path $envFile)) { return $null }
+    $line = Get-Content $envFile | Where-Object { $_ -match '^\s*PORT\s*=' } | Select-Object -First 1
+    if (-not $line) { return $null }
+    $val = ($line -split '=', 2)[1].Trim().Trim('"').Trim()
+    if ($val -match '^\d+$') { return [int]$val }
+    return $null
 }
 
 function Read-PidsFile {
@@ -55,7 +51,6 @@ function Write-PidsFile($backendPid, $frontendPid) {
     @{
         backend = @{ pid = $backendPid }
         frontend = @{ pid = $frontendPid }
-        ports = @{ backend = $Port; frontend = $FrontendPort }
     } | ConvertTo-Json -Depth 3 | Set-Content -Path $pidsFile -Encoding UTF8
 }
 
@@ -142,21 +137,24 @@ function Build-Projects {
 
 # ==================== 命令 ====================
 
+function Set-Ports {
+    $envPort = Read-EnvPort
+    $script:Port = if ($envPort) { $envPort } else { 3333 }
+    $script:FrontendPort = 4173
+}
+
 function Invoke-Start {
-    $saved = Read-PortsFile
-    if (-not $PSBoundParameters.ContainsKey('Port') -and $saved -and $saved.backend) {
-        $Port = $saved.backend
-    }
-    if (-not $PSBoundParameters.ContainsKey('FrontendPort') -and $saved -and $saved.frontend) {
-        $FrontendPort = $saved.frontend
-    }
+    param([switch]$BackendOnly)
+    Set-Ports
 
     Write-Host "========================================"
     Write-Host "  ZViewer 启动"
     Write-Host "  后端端口: $Port"
     if ($Https) {
-      Write-Host "  模式: HTTPS（自签证书）"
+      Write-Host "  模式: HTTPS（自签/可信证书）"
       Write-Host "  前端: 由后端统一提供"
+    } elseif ($BackendOnly) {
+      Write-Host "  模式: 仅后端（HTTP）"
     } else {
       Write-Host "  前端端口: $FrontendPort"
     }
@@ -166,7 +164,7 @@ function Invoke-Start {
         Write-Host "  错误：后端端口 $Port 已被占用" -ForegroundColor Red
         exit 1
     }
-    if (-not $Https -and (Test-PortInUse $FrontendPort)) {
+    if (-not $Https -and -not $BackendOnly -and (Test-PortInUse $FrontendPort)) {
         Write-Host "  错误：前端端口 $FrontendPort 已被占用" -ForegroundColor Red
         exit 1
     }
@@ -190,7 +188,7 @@ function Invoke-Start {
       if (-not (Test-Path $frontendArtifact)) {
         throw "前端构建产物缺失: $frontendArtifact，HTTPS 模式需要前端构建产物"
       }
-    } else {
+    } elseif (-not $BackendOnly) {
       if (-not (Test-Path $frontendArtifact)) {
         throw "前端构建产物缺失: $frontendArtifact，请先执行 build 或加 -Build 启动"
       }
@@ -212,8 +210,7 @@ function Invoke-Start {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     "" | Set-Content "$logDir/backend.log" -Encoding UTF8
     "" | Set-Content "$logDir/backend.err.log" -Encoding UTF8
-    if (-not $Https) {
-      # 非 HTTPS 模式才需要启动前端
+    if (-not $Https -and -not $BackendOnly) {
       "" | Set-Content "$logDir/frontend.log" -Encoding UTF8
       "" | Set-Content "$logDir/frontend.err.log" -Encoding UTF8
     }
@@ -242,6 +239,12 @@ function Invoke-Start {
       Write-Host "  后端 PID: $($backend.Id)"
       Write-Host "  HTTPS 访问: https://localhost:$Port"
       Write-Host "  日志: $logDir/"
+    } elseif ($BackendOnly) {
+      # 仅后端模式：不启动前端
+      Write-PidsFile -backendPid $backend.Id -frontendPid $null
+      Write-Host "  后端 PID: $($backend.Id)"
+      Write-Host "  访问  : http://localhost:$Port   （仅后端，未启动前端）"
+      Write-Host "  日志  : $logDir/"
     } else {
       Write-Host "  启动前端..."
       $viteJs = Resolve-ViteJs
@@ -254,7 +257,8 @@ function Invoke-Start {
       Write-PidsFile -backendPid $backend.Id -frontendPid $frontend.Id
       Write-Host "  后端 PID: $($backend.Id)"
       Write-Host "  前端 PID: $($frontend.Id)"
-      Write-Host "  日志: $logDir/"
+      Write-Host "  访问  : http://localhost:$FrontendPort"
+      Write-Host "  日志  : $logDir/"
     }
 }
 
@@ -276,6 +280,7 @@ function Invoke-Stop {
         Remove-Item $pidsFile -Force -ErrorAction SilentlyContinue
     }
     # 兜底：按端口清理
+    Set-Ports
     Stop-ProcessByPort $Port
     if (-not $Https) {
         Stop-ProcessByPort $FrontendPort
@@ -294,9 +299,9 @@ function Invoke-Status {
     Write-Host "  ZViewer 运行状态"
     Write-Host "========================================"
 
-    $saved = Read-PortsFile
-    $backendPort = if ($saved -and $saved.backend) { $saved.backend } else { $Port }
-    $frontendPort = if ($saved -and $saved.frontend) { $saved.frontend } else { $FrontendPort }
+    Set-Ports
+    $backendPort = $Port
+    $frontendPort = $FrontendPort
 
     $existing = Read-PidsFile
     $backendRunning = $false
@@ -328,7 +333,7 @@ function Invoke-Status {
         Write-Host "    端口监听: $(if ($frontendListen) { '是' } else { '否' })"
         Write-Host "    记录 PID: $($existing.frontend.pid) ($frontendState)"
     } elseif ($existing -and $existing.frontend -eq $null) {
-        Write-Host "    模式: HTTPS（后端统一提供服务）"
+        Write-Host "    模式: 仅后端 / HTTPS（未启动前端）"
     } else {
         Write-Host "    端口监听: $(if ($frontendListen) { '是' } else { '否' })"
     }
@@ -352,10 +357,11 @@ function Invoke-Logs {
 }
 
 function Show-Help {
-    Write-Host "用法: .\start-prod.ps1 {start|stop|restart|status|logs|build|help} [选项]"
+    Write-Host "用法: .\start-prod.ps1 {start|backend|stop|restart|status|logs|build|help} [选项]"
     Write-Host ""
     Write-Host "命令:"
     Write-Host "  start              安装依赖后直接启动（默认不构建）"
+    Write-Host "  backend            仅启动后端（加 -Https 使用 HTTPS）"
     Write-Host "  build              单独构建前后端"
     Write-Host "  stop               停止服务"
     Write-Host "  restart            重启服务"
@@ -363,11 +369,11 @@ function Show-Help {
     Write-Host "  logs [backend|frontend]  查看日志（默认 backend）"
     Write-Host "  help               显示此帮助"
     Write-Host ""
-    Write-Host "start/restart 选项:"
-    Write-Host "  -Port PORT                指定后端端口（默认 3333）"
-    Write-Host "  -FrontendPort PORT        指定前端端口（默认 4173）"
+    Write-Host "start/restart/backend 选项:"
     Write-Host "  -Build                    启动前执行构建"
-    Write-Host "  -Https                    使用自签 HTTPS（后端统一提供前端页面）"
+    Write-Host "  -Https                    使用 HTTPS（后端统一提供前端页面）"
+    Write-Host ""
+    Write-Host "端口: 后端默认取 .env 的 PORT（否则 3333），前端固定 4173"
 }
 
 # ==================== 交互菜单 ====================
@@ -380,21 +386,28 @@ function Show-Menu {
         Write-Host "========================================"
         Write-Host ""
         Write-Host "  1) 启动服务"
-        Write-Host "  2) 停止服务"
-        Write-Host "  3) 重启服务"
-        Write-Host "  4) 查看状态"
-        Write-Host "  5) 查看日志"
-        Write-Host "  6) 构建前后端"
+        Write-Host "  2) 仅启动后端"
+        Write-Host "  3) 停止服务"
+        Write-Host "  4) 重启服务"
+        Write-Host "  5) 查看状态"
+        Write-Host "  6) 查看日志"
+        Write-Host "  7) 构建前后端"
         Write-Host "  0) 退出"
         Write-Host ""
-        $choice = Read-Host "请输入编号 (0-6)"
+        $choice = Read-Host "请输入编号 (0-7)"
         switch ($choice) {
             '1' { Invoke-Start; Wait-MenuKey }
-            '2' { Invoke-Stop; Wait-MenuKey }
-            '3' { Invoke-Restart; Wait-MenuKey }
-            '4' { Invoke-Status; Wait-MenuKey }
-            '5' { Invoke-Logs -LogTarget $Target; Wait-MenuKey }
-            '6' { Invoke-Build; Wait-MenuKey }
+            '2' {
+                $boChoice = Read-Host "  请选择类型 (1=HTTP 2=HTTPS，直接回车默认 HTTP)"
+                if ($boChoice -eq '2') { $script:Https = $true }
+                Invoke-Start -BackendOnly
+                Wait-MenuKey
+            }
+            '3' { Invoke-Stop; Wait-MenuKey }
+            '4' { Invoke-Restart; Wait-MenuKey }
+            '5' { Invoke-Status; Wait-MenuKey }
+            '6' { Invoke-Logs -LogTarget $Target; Wait-MenuKey }
+            '7' { Invoke-Build; Wait-MenuKey }
             '0' { return }
             default { Write-Host "  无效输入，请重新选择"; Start-Sleep -Milliseconds 800 }
         }
@@ -410,6 +423,7 @@ function Wait-MenuKey {
 
 switch ($Command) {
     'start'   { Invoke-Start }
+    'backend' { Invoke-Start -BackendOnly }
     'build'   { Invoke-Build }
     'stop'    { Invoke-Stop }
     'restart' { Invoke-Restart }

@@ -2,26 +2,34 @@
 set -euo pipefail
 
 # ZViewer 一键启动脚本
-# 命令：start | stop | restart | status | logs | build | help
+# 命令：start | backend | stop | restart | status | logs | build | help
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 LOG_DIR="$ROOT_DIR/log"
 PIDS_FILE="$ROOT_DIR/.prod.pids.json"
-PORTS_FILE="$ROOT_DIR/.prod.ports.json"
 
-BACKEND_PORT=3333
-FRONTEND_PORT=4173
+BACKEND_PORT=""
+FRONTEND_PORT=""
+BACKEND_ONLY=0
 DO_BUILD=0
 HTTPS_MODE=0
 
 # ==================== 工具函数 ====================
 
-read_ports() {
-  if [[ -f "$PORTS_FILE" ]]; then
-    BACKEND_PORT=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PORTS_FILE','utf8')).backend||$BACKEND_PORT)}catch{console.log($BACKEND_PORT)}" 2>/dev/null || echo "$BACKEND_PORT")
-    FRONTEND_PORT=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PORTS_FILE','utf8')).frontend||$FRONTEND_PORT)}catch{console.log($FRONTEND_PORT)}" 2>/dev/null || echo "$FRONTEND_PORT")
+# 端口固定：后端 = .env 的 PORT 或默认 3333；前端 = 4173
+set_ports() {
+  if [[ -z "$BACKEND_PORT" ]]; then
+    local env_port
+    env_port=""
+    if [[ -f "$ROOT_DIR/.env" ]]; then
+      env_port=$(grep -E '^PORT=' "$ROOT_DIR/.env" | head -n 1 | cut -d= -f2- | tr -d '"' | xargs)
+    fi
+    if [[ -n "$env_port" ]]; then BACKEND_PORT="$env_port"; else BACKEND_PORT=3333; fi
+  fi
+  if [[ -z "$FRONTEND_PORT" ]]; then
+    FRONTEND_PORT=4173
   fi
 }
 
@@ -76,14 +84,16 @@ build() {
 # ==================== 命令 ====================
 
 cmd_start() {
-  read_ports
+  set_ports
 
   echo "========================================"
   echo "  ZViewer 启动"
   echo "  后端端口: $BACKEND_PORT"
   if [[ "$HTTPS_MODE" -eq 1 ]]; then
-    echo "  模式: HTTPS（自签证书）"
+    echo "  模式: HTTPS（自签/可信证书）"
     echo "  前端: 由后端统一提供"
+  elif [[ "$BACKEND_ONLY" -eq 1 ]]; then
+    echo "  模式: 仅后端（HTTP）"
   else
     echo "  前端端口: $FRONTEND_PORT"
   fi
@@ -93,7 +103,7 @@ cmd_start() {
     echo "  错误：后端端口 $BACKEND_PORT 已被占用" >&2
     exit 1
   fi
-  if [[ "$HTTPS_MODE" -eq 0 ]] && port_in_use "$FRONTEND_PORT"; then
+  if [[ "$HTTPS_MODE" -eq 0 ]] && [[ "$BACKEND_ONLY" -eq 0 ]] && port_in_use "$FRONTEND_PORT"; then
     echo "  错误：前端端口 $FRONTEND_PORT 已被占用" >&2
     exit 1
   fi
@@ -118,7 +128,7 @@ cmd_start() {
       echo "  错误：前端构建产物缺失: $frontend_artifact，HTTPS 模式需要前端构建产物" >&2
       exit 1
     fi
-  else
+  elif [[ "$BACKEND_ONLY" -eq 0 ]]; then
     if [[ ! -f "$frontend_artifact" ]]; then
       echo "  错误：前端构建产物缺失: $frontend_artifact" >&2
       exit 1
@@ -139,7 +149,7 @@ cmd_start() {
 
   # 启动前清空旧日志，避免混叠
   : > "$LOG_DIR/backend.log"
-  if [[ "$HTTPS_MODE" -eq 0 ]]; then
+  if [[ "$HTTPS_MODE" -eq 0 ]] && [[ "$BACKEND_ONLY" -eq 0 ]]; then
     : > "$LOG_DIR/frontend.log"
   fi
 
@@ -159,13 +169,24 @@ cmd_start() {
       const fs = require('fs');
       fs.writeFileSync('$PIDS_FILE', JSON.stringify({
         backend: { pid: $backend_pid },
-        frontend: null,
-        ports: { backend: $BACKEND_PORT, frontend: $FRONTEND_PORT }
+        frontend: null
       }, null, 2));
     "
     echo "  后端 PID: $backend_pid"
     echo "  HTTPS 访问: https://localhost:$BACKEND_PORT"
     echo "  日志: $LOG_DIR/"
+  elif [[ "$BACKEND_ONLY" -eq 1 ]]; then
+    # 仅后端模式：不启动前端
+    node -e "
+      const fs = require('fs');
+      fs.writeFileSync('$PIDS_FILE', JSON.stringify({
+        backend: { pid: $backend_pid },
+        frontend: null
+      }, null, 2));
+    "
+    echo "  后端 PID: $backend_pid"
+    echo "  访问  : http://localhost:$BACKEND_PORT   （仅后端，未启动前端）"
+    echo "  日志  : $LOG_DIR/"
   else
     echo "  启动前端..."
     pushd "$FRONTEND_DIR" >/dev/null
@@ -177,14 +198,14 @@ cmd_start() {
       const fs = require('fs');
       fs.writeFileSync('$PIDS_FILE', JSON.stringify({
         backend: { pid: $backend_pid },
-        frontend: { pid: $frontend_pid },
-        ports: { backend: $BACKEND_PORT, frontend: $FRONTEND_PORT }
+        frontend: { pid: $frontend_pid }
       }, null, 2));
     "
 
     echo "  后端 PID: $backend_pid"
     echo "  前端 PID: $frontend_pid"
-    echo "  日志: $LOG_DIR/"
+    echo "  访问  : http://localhost:$FRONTEND_PORT"
+    echo "  日志  : $LOG_DIR/"
   fi
 }
 
@@ -214,17 +235,17 @@ cmd_restart() {
 }
 
 cmd_status() {
+  set_ports
   if [[ -f "$PIDS_FILE" ]]; then
-    node -e "
-      const fs = require('fs');
-      try {
-        const d = JSON.parse(fs.readFileSync('$PIDS_FILE','utf8'));
-        console.log('  后端 PID: ' + d.backend.pid + ' (端口 ' + d.ports.backend + ')');
-        console.log('  前端 PID: ' + d.frontend.pid + ' (端口 ' + d.ports.frontend + ')');
-      } catch {
-        console.log('  PID 文件损坏');
-      }
-    "
+    local backend_pid frontend_pid
+    backend_pid=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PIDS_FILE','utf8')).backend.pid||'')}catch{}" 2>/dev/null || true)
+    frontend_pid=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PIDS_FILE','utf8')).frontend?.pid||'')}catch{}" 2>/dev/null || true)
+    echo "  后端 PID: $backend_pid (端口 $BACKEND_PORT)"
+    if [[ -n "$frontend_pid" ]]; then
+      echo "  前端 PID: $frontend_pid (端口 $FRONTEND_PORT)"
+    else
+      echo "  前端: 未启动（仅后端 / HTTPS 模式）"
+    fi
   else
     echo "  未运行"
   fi
@@ -241,30 +262,74 @@ cmd_logs() {
 
 usage() {
   cat <<EOF
-用法: $0 {start|stop|restart|status|logs|build|help} [选项]
+用法: $0 {start|backend|stop|restart|status|logs|build|menu|help} [选项]
 
 命令:
   start              安装依赖后直接启动（默认不构建）
+  backend            仅启动后端（加 --https 使用 HTTPS）
   build              单独构建前后端
   stop               停止服务
   restart            重启服务
   status             查看运行状态
   logs [backend|frontend]  查看日志（默认 backend）
+  menu               交互菜单（无参数时自动进入）
   help               显示此帮助
 
-start/restart 选项:
-  -p, --port PORT         指定后端端口（默认 3333）
-  -f, --frontend-port PORT 指定前端端口（默认 4173）
+start/restart/backend 选项:
       --build             启动前执行构建
-      --https             使用自签 HTTPS（后端统一提供前端页面）
+      --https             使用 HTTPS（后端统一提供前端页面）
+
+端口: 后端默认取 .env 的 PORT（否则 3333），前端固定 4173
 EOF
+}
+
+# ==================== 交互菜单 ====================
+
+do_menu() {
+  while true; do
+    clear 2>/dev/null || true
+    echo "========================================"
+    echo "  ZViewer 生产服务管理"
+    echo "========================================"
+    echo ""
+    echo "  1) 启动服务"
+    echo "  2) 仅启动后端"
+    echo "  3) 停止服务"
+    echo "  4) 重启服务"
+    echo "  5) 查看状态"
+    echo "  6) 查看日志"
+    echo "  7) 构建前后端"
+    echo "  0) 退出"
+    echo ""
+    printf "请输入编号 (0-7): "
+    read CHOICE
+    case "$CHOICE" in
+      1) cmd_start; wait_key ;;
+      2) BACKEND_ONLY=1
+        printf "  请选择类型 (1=HTTP 2=HTTPS，直接回车默认 HTTP): "
+        read BO_CHOICE
+        [ "$BO_CHOICE" = "2" ] && HTTPS_MODE=1
+        cmd_start; wait_key ;;
+      3) cmd_stop; wait_key ;;
+      4) cmd_restart; wait_key ;;
+      5) cmd_status; wait_key ;;
+      6) cmd_logs; wait_key ;;
+      7) cmd_build; wait_key ;;
+      0) return 0 ;;
+      *) echo "  无效输入，请重新选择"; sleep 1 ;;
+    esac
+  done
+}
+
+wait_key() {
+  echo ""
+  printf "按回车返回菜单: "
+  read _DUMMY
 }
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -p|--port) BACKEND_PORT="$2"; shift 2 ;;
-      -f|--frontend-port) FRONTEND_PORT="$2"; shift 2 ;;
       --build) DO_BUILD=1; shift ;;
       --https) HTTPS_MODE=1; shift ;;
       *) echo "  未知参数: $1" >&2; usage; exit 1 ;;
@@ -275,12 +340,17 @@ parse_args() {
 # ==================== 入口 ====================
 
 main() {
-  local cmd="${1:-help}"
+  local cmd="${1:-menu}"
   shift || true
 
   case "$cmd" in
     start)
       parse_args "$@"
+      cmd_start
+      ;;
+    backend)
+      parse_args "$@"
+      BACKEND_ONLY=1
       cmd_start
       ;;
     build)
@@ -298,6 +368,9 @@ main() {
       ;;
     logs)
       cmd_logs "$1"
+      ;;
+    menu)
+      do_menu
       ;;
     help|--help|-h|*)
       usage

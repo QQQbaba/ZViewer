@@ -34,8 +34,11 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 - [技术栈](#技术栈)
 - [项目结构](#项目结构)
 - [快速开始](#快速开始)
+- [一键启动脚本](#一键启动脚本)
+- [单文件 exe 版](#单文件-exe-版)
+- [HTTPS 与证书](#https-与证书)
+- [Docker 部署](#docker-部署)
 - [本地开发](#本地开发)
-- [生产部署](#生产部署)
 - [环境变量](#环境变量)
 - [权限模型](#权限模型)
 - [视频源](#视频源)
@@ -49,8 +52,6 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 | ![image-20260730002033267](https://github.cdn.zero251.xyz/Zero-wyc/Image/main/All/20260730002033753.webp) | ![image-20260730002058938](https://github.cdn.zero251.xyz/Zero-wyc/Image/main/All/20260730002059371.webp) |
 
 ---
-
-
 
 可以来群组玩玩捏
 
@@ -165,8 +166,8 @@ https://t.me/Zero_251
 ### 部署
 
 - Docker + Docker Compose
-- Nginx 反向代理
-- 跨平台一键启动脚本（PowerShell / Bash）
+- 跨平台一键启动脚本（源码版 PowerShell / Bash）
+- 单文件 exe 版（pkg 打包，Windows / Linux / Linux-arm64）
 
 ---
 
@@ -177,34 +178,29 @@ ZViewer/
 ├── frontend/                # 前端 (React + Vite)
 │   ├── src/
 │   │   ├── components/      # 通用 UI 组件
-│   │   ├── modules/         # 业务模块
-│   │   │   ├── room/        # 房间与一起看
-│   │   │   ├── sync-playback/   # 同步播放核心
-│   │   │   ├── player/      # 播放器引擎与缓冲
-│   │   │   ├── bilibili/    # Bilibili 解析
-│   │   │   ├── screen-sharing/  # 屏幕共享
-│   │   │   ├── mounts/      # 挂载点管理
-│   │   │   ├── webdav/      # WebDAV 浏览
-│   │   │   ├── ftp/         # FTP 浏览
-│   │   │   ├── openlist/    # OpenList 浏览
-│   │   │   └── admin/       # 管理后台
+│   │   ├── modules/         # 业务模块（房间/播放器/Bilibili/挂载源/后台…）
 │   │   ├── pages/           # 页面组件
 │   │   ├── store/           # Zustand 状态
 │   │   ├── hooks/           # 通用 Hooks
 │   │   └── lib/             # 工具库
 │   └── nginx.conf           # 生产 Nginx 配置
 ├── backend/                 # 后端 (Express + TypeORM)
-│   ├── src/
-│   │   ├── entities/        # 数据库实体
-│   │   ├── routes/          # HTTP 路由
-│   │   ├── services/        # 业务服务
-│   │   ├── modules/         # Socket.IO 事件模块
-│   │   ├── middleware/      # 中间件
-│   │   └── utils/           # 工具
-│   └── Dockerfile
-├── docker-compose.yml       # 生产编排
-├── start-prod.ps1           # Windows 一键启动脚本
-├── start-prod.sh            # Linux/macOS 一键启动脚本
+│   └── src/                 # entities/routes/services/modules/middleware/utils
+├── frontend-server/         # 前端静态服务 + API 反代（零依赖，单文件 exe 用）
+├── scripts/
+│   ├── generate-cert.js     # 证书签发工具（自签 / Let's Encrypt 可信 CA）
+│   ├── acme-client.js       # ACME v2 HTTP-01 客户端（申请 Let's Encrypt 证书）
+│   └── test/                # 证书工具与启动脚本的本地 mock 测试
+├── packaging/               # 单文件版一键启动脚本模板
+│   ├── start-win.bat        # Windows 转发器（→ start-win.ps1）
+│   ├── start-win.ps1        # Windows 单文件版主逻辑（含交互菜单）
+│   └── start-linux.sh       # Linux 单文件版一键启动脚本
+├── dist-exe/                # build-all 编译产物（win/linux/linux-arm64）
+├── docker-compose.yml       # Docker 生产编排
+├── start-prod.bat           # 源码版 Windows 转发器（→ start-prod.ps1）
+├── start-prod.ps1           # 源码版 Windows 一键启动脚本（含交互菜单）
+├── start-prod.sh            # 源码版 Linux/macOS 一键启动脚本
+├── build-all.js             # 一键编译全部单文件 exe（可执行 build-all.bat）
 ├── prepare-cli-build.ps1    # 准备 ZViewerCLI 构建源
 └── package.json             # npm workspaces 根配置
 ```
@@ -222,7 +218,200 @@ ZViewer/
 
 > 生产环境部署后请立即修改默认密码。
 
-### Docker 一键启动
+### 方式一：源码版一键启动（推荐）
+
+项目根目录的 `start-prod` 脚本会自动检测并安装依赖、按需构建、启动服务，无需手动执行 `npm install` / `npm run build`。
+
+**Windows**：双击 `start-prod.bat` 进入交互菜单，或使用命令：
+
+```powershell
+.\start-prod.bat              # 交互菜单（双击默认进入）
+.\start-prod.bat start        # 启动（HTTP 前后端）
+.\start-prod.bat backend      # 仅启动后端
+.\start-prod.bat stop         # 停止服务
+.\start-prod.bat restart      # 重启
+.\start-prod.bat status       # 查看状态
+.\start-prod.bat logs         # 查看后端日志
+.\start-prod.bat build        # 构建前后端
+```
+
+**Linux / macOS**：
+
+```bash
+./start-prod.sh               # 交互菜单（无参数默认进入）
+./start-prod.sh start
+./start-prod.sh backend
+./start-prod.sh stop
+./start-prod.sh restart
+./start-prod.sh status
+./start-prod.sh logs
+./start-prod.sh build
+```
+
+启动后访问：
+
+- 前端：http://localhost:4173
+- 后端 API：http://localhost:3333/api
+- 健康检查：http://localhost:3333/health
+
+### 方式二：单文件 exe 版
+
+无需安装 Node.js / npm，直接运行编译好的可执行文件（见下文 [单文件 exe 版](#单文件-exe-版)）。
+
+### 方式三：Docker Compose
+
+见下文 [Docker 部署](#docker-部署)。
+
+---
+
+## 一键启动脚本
+
+源码版（`start-prod.*`）与单文件版（`packaging/start-*` → `dist-exe/` 内的 `start.bat` / `start.sh`）功能一致，均提供：
+
+### 交互菜单
+
+无参数运行（或双击）进入交互菜单：
+
+```text
+========================================
+  ZViewer 服务管理
+========================================
+  1) 启动服务 (HTTP)
+  2) 仅启动后端（可选 HTTP / HTTPS）
+  3) 停止服务
+  4) 重启服务
+  5) 查看状态
+  6) 查看日志
+  7) 一键签发 SSL 证书（单文件版） / 构建前后端（源码版）
+  8) HTTPS 启动（自动签发证书，单文件版）
+  0) 退出
+```
+
+### 命令
+
+| 命令 | 说明 |
+|---|---|
+| `start` | 启动服务（HTTP 前后端；加 `-Https` / `--https` 使用 HTTPS） |
+| `backend` | 仅启动后端（HTTP；加 `-Https` / `--https` 使用 HTTPS，自动签发证书） |
+| `https [host]` | 签发证书后以 HTTPS 启动（单文件版，仅后端，后端统一提供前端页面） |
+| `cert [host]` | 一键签发 SSL 证书（单文件版，见 [HTTPS 与证书](#https-与证书)） |
+| `stop` / `restart` | 停止 / 重启服务 |
+| `status` | 查看运行状态（PID、端口监听、证书/产物状态） |
+| `logs [backend\|frontend]` | 查看日志（默认 backend） |
+| `build` | 构建前后端（源码版） |
+| `help` / `menu` | 帮助 / 交互菜单 |
+
+### 端口
+
+端口固定，不支持自定义：
+
+- 后端：`.env` 中的 `PORT`，未设置时为 `3333`
+- 前端：`4173`（HTTP 模式）
+
+### 运行管理
+
+- 进程信息写入根目录 `.prod.pids.json`，`stop` 按 PID 停止并兜底清理占用端口。
+- 日志写入 `log/backend.log`、`log/frontend.log`（及 `.err.log`）。
+
+---
+
+## 单文件 exe 版
+
+将前后端与证书工具编译为单个可执行文件，目标机器无需安装 Node.js。
+
+### 编译
+
+在源码目录执行（Windows 可用 `build-all.bat`）：
+
+```bash
+npm run build:all        # 或 node build-all.js
+```
+
+产物输出到 `dist-exe/`：
+
+```text
+dist-exe/
+├── win/                 # start.bat + start.ps1 + zviewer-backend.exe
+│                        #   + zviewer-frontend.exe + zviewer-cert.exe
+├── linux/               # start.sh + zviewer-backend + zviewer-frontend + zviewer-cert
+└── linux-arm64/
+```
+
+### 使用
+
+将对应平台目录整体拷贝到目标机器，运行：
+
+- **Windows**：双击 `start.bat`（交互菜单）或 `start.bat start`
+- **Linux**：`./start.sh`（交互菜单）或 `./start.sh start`
+
+单文件版额外提供证书相关命令：`cert`、`https`、`backend --https`（见下节）。
+
+---
+
+## HTTPS 与证书
+
+### 签发类型
+
+证书工具（`zviewer-cert`，源码为 `scripts/generate-cert.js`）按地址类型自动选择签发方式：
+
+| 地址类型 | 证书 | 说明 |
+|---|---|---|
+| `localhost` | 自签证书 | SAN 含 `localhost`、`127.0.0.1`、`::1`，10 年有效 |
+| 域名（如 `example.com`） | **Let's Encrypt 可信 CA 证书** | 通过内置 ACME 客户端自动申请，浏览器不报警告 |
+| 公网 IP（如 `1.2.3.4`） | 自签证书 | SAN 写入 IP 条目（iPAddress） |
+
+### 交互签发
+
+菜单选择"一键签发 SSL 证书"后按提示操作：
+
+```text
+请选择证书签发类型：
+  [1] localhost（本机访问，默认，自签证书）
+  [2] 域名或公网 IP（如 example.com 或 1.2.3.4）
+      - 域名将自动申请 Let's Encrypt 可信 CA 证书
+        （需域名已解析到本机且 80 端口可访问）
+      - 公网 IP 或内网地址使用自签证书
+```
+
+### 命令行签发
+
+```bash
+# 域名 → 自动申请 Let's Encrypt 可信证书
+start.bat cert example.com
+./start.sh cert example.com
+
+# 公网 IP → 自签（SAN 含该 IP）
+start.bat cert 1.2.3.4
+
+# 强制重新签发 / 使用测试环境
+start.bat cert example.com --force
+./start.sh cert example.com --staging
+
+# 域名强制使用自签（如内网域名）
+./start.sh cert myhost.local --selfsigned
+```
+
+### HTTPS 启动
+
+```bash
+start.bat https example.com     # 签发证书后以 HTTPS 启动（仅后端）
+start.bat start -Https          # 同上
+start.bat backend -Https        # 仅后端 + HTTPS
+```
+
+HTTPS 模式下后端同时提供前端静态页面，访问 `https://localhost:3333`（证书签发为域名/IP 时按实际地址访问）。
+
+### 域名申请 Let's Encrypt 证书的前置条件
+
+1. 域名已解析到本机公网 IP；
+2. 本机 **80 端口**空闲且防火墙/安全组放行（ACME HTTP-01 验证）；
+3. 正式环境有速率限制（每域名每周 5 张），调试可用 `--staging` 测试环境。
+
+证书文件位于 `config/ssl/`（`cert.pem` 证书链、`key.pem` 私钥、`acme-account.key` ACME 账号），HTTPS 启动时自动加载。
+
+---
+
+## Docker 部署
 
 ```bash
 # 1. 复制环境变量模板
@@ -240,7 +429,7 @@ docker compose logs -f
 
 启动后访问：
 
-- 前端：http://localhost:4173
+- 前端（Nginx）：http://localhost:80
 - 后端 API：http://localhost:3333/api
 - 健康检查：http://localhost:3333/health
 
@@ -250,6 +439,8 @@ docker compose logs -f
 docker compose down          # 保留数据
 docker compose down -v       # 同时删除数据卷
 ```
+
+> Docker 方式使用 Nginx 提供前端页面并反向代理后端，HTTPS 建议由 Nginx 终止 TLS（certbot + Let's Encrypt，详见 `frontend/nginx.conf` 注释）。
 
 ---
 
@@ -278,94 +469,16 @@ npm run dev:frontend
 
 ---
 
-## 生产部署
-
-### 一键启动脚本（推荐）
-
-项目根目录提供跨平台启动脚本，无需提前执行 `npm install` 或 `npm run build`，脚本会自动检测并按需安装依赖、构建产物、启动服务。
-
-#### Windows (PowerShell)
-
-```powershell
-.\start-prod.ps1 start                # 一键启动（自动安装+构建+启动）
-.\start-prod.ps1 stop                 # 停止
-.\start-prod.ps1 restart              # 重启（跳过构建，加快重启）
-.\start-prod.ps1 status               # 查看状态
-.\start-prod.ps1 logs backend         # 查看后端日志
-.\start-prod.ps1 logs frontend        # 查看前端日志
-```
-
-双击 `start-prod.bat` 可打开交互菜单。
-
-#### Linux / macOS
-
-```bash
-./start-prod.sh start                 # 一键启动（自动安装+构建+启动）
-./start-prod.sh stop                  # 停止
-./start-prod.sh restart               # 重启（跳过构建，加快重启）
-./start-prod.sh status                # 查看状态
-./start-prod.sh logs backend          # 查看后端日志
-./start-prod.sh logs frontend         # 查看前端日志
-```
-
-#### 常用选项
-
-| 选项 | PowerShell | Bash | 说明 |
-|---|---|---|---|
-| 跳过构建 | `-SkipBuild` | `--skip-build` | 仅使用已有 `dist/` 产物启动 |
-| 智能跳过 | 默认行为 | `--auto-build`（默认） | 源码未修改时自动跳过构建 |
-| 强制构建 | — | `--no-auto-build` | 禁用智能跳过，强制构建 |
-| 重装依赖 | `-ForceDeps` | `--force-deps` | 强制重新安装依赖 |
-| 后端端口 | `-Port <int>` | `-p, --port <int>` | 默认 3333 |
-| 前端端口 | `-FrontendPort <int>` | `--frontend-port <int>` | 默认 4173 |
-| 数据库 | `-Database <url>` | `-d, --database <url>` | 覆盖 `DATABASE_URL` |
-
-#### 启动流程
-
-执行 `start` 时脚本自动完成：
-
-1. 检查 Node.js / npm 环境。
-2. 检查依赖：`node_modules` 缺失则自动安装；`-ForceDeps` 强制重装。
-3. 智能构建：产物缺失或源码已更新时自动构建；源码未修改时跳过。
-4. 校验后端产物与前端产物。
-5. 后台启动后端 API 与前端静态服务。
-
-PID 写入 `.prod.pids.json`，日志写入 `backend-prod.log` 与 `frontend-prod.log`。
-
-#### 云服务器部署
-
-1. 准备 Linux 云服务器（Ubuntu 22.04/24.04 推荐），开放端口 80、443。
-2. 安装 Docker 与 Docker Compose。
-3. 上传代码并配置 `.env`：
-
-```bash
-cp .env.example .env
-# 至少修改 JWT_ACCESS_SECRET、JWT_REFRESH_SECRET、CORS_ORIGIN
-```
-
-4. 启动服务：
-
-```bash
-docker compose pull
-docker compose up -d --build
-```
-
-5. 配置 SSL 证书（推荐 certbot + Let's Encrypt），修改 `frontend/nginx.conf` 增加 443 监听，并在 `docker-compose.yml` 中挂载证书目录。
-
-> 详见原配置文件中 nginx 与 certbot 示例。
-
----
-
 ## 环境变量
 
 ### 后端
 
 | 变量 | 说明 | 默认值 |
 |---|---|---|
-| `PORT` | 后端服务端口 | `3333` |
+| `PORT` | 后端服务端口（一键启动脚本亦读取此值） | `3333` |
 | `HOST` | 监听地址，`::` 表示 IPv4/IPv6 双栈 | `::` |
 | `NODE_ENV` | 运行环境 | `production` |
-| `DATABASE_URL` | SQLite 文件路径或 PostgreSQL 连接串 | `/app/data/dev.sqlite` |
+| `DATABASE_URL` | SQLite 文件路径或 PostgreSQL 连接串 | `<config>/dev.sqlite` |
 | `CONFIG_DIR` | 数据根目录 | `<project-root>/config` |
 | `CORS_ORIGIN` | CORS 允许来源，多个用逗号分隔 | `*` |
 | `JWT_ACCESS_SECRET` | Access Token 密钥（生产必须修改） | — |
@@ -413,12 +526,12 @@ docker compose up -d --build
 
 解析 BV 号或视频链接，支持 DASH 音视频合并播放、清晰度切换、大会员专享内容。可在管理后台配置 Bilibili 登录凭证以获取大会员清晰度。
 
-
 ### 直链与挂载
 
 - **MP4 直链**：直接输入可访问的 MP4 视频地址播放。
 - **WebDAV / FTP / OpenList**：在挂载点管理中保存连接配置，浏览目录并播放视频文件。
 
+---
 
 ## ZViewerCLI 本地代理
 
@@ -437,6 +550,23 @@ ZViewerCLI 是一个可选的本地代理客户端，用于解决浏览器端无
 ---
 
 ## 常见问题
+
+### 自签证书浏览器提示"不安全"
+
+`localhost` 与公网 IP 使用自签证书，浏览器会提示"证书颁发机构不受信任"（`NET::ERR_CERT_AUTHORITY_INVALID`）。解决方法：
+
+- 将 `config/ssl/cert.pem` 导入客户端"受信任的根证书颁发机构"；或
+- 使用域名并通过 Let's Encrypt 申请可信证书（见 [HTTPS 与证书](#https-与证书)）。
+
+自签证书与地址不匹配（`NET::ERR_CERT_COMMON_NAME_INVALID`）时，说明访问地址不在证书 SAN 中——请为实际访问的域名/IP 重新签发。
+
+### 域名申请 Let's Encrypt 证书失败
+
+依次检查：
+
+- 域名是否已解析到本机公网 IP；
+- 80 端口是否空闲、防火墙/安全组是否放行；
+- 是否触发速率限制（可用 `--staging` 测试环境验证流程）。
 
 ### better-sqlite3 编译失败
 

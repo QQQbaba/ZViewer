@@ -446,12 +446,54 @@ function packageBackend(targetPlatforms) {
   return results;
 }
 
+// 打包证书生成工具（zviewer-cert），供产物目录的一键启动脚本签证书使用
+function packageCertTool(targetPlatforms) {
+  console.log('');
+  console.log('>>> 打包证书工具 zviewer-cert...');
+
+  const entry = path.join(ROOT, 'scripts', 'generate-cert.js');
+  if (!fs.existsSync(entry)) {
+    warn(`证书工具入口不存在: ${entry}`);
+    return;
+  }
+
+  for (const platform of targetPlatforms) {
+    for (const target of platform.targets) {
+      const outputFolder = path.join(DIST_EXE, platform.folder);
+      const outputName = `zviewer-cert${target.includes('win') ? '.exe' : ''}`;
+      const outputPath = path.join(outputFolder, outputName);
+
+      fs.mkdirSync(outputFolder, { recursive: true });
+
+      log(`打包证书工具 → ${target}...`);
+
+      const cmd = [
+        'npx', 'pkg',
+        JSON.stringify(entry),
+        '--targets', target,
+        '--output', JSON.stringify(outputPath),
+      ].join(' ');
+
+      try {
+        execSync(cmd, { cwd: ROOT, stdio: 'inherit' });
+        success(`证书工具 ${target}: ${outputPath}`);
+      } catch (e) {
+        warn(`证书工具打包失败 (${target}): ${e.message}`);
+      }
+    }
+  }
+}
+
 // Copy per-platform one-click start scripts into the output folders.
 function copyStartScripts(targetPlatforms) {
+  // 每个平台可复制多个文件（Windows: bat 转发器 + ps1 主逻辑）
   const scriptMap = {
-    win: { src: 'start-win.bat', dest: 'start.bat' },
-    linux: { src: 'start-linux.sh', dest: 'start.sh' },
-    'linux-arm64': { src: 'start-linux.sh', dest: 'start.sh' },
+    win: [
+      { src: 'start-win.bat', dest: 'start.bat' },
+      { src: 'start-win.ps1', dest: 'start.ps1' },
+    ],
+    linux: [{ src: 'start-linux.sh', dest: 'start.sh' }],
+    'linux-arm64': [{ src: 'start-linux.sh', dest: 'start.sh' }],
   };
 
   const folders = [];
@@ -460,25 +502,28 @@ function copyStartScripts(targetPlatforms) {
   }
 
   for (const folder of folders) {
-    const mapping = scriptMap[folder];
-    if (!mapping) {
+    const files = scriptMap[folder];
+    if (!files) {
       warn(`skip start script: unknown folder ${folder}`);
-      continue;
-    }
-    const srcPath = path.join(PACKAGING_DIR, mapping.src);
-    if (!fs.existsSync(srcPath)) {
-      warn(`start script template not found: ${srcPath}`);
       continue;
     }
     const outputFolder = path.join(DIST_EXE, folder);
     fs.mkdirSync(outputFolder, { recursive: true });
-    const destPath = path.join(outputFolder, mapping.dest);
-    fs.copyFileSync(srcPath, destPath);
-    // Set executable permission on Unix-like build hosts (no-op on Windows)
-    if (mapping.dest.endsWith('.sh') || mapping.dest.endsWith('.command')) {
-      try { fs.chmodSync(destPath, 0o755); } catch { /* ignore on non-Unix hosts */ }
+
+    for (const mapping of files) {
+      const srcPath = path.join(PACKAGING_DIR, mapping.src);
+      if (!fs.existsSync(srcPath)) {
+        warn(`start script template not found: ${srcPath}`);
+        continue;
+      }
+      const destPath = path.join(outputFolder, mapping.dest);
+      fs.copyFileSync(srcPath, destPath);
+      // Set executable permission on Unix-like build hosts (no-op on Windows)
+      if (mapping.dest.endsWith('.sh') || mapping.dest.endsWith('.command')) {
+        try { fs.chmodSync(destPath, 0o755); } catch { /* ignore on non-Unix hosts */ }
+      }
+      success(`start script: ${folder}/${mapping.dest}`);
     }
-    success(`start script: ${folder}/${mapping.dest}`);
   }
 }
 
@@ -625,6 +670,9 @@ async function main() {
   }
 
   // 5. 输出汇总
+
+  // 打包证书生成工具（一键启动脚本用它签证书）
+  packageCertTool(targetPlatforms);
 
   // 复制各平台一键启动脚本到产物目录
   copyStartScripts(targetPlatforms);
