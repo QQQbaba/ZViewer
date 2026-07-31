@@ -1,6 +1,9 @@
 @echo off
 setlocal
 
+:: Set console to UTF-8 so the PowerShell script's Chinese output displays correctly
+chcp 65001 >nul 2>&1
+
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 set "PS1=%ROOT%\start-prod.ps1"
@@ -25,9 +28,11 @@ if not exist "%PS1%" (
 :: which breaks UTF-8 Chinese characters even with `chcp 65001`.
 :: This .bat is a pure forwarder - no Chinese here.
 
-:: Forward the -Https parameter
+:: Double-click (no args) -> interactive menu; keep the window open.
+:: Explicit args are forwarded unchanged (e.g. start-prod.bat status).
 if "%~1"=="" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" help
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" menu
+  pause
 ) else (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
 )

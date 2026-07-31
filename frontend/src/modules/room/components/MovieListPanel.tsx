@@ -326,10 +326,13 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="搜索影片…"
+        className="px-2.5"
       />
 
-      {/* 影片列表滚动区域 */}
-      <div className="min-h-[120px] min-w-0 flex-1 overflow-y-auto rounded-[var(--md-sys-shape-corner)]">
+      {/* 影片列表滚动区域 — pl-2.5 平衡左右剩余宽度，
+          scrollbar-gutter:stable 占右侧 10px，pl-2.5 补左侧 10px，
+          使视频卡片左右距面板边缘宽度一致 */}
+      <div className="movie-list-scroll min-h-[120px] min-w-0 flex-1 overflow-y-auto rounded-[var(--md-sys-shape-corner)] pl-2.5">
         {filteredMovies.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
             <div
@@ -550,8 +553,8 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
         </button>
       </div>
 
-      {/* 卡片内容 */}
-      <div className="zen-scroll flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-3">
+      {/* 卡片内容 — 外层 px-0.5(2px) + 内层 pl-2.5(10px)/scrollbar-gutter(10px) = 12px 左右剩余 */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-0.5 py-3">
         {movieListContent}
       </div>
 

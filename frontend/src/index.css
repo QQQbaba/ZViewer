@@ -21,6 +21,23 @@
   background-color: var(--md-sys-color-outline);
 }
 
+/* 影片列表滚动区：窄滚动条 + scrollbar-gutter 预留空间，
+   避免 B站解析设置展开后滚动条占用内容宽度导致视频卡片收缩。
+   注意：Chrome 121+ (Electron 39) 在 Windows 经典滚动条模式下
+   不支持 ::-webkit-scrollbar 自定义宽度，因此使用标准属性
+   scrollbar-width: thin 控制宽度，scrollbar-gutter: stable 预留空间。 */
+.movie-list-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(
+      in srgb,
+      var(--md-sys-color-outline) 60%,
+      transparent
+    )
+    transparent;
+  scrollbar-gutter: stable;
+}
+
 :root {
   /* Material Design 3 形状与玻璃拟态默认值 */
   --md-sys-shape-corner: 16px;
