@@ -24,6 +24,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Fix console encoding for Windows zh-CN systems (GBK default)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # ===== 排除规则 =====
 
 # 排除目录（按目录名匹配，任何层级）

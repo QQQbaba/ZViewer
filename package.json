@@ -16,7 +16,8 @@
     "start": "node scripts/start.js",
     "build:exe": "node scripts/build-exe.js && node scripts/build-frontend-exe.js",
     "build:backend-exe": "node scripts/build-exe.js",
-    "build:frontend-exe": "node scripts/build-frontend-exe.js"
+    "build:frontend-exe": "node scripts/build-frontend-exe.js",
+    "build:all": "node build-all.js"
   },
   "pkg": {
     "assets": [

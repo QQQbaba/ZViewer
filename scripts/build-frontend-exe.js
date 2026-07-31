@@ -74,7 +74,20 @@ function main() {
     process.exit(1);
   }
 
-  // Step 2: 运行 pkg 打包（零外部依赖，无需安装任何包）
+  // Step 2: 清理 frontend-server/node_modules 残留依赖
+  //
+  // server.js 是零依赖实现（仅使用 Node.js 内置模块），
+  // 但 frontend-server/node_modules/ 可能有旧版依赖残留（express、httpxy 等）。
+  // pkg 会扫描入口目录下的 node_modules 并尝试打包，遇到纯 ESM 模块（如 httpxy）
+  // 会导致运行时 "Cannot find module" 错误，因此打包前必须清理。
+  const frontendServerNodeModules = path.join(FRONTEND_SERVER, 'node_modules');
+  if (fs.existsSync(frontendServerNodeModules)) {
+    log('清理 frontend-server/node_modules 残留依赖...');
+    fs.rmSync(frontendServerNodeModules, { recursive: true, force: true });
+    log('已清理');
+  }
+
+  // Step 3: 运行 pkg 打包（零外部依赖，无需安装任何包）
   const entry = path.join(FRONTEND_SERVER, 'server.js');
   log('打包为 exe（此过程可能耗时 1-3 分钟）...');
   log(`  入口: ${entry}`);
@@ -90,13 +103,13 @@ function main() {
 
   execSync(cmd, { cwd: ROOT, stdio: 'inherit' });
 
-  // Step 3: 验证
+  // Step 4: 验证
   if (!fs.existsSync(OUTPUT_PATH)) {
     console.error(`  错误：打包失败，未生成 ${OUTPUT_PATH}`);
     process.exit(1);
   }
 
-  // Step 4: 复制前端构建产物到输出目录
+  // Step 5: 复制前端构建产物到输出目录
   const outputFrontendDist = path.join(DIST_EXE, 'frontend', 'dist');
   log('复制前端构建产物...');
   if (fs.existsSync(outputFrontendDist)) {
@@ -119,10 +132,12 @@ function getDirSize(dir) {
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true, recursive: true });
     for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isFile()) {
-        size += fs.statSync(fullPath).size;
-      }
+      if (!entry.isFile()) continue;
+      // 使用 entry.parentPath（Node.js 20+）构建完整路径
+      const fullPath = entry.parentPath
+        ? path.join(entry.parentPath, entry.name)
+        : path.join(dir, entry.name);
+      size += fs.statSync(fullPath).size;
     }
   } catch { /* ignore */ }
   return size > 1024 * 1024

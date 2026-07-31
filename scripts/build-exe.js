@@ -29,6 +29,21 @@ function log(msg) {
   console.log(`  ${msg}`);
 }
 
+/** 递归复制目录 */
+function copyDirSync(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirSync(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
 function main() {
   console.log('========================================');
   console.log('  ZViewer 后端 exe 构建');
@@ -76,6 +91,25 @@ function main() {
   if (!fs.existsSync(OUTPUT_PATH)) {
     console.error(`  错误：打包失败，未生成 ${OUTPUT_PATH}`);
     process.exit(1);
+  }
+
+  // Step 5: 复制 better-sqlite3 原生模块到 dist-exe
+  //
+  // pkg.assets 已将 .node 文件嵌入 exe 快照，运行时 pkg 会提取到临时目录加载。
+  // 但部分场景下 bindings 路径解析可能失效，因此在 dist-exe 外部保留一份
+  // better-sqlite3 完整副本作为 fallback，确保 exe 能在目标机器上正常运行。
+  const sqliteSrc = path.join(ROOT, 'node_modules', 'better-sqlite3');
+  const sqliteDest = path.join(DIST_EXE, 'node_modules', 'better-sqlite3');
+  if (fs.existsSync(sqliteSrc)) {
+    log('复制 better-sqlite3 原生模块...');
+    if (fs.existsSync(sqliteDest)) {
+      fs.rmSync(sqliteDest, { recursive: true, force: true });
+    }
+    copyDirSync(sqliteSrc, sqliteDest);
+    log('  已复制 better-sqlite3（含 .node 原生插件）');
+  } else {
+    console.warn('  警告：未找到 node_modules/better-sqlite3，跳过原生模块复制');
+    console.warn('  exe 可能无法在目标机器上正常使用数据库功能');
   }
 
   const stats = fs.statSync(OUTPUT_PATH);

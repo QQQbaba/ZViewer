@@ -6,8 +6,8 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'status', 'logs', 'build', 'help', '')]
-    [string]$Command = 'help',
+    [ValidateSet('start', 'stop', 'restart', 'status', 'logs', 'build', 'help', 'menu', '')]
+    [string]$Command = 'menu',
 
     [Parameter(Position = 1)]
     [ValidateSet('backend', 'frontend', '')]
@@ -20,6 +20,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Force UTF-8 console output so Chinese text renders correctly
+# regardless of the system's default OEM codepage (GBK on zh-CN).
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $rootDir = $PSScriptRoot
 if (-not $rootDir) { $rootDir = (Get-Location).Path }
@@ -366,6 +370,42 @@ function Show-Help {
     Write-Host "  -Https                    使用自签 HTTPS（后端统一提供前端页面）"
 }
 
+# ==================== 交互菜单 ====================
+
+function Show-Menu {
+    while ($true) {
+        Clear-Host
+        Write-Host "========================================"
+        Write-Host "  ZViewer 生产服务管理"
+        Write-Host "========================================"
+        Write-Host ""
+        Write-Host "  1) 启动服务"
+        Write-Host "  2) 停止服务"
+        Write-Host "  3) 重启服务"
+        Write-Host "  4) 查看状态"
+        Write-Host "  5) 查看日志"
+        Write-Host "  6) 构建前后端"
+        Write-Host "  0) 退出"
+        Write-Host ""
+        $choice = Read-Host "请输入编号 (0-6)"
+        switch ($choice) {
+            '1' { Invoke-Start; Wait-MenuKey }
+            '2' { Invoke-Stop; Wait-MenuKey }
+            '3' { Invoke-Restart; Wait-MenuKey }
+            '4' { Invoke-Status; Wait-MenuKey }
+            '5' { Invoke-Logs -LogTarget $Target; Wait-MenuKey }
+            '6' { Invoke-Build; Wait-MenuKey }
+            '0' { return }
+            default { Write-Host "  无效输入，请重新选择"; Start-Sleep -Milliseconds 800 }
+        }
+    }
+}
+
+function Wait-MenuKey {
+    Write-Host ""
+    Read-Host "按回车返回菜单" | Out-Null
+}
+
 # ==================== 入口 ====================
 
 switch ($Command) {
@@ -375,5 +415,6 @@ switch ($Command) {
     'restart' { Invoke-Restart }
     'status'  { Invoke-Status }
     'logs'    { Invoke-Logs -LogTarget $Target }
+    'menu'    { Show-Menu }
     default   { Show-Help }
 }

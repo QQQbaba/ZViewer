@@ -106,6 +106,36 @@ class NmsService {
     try {
       this.nmsInstance = new NodeMediaServer(config);
 
+      // NMS 内部的 HTTP/RTMP 服务器在端口被占用时会异步触发 'error' 事件。
+      // Node.js 对未监听 'error' 事件的 EventEmitter 默认行为是抛出异常并终止进程。
+      // 此处提前注册 error 监听器，将端口冲突降级为警告而非崩溃。
+      type ErrorEmitter = { on?: (event: string, cb: (err: Error) => void) => void };
+      const nmsAny = this.nmsInstance as unknown as {
+        httpServer?: { httpServer?: ErrorEmitter; wsServer?: ErrorEmitter };
+        rtmpServer?: { tcpServer?: ErrorEmitter };
+      };
+
+      const handleServerError = (label: string) => (err: Error) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('EADDRINUSE')) {
+          console.error(
+            `[NMS] ${label} 端口被占用，跳过启动。请确保端口 ${rtmpPort}/${httpFlvPort} 未被其他进程占用。`,
+          );
+        } else {
+          console.error(`[NMS] ${label} 服务器错误:`, err);
+        }
+        this.nmsAvailable = false;
+      };
+
+      // 注册 HTTP / WebSocket / RTMP 服务器的 error 事件
+      // 使用 if 显式判空，避免 TS2722（Cannot invoke possibly undefined）
+      const httpEmitter = nmsAny.httpServer?.httpServer;
+      const wsEmitter = nmsAny.httpServer?.wsServer;
+      const rtmpEmitter = nmsAny.rtmpServer?.tcpServer;
+      if (httpEmitter?.on) httpEmitter.on('error', handleServerError('HTTP'));
+      if (wsEmitter?.on) wsEmitter.on('error', handleServerError('WebSocket'));
+      if (rtmpEmitter?.on) rtmpEmitter.on('error', handleServerError('RTMP'));
+
       this.nmsInstance.on('postPublish', async (id, streamPath, _args) => {
         console.log(`[NMS] postPublish id=${id} streamPath=${streamPath}`);
         const result = await this.validatePublishStream(streamPath);

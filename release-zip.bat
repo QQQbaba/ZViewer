@@ -1,6 +1,9 @@
 @echo off
 setlocal
 
+:: Set console to UTF-8 so PowerShell's Chinese output displays correctly
+chcp 65001 >nul 2>&1
+
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 set "PS1=%ROOT%\release-zip.ps1"
