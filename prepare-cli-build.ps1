@@ -1,5 +1,12 @@
-﻿$src = 'F:\Code\ZViewer\ZViewerCLI'
-$dst = Join-Path $PSScriptRoot 'ZViewerCLI'
+param(
+    [string]$SourceDir = '../ZViewerCLI',
+    [string]$OutputDir = 'ZViewerCLI'
+)
+
+$ErrorActionPreference = 'Stop'
+
+$src = Resolve-Path $SourceDir -ErrorAction Stop
+$dst = Join-Path $PSScriptRoot $OutputDir
 
 New-Item -ItemType Directory -Force -Path $dst | Out-Null
 

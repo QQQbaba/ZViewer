@@ -118,7 +118,7 @@ function Show-Help {
   Write-Host '    1. 解压 zip'
   Write-Host '    2. 复制 backend/.env.example 为 backend/.env 并配置'
   Write-Host '    3. npm install --omit=dev   # 仅安装运行时依赖'
-  Write-Host '    4. npm start（或使用 start-prod.bat）'
+  Write-Host '    4. .\start-prod.bat start（或 npm start）# 直接启动（默认不构建，因产物已打包）'
   Write-Host ''
   Write-Host '  升级（保留用户数据）：'
   Write-Host '    1. 停止旧版本服务'
@@ -126,7 +126,7 @@ function Show-Help {
   Write-Host '    3. 解压新版本 zip 到新目录（或覆盖旧目录）'
   Write-Host '    4. 将备份的 config/ 目录复制到新版本根目录'
   Write-Host '    5. npm install --omit=dev'
-  Write-Host '       npm start'
+  Write-Host '    6. .\start-prod.bat start（或 npm start）'
   Write-Host ''
 }
 
@@ -302,8 +302,8 @@ function Invoke-Release {
     Write-Host "  文件数：$fileCount" -ForegroundColor Green
     Write-Host ''
     Write-Host '接收者使用方式：' -ForegroundColor Yellow
-    Write-Host '  首次部署：解压 → 配置 .env → npm install --omit=dev → npm start'
-    Write-Host '  升级：保留旧版本 config/ 目录 → 覆盖到新版本根目录 → npm install --omit=dev → npm start'
+    Write-Host '  首次部署：解压 → 配置 .env → npm install --omit=dev → .\start-prod.bat start（或 npm start）'
+    Write-Host '  升级：保留旧版本 config/ 目录 → 覆盖到新版本根目录 → npm install --omit=dev → .\start-prod.bat start（或 npm start）'
     Write-Host ''
   } finally {
     # 清理临时目录

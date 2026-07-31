@@ -26,7 +26,7 @@ if not exist "%PS1%" (
 :: This .bat is a pure forwarder - no Chinese here.
 
 if "%~1"=="" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" menu
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" help
 ) else (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
 )
