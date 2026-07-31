@@ -68,7 +68,11 @@ function computeRtmpPort(): string {
   return getStored(CUSTOM_RTMP_PORT_KEY) || rawRtmpPort
 }
 
-/** 当前生效的 REST API 地址（自定义 > 环境变量 > 当前页面 origin） */
+/**
+ * 当前生效的 REST API 地址（自定义 > 环境变量 > 当前页面 origin）。
+ * 注意：此变量在模块加载时计算一次，后续通过 setCustomApiUrl 更新。
+ * 如需确保获取最新值，请使用 getApiUrl() 函数。
+ */
 export let API_URL = computeApiUrl()
 
 /**
@@ -87,6 +91,26 @@ export let FLV_BASE_URL = computeFlvBaseUrl()
 
 /** 当前生效的 RTMP 推流端口 */
 export let RTMP_PORT = computeRtmpPort()
+
+/** 实时获取当前生效的 REST API 地址（每次从 localStorage 读取，确保最新） */
+export function getApiUrl(): string {
+  return computeApiUrl()
+}
+
+/** 实时获取当前生效的 socket.io 地址（每次从 localStorage 读取，确保最新） */
+export function getSocketUrl(): string {
+  return computeSocketUrl()
+}
+
+/** 实时获取当前生效的 FLV 拉流基础地址 */
+export function getFlvBaseUrl(): string {
+  return computeFlvBaseUrl()
+}
+
+/** 实时获取当前生效的 RTMP 推流端口 */
+export function getRtmpPort(): string {
+  return computeRtmpPort()
+}
 
 function setStored(key: string, value: string): void {
   try {
@@ -167,7 +191,7 @@ async function refreshAccessToken(): Promise<boolean> {
 
   inflightRefresh = (async () => {
     try {
-      const res = await fetch(`${API_URL}/api/auth/refresh`, {
+      const res = await fetch(`${getApiUrl()}/api/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -208,9 +232,11 @@ export async function apiFetch(
   const { _retried, headers, ...rest } = options
 
   // 拼接完整 URL（如果 input 是相对路径如 /api/xxx）
+  // 每次实时从 localStorage 读取，确保自定义后端地址立即生效
+  const currentApiUrl = getApiUrl()
   const url =
     typeof input === 'string' && input.startsWith('/')
-      ? `${API_URL}${input}`
+      ? `${currentApiUrl}${input}`
       : input
 
   const res = await fetch(url, {

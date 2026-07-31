@@ -1,4 +1,4 @@
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch, getApiUrl } from '@/lib/api'
 import type {
   BilibiliDownloadedFile,
   BilibiliDownloadCallbacks,
@@ -18,7 +18,7 @@ export async function browseServerFiles(
   path?: string
 ): Promise<ServerBrowseResult> {
   const query = path ? `?path=${encodeURIComponent(path)}` : ''
-  const res = await apiFetch(`${API_URL}/api/server-files/browse${query}`)
+  const res = await apiFetch(`/api/server-files/browse${query}`)
   const data = (await res.json()) as {
     success: boolean
     entries?: ServerFileEntry[]
@@ -50,7 +50,7 @@ export async function uploadServerFiles(
 
   return new Promise<UploadedFile[]>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `${API_URL}/api/server-files/upload`)
+    xhr.open('POST', `${getApiUrl()}/api/server-files/upload`)
     xhr.withCredentials = true
 
     if (onProgress) {
@@ -86,7 +86,7 @@ export async function createFolder(
   parent: string,
   name: string
 ): Promise<string> {
-  const res = await apiFetch(`${API_URL}/api/server-files/folder`, {
+  const res = await apiFetch('/api/server-files/folder', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ parent, name }),
@@ -107,7 +107,7 @@ export async function renameServerFile(
   path: string,
   newName: string
 ): Promise<string> {
-  const res = await apiFetch(`${API_URL}/api/server-files/rename`, {
+  const res = await apiFetch('/api/server-files/rename', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, newName }),
@@ -126,7 +126,7 @@ export async function renameServerFile(
 /** 删除文件或文件夹。path 为前缀式路径。 */
 export async function deleteServerFile(path: string): Promise<void> {
   const res = await apiFetch(
-    `${API_URL}/api/server-files/file?path=${encodeURIComponent(path)}`,
+    `/api/server-files/file?path=${encodeURIComponent(path)}`,
     { method: 'DELETE' }
   )
   const data = (await res.json()) as { success: boolean; message?: string }
@@ -140,7 +140,7 @@ export async function resolveServerFile(
   path: string
 ): Promise<ServerFileResolved> {
   const res = await apiFetch(
-    `${API_URL}/api/server-files/resolve?path=${encodeURIComponent(path)}`
+    `/api/server-files/resolve?path=${encodeURIComponent(path)}`
   )
   const data = (await res.json()) as {
     success: boolean
@@ -163,7 +163,7 @@ export async function resolveServerFile(
 
 /** 构建服务器文件代理播放 URL（供 MoviePushPanel 直接拼装，免去 resolve 请求）。 */
 export function buildServerFileProxyUrl(path: string): string {
-  return `${API_URL}/api/server-files/proxy?path=${encodeURIComponent(path)}`
+  return `${getApiUrl()}/api/server-files/proxy?path=${encodeURIComponent(path)}`
 }
 
 // ============ 根目录管理 ============
@@ -178,7 +178,7 @@ export async function browseSystemDirs(
 ): Promise<SystemDirBrowseResult> {
   const query = absPath ? `?absPath=${encodeURIComponent(absPath)}` : ''
   const res = await apiFetch(
-    `${API_URL}/api/server-files/browse-system${query}`
+    `/api/server-files/browse-system${query}`
   )
   const data = (await res.json()) as {
     success: boolean
@@ -201,7 +201,7 @@ export async function browseSystemDirs(
 
 /** 列出所有可用根（uploads + 自定义）。 */
 export async function listServerRoots(): Promise<ServerFileRoot[]> {
-  const res = await apiFetch(`${API_URL}/api/server-files/roots`)
+  const res = await apiFetch('/api/server-files/roots')
   const data = (await res.json()) as {
     success: boolean
     roots?: ServerFileRoot[]
@@ -219,7 +219,7 @@ export async function addServerRoot(
   absPath: string,
   readonly?: boolean
 ): Promise<ServerFileRoot> {
-  const res = await apiFetch(`${API_URL}/api/server-files/roots`, {
+  const res = await apiFetch('/api/server-files/roots', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, absPath, readonly: !!readonly }),
@@ -243,7 +243,7 @@ export async function deleteServerRoot(key: string): Promise<void> {
     throw new Error('默认空间不可删除')
   }
   const id = match[1]
-  const res = await apiFetch(`${API_URL}/api/server-files/roots/${id}`, {
+  const res = await apiFetch(`/api/server-files/roots/${id}`, {
     method: 'DELETE',
   })
   const data = (await res.json()) as { success: boolean; message?: string }
@@ -311,7 +311,7 @@ export async function downloadBilibiliVideo(
 
   try {
     const res = await apiFetch(
-      `${API_URL}/api/server-files/bilibili-download`,
+      '/api/server-files/bilibili-download',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -383,7 +383,7 @@ export async function downloadBilibiliVideo(
 
 /** 检测服务器 FFmpeg 状态。 */
 export async function checkFfmpeg(): Promise<FfmpegStatus> {
-  const res = await apiFetch(`${API_URL}/api/server-files/ffmpeg-status`)
+  const res = await apiFetch('/api/server-files/ffmpeg-status')
   const data = (await res.json()) as FfmpegStatus & { success?: boolean }
   if (!res.ok || data.success === false) {
     return {
@@ -421,7 +421,7 @@ export async function installFfmpeg(
   const timer = setTimeout(() => controller.abort(), FFMPEG_INSTALL_TIMEOUT_MS)
 
   try {
-    const res = await apiFetch(`${API_URL}/api/server-files/ffmpeg-install`, {
+    const res = await apiFetch('/api/server-files/ffmpeg-install', {
       method: 'POST',
       signal: controller.signal,
     })

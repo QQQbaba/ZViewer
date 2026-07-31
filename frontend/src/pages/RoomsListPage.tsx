@@ -19,7 +19,7 @@ import { Tag } from '@/components/ui/Tag'
 import { Spinner } from '@/components/ui/Spinner'
 import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 const Fade = ({
@@ -70,7 +70,7 @@ export default function RoomsListPage() {
   }
 
   const fetchRooms = async () => {
-    const res = await apiFetch(`${API_URL}/api/rooms`, {
+    const res = await apiFetch('/api/rooms', {
       headers: authHeaders,
     })
     const data = (await res.json()) as {

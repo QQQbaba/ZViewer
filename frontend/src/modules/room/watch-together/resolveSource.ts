@@ -1,6 +1,6 @@
 import type { ResolvedSource } from '@/modules/bilibili/types'
 import type { MediaFormat } from '@/lib/mediaFormat'
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch, getApiUrl } from '@/lib/api'
 
 // Bilibili 模块化后的 re-export：保持向后兼容
 // 类型与解析偏好
@@ -43,7 +43,7 @@ export async function resolveFTP(params: FTPParams): Promise<ResolvedSource> {
     ...(params.password ? { password: params.password } : {}),
     ...(params.port ? { port: String(params.port) } : {}),
   }).toString()
-  const res = await apiFetch(`${API_URL}/api/stream/resolve-ftp?${query}`)
+  const res = await apiFetch(`/api/stream/resolve-ftp?${query}`)
   const data = (await res.json()) as {
     success: boolean
     message?: string
@@ -84,7 +84,7 @@ export interface AnimeSource {
 }
 
 export async function getAnimeSources(): Promise<AnimeSource[]> {
-  const res = await apiFetch(`${API_URL}/api/stream/anime/sources`)
+  const res = await apiFetch('/api/stream/anime/sources')
   const data = (await res.json()) as {
     success: boolean
     message?: string
@@ -101,7 +101,7 @@ export async function searchAnime(
   keyword: string
 ): Promise<AnimeSearchResult[]> {
   const res = await apiFetch(
-    `${API_URL}/api/stream/anime/search?source=${encodeURIComponent(source)}&keyword=${encodeURIComponent(keyword)}`
+    `/api/stream/anime/search?source=${encodeURIComponent(source)}&keyword=${encodeURIComponent(keyword)}`
   )
   const data = (await res.json()) as {
     success: boolean
@@ -119,7 +119,7 @@ export async function getAnimeEpisodes(
   identifier: string
 ): Promise<AnimeEpisode[]> {
   const res = await apiFetch(
-    `${API_URL}/api/stream/anime/episodes?source=${encodeURIComponent(source)}&identifier=${encodeURIComponent(identifier)}`
+    `/api/stream/anime/episodes?source=${encodeURIComponent(source)}&identifier=${encodeURIComponent(identifier)}`
   )
   const data = (await res.json()) as {
     success: boolean
@@ -146,7 +146,7 @@ export async function resolveAnimeEpisode(
   source: string,
   episode: AnimeEpisode
 ): Promise<ResolvedAnimeSource> {
-  const res = await apiFetch(`${API_URL}/api/stream/anime/resolve`, {
+  const res = await apiFetch('/api/stream/anime/resolve', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -192,7 +192,7 @@ export function buildAnimeProxyUrl(
   if (headers['User-Agent']) params.set('userAgent', headers['User-Agent'])
   if (headers.Origin) params.set('origin', headers.Origin)
   if (headers.Cookie) params.set('cookie', headers.Cookie)
-  return `${API_URL}/api/stream/anime/proxy?${params.toString()}`
+  return `${getApiUrl()}/api/stream/anime/proxy?${params.toString()}`
 }
 
 export interface FollowingBangumi {
@@ -204,7 +204,7 @@ export interface FollowingBangumi {
 }
 
 export async function getFollowingBangumi(): Promise<FollowingBangumi[]> {
-  const res = await apiFetch(`${API_URL}/api/stream/bilibili/following-bangumi`)
+  const res = await apiFetch('/api/stream/bilibili/following-bangumi')
   const data = (await res.json()) as {
     success: boolean
     message?: string
@@ -227,7 +227,7 @@ export async function getBangumiEpisodes(
   seasonId: number
 ): Promise<BangumiEpisode[]> {
   const res = await apiFetch(
-    `${API_URL}/api/stream/bilibili/bangumi-episodes?seasonId=${encodeURIComponent(seasonId)}`
+    `/api/stream/bilibili/bangumi-episodes?seasonId=${encodeURIComponent(seasonId)}`
   )
   const data = (await res.json()) as {
     success: boolean
@@ -253,7 +253,7 @@ export function buildBilibiliVideoUrl(bvid: string): string {
  */
 export function buildBilibiliImageProxyUrl(originalUrl: string): string {
   if (!originalUrl) return ''
-  return `${API_URL}/api/stream/proxy-image?url=${encodeURIComponent(originalUrl)}`
+  return `${getApiUrl()}/api/stream/proxy-image?url=${encodeURIComponent(originalUrl)}`
 }
 
 /**

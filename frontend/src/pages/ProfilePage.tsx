@@ -38,22 +38,23 @@ import {
 import MountManager from '@/modules/mounts/MountManager'
 import ServerFileManager from '@/modules/server-files/ServerFileManager'
 import { BilibiliDownloadModal } from '@/modules/server-files/BilibiliDownloadModal'
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch, getApiUrl } from '@/lib/api'
 
 /** 构建头像完整 URL（后端返回相对路径，前端拼接 API_URL） */
 function buildAvatarUrl(
   avatar: string | null | undefined,
   username?: string
 ): string | undefined {
+  const baseUrl = getApiUrl()
   if (!avatar) {
     if (username === 'root') {
-      return `${API_URL}/root-avatar.jpg`
+      return `${baseUrl}/root-avatar.jpg`
     }
     return undefined
   }
   if (avatar.startsWith('http://') || avatar.startsWith('https://'))
     return avatar
-  return `${API_URL}${avatar}`
+  return `${baseUrl}${avatar}`
 }
 
 export default function ProfilePage() {
@@ -216,7 +217,7 @@ export default function ProfilePage() {
     }
     setPasswordLoading(true)
     try {
-      const res = await apiFetch(`${API_URL}/api/auth/password`, {
+      const res = await apiFetch('/api/auth/password', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -258,7 +259,7 @@ export default function ProfilePage() {
     }
     setUsernameLoading(true)
     try {
-      const res = await apiFetch(`${API_URL}/api/auth/username`, {
+      const res = await apiFetch('/api/auth/username', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -309,7 +310,7 @@ export default function ProfilePage() {
       try {
         const formData = new FormData()
         formData.append('avatar', file)
-        const res = await apiFetch(`${API_URL}/api/auth/avatar`, {
+        const res = await apiFetch('/api/auth/avatar', {
           method: 'POST',
           body: formData,
         })
@@ -338,7 +339,7 @@ export default function ProfilePage() {
     setAvatarDeleteTarget(false)
     setAvatarLoading(true)
     try {
-      const res = await apiFetch(`${API_URL}/api/auth/avatar`, {
+      const res = await apiFetch('/api/auth/avatar', {
         method: 'DELETE',
       })
       const data = (await res.json()) as {

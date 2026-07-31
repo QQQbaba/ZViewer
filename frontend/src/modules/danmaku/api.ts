@@ -1,4 +1,4 @@
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import type {
   DanmakuSource,
   DanmakuItem,
@@ -15,7 +15,7 @@ import type {
 export async function listDanmakuSources(): Promise<
   Array<{ id: string; name: string }>
 > {
-  const res = await apiFetch(`${API_URL}/api/stream/danmaku/sources`)
+  const res = await apiFetch('/api/stream/danmaku/sources')
   const data = (await res.json()) as {
     success: boolean
     sources?: Array<{ id: string; name: string }>
@@ -33,7 +33,7 @@ export async function searchDanmaku(
   keyword: string
 ): Promise<DanmakuSearchResult[]> {
   const res = await apiFetch(
-    `${API_URL}/api/stream/danmaku/search?source=${encodeURIComponent(
+    `/api/stream/danmaku/search?source=${encodeURIComponent(
       source
     )}&keyword=${encodeURIComponent(keyword)}`
   )
@@ -77,7 +77,7 @@ export async function getDanmakuEpisodes(
   identifier: string
 ): Promise<DanmakuEpisode[]> {
   const res = await apiFetch(
-    `${API_URL}/api/stream/danmaku/episodes?source=${encodeURIComponent(
+    `/api/stream/danmaku/episodes?source=${encodeURIComponent(
       source
     )}&identifier=${encodeURIComponent(identifier)}`
   )
@@ -109,7 +109,7 @@ export async function fetchDanmaku(
   source: DanmakuSource,
   episode: DanmakuEpisode
 ): Promise<DanmakuItem[]> {
-  const res = await apiFetch(`${API_URL}/api/stream/danmaku/fetch`, {
+  const res = await apiFetch('/api/stream/danmaku/fetch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source, episode }),
@@ -148,7 +148,7 @@ export async function fetchBilibiliDanmakuByCid(
   cid: number
 ): Promise<DanmakuItem[]> {
   const res = await apiFetch(
-    `${API_URL}/api/stream/bilibili/danmaku?cid=${encodeURIComponent(String(cid))}`
+    `/api/stream/bilibili/danmaku?cid=${encodeURIComponent(String(cid))}`
   )
   const data = (await res.json()) as {
     success: boolean

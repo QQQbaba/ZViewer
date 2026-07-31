@@ -3,7 +3,7 @@
  *
  * OpenList 通过 WebDAV 协议访问，API 结构与 webdavApi.ts 对齐。
  */
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { buildProxyUrl } from '@/modules/direct-link/directLinkApi'
 import type {
   OpenListMount,
@@ -24,7 +24,7 @@ function jsonHeaders(): Record<string, string> {
 }
 
 export async function getOpenListMounts(): Promise<OpenListMount[]> {
-  const res = await apiFetch(`${API_URL}/api/openlist/mounts`)
+  const res = await apiFetch('/api/openlist/mounts')
   const data = (await res.json()) as {
     success: boolean
     mounts?: OpenListMount[]
@@ -39,7 +39,7 @@ export async function getOpenListMounts(): Promise<OpenListMount[]> {
 export async function createOpenListMount(
   payload: OpenListMountFormPayload
 ): Promise<OpenListMount> {
-  const res = await apiFetch(`${API_URL}/api/openlist/mounts`, {
+  const res = await apiFetch('/api/openlist/mounts', {
     method: 'POST',
     headers: jsonHeaders(),
     body: JSON.stringify(payload),
@@ -59,7 +59,7 @@ export async function updateOpenListMount(
   id: number,
   payload: OpenListMountFormPayload
 ): Promise<OpenListMount> {
-  const res = await apiFetch(`${API_URL}/api/openlist/mounts/${id}`, {
+  const res = await apiFetch(`/api/openlist/mounts/${id}`, {
     method: 'PUT',
     headers: jsonHeaders(),
     body: JSON.stringify(payload),
@@ -76,7 +76,7 @@ export async function updateOpenListMount(
 }
 
 export async function deleteOpenListMount(id: number): Promise<void> {
-  const res = await apiFetch(`${API_URL}/api/openlist/mounts/${id}`, {
+  const res = await apiFetch(`/api/openlist/mounts/${id}`, {
     method: 'DELETE',
   })
   const data = (await res.json()) as { success: boolean; message?: string }
@@ -88,7 +88,7 @@ export async function deleteOpenListMount(id: number): Promise<void> {
 export async function testOpenListMount(
   params: OpenListConnectionParams
 ): Promise<OpenListTestResult> {
-  const res = await apiFetch(`${API_URL}/api/openlist/mounts/test`, {
+  const res = await apiFetch('/api/openlist/mounts/test', {
     method: 'POST',
     headers: jsonHeaders(),
     body: JSON.stringify(params),
@@ -114,7 +114,7 @@ export async function browseOpenListMount(
 ): Promise<OpenListDirectoryEntry[]> {
   const query = path ? `?path=${encodeURIComponent(path)}` : ''
   const res = await apiFetch(
-    `${API_URL}/api/openlist/mounts/${id}/browse${query}`
+    `/api/openlist/mounts/${id}/browse${query}`
   )
   const data = (await res.json()) as {
     success: boolean
@@ -135,7 +135,7 @@ export async function resolveOpenList(
     mountId: String(mountId),
     path,
   }).toString()
-  const res = await apiFetch(`${API_URL}/api/openlist/resolve?${query}`)
+  const res = await apiFetch(`/api/openlist/resolve?${query}`)
   const data = (await res.json()) as {
     success: boolean
     message?: string

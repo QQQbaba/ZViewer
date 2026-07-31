@@ -91,8 +91,12 @@ function Install-Deps {
 }
 
 function Test-SqliteOk {
-    $nodeFile = Get-ChildItem -Path (Join-Path $rootDir "node_modules\better-sqlite3") -Filter "*.node" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-    return $null -ne $nodeFile
+    try {
+        node -e "require('better-sqlite3')" 2>$null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
 }
 
 function Rebuild-Sqlite {

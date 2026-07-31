@@ -53,9 +53,7 @@ install_deps() {
 }
 
 sqlite_ok() {
-  local node_file
-  node_file=$(find "$ROOT_DIR/node_modules/better-sqlite3" -name "*.node" -type f -print -quit 2>/dev/null || true)
-  [[ -n "$node_file" ]]
+  node -e "require('better-sqlite3')" 2>/dev/null
 }
 
 rebuild_sqlite() {

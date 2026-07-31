@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import type {
   ResolvedSource,
   QualityOption,
@@ -484,7 +484,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   // 失败时抛出错误，调用方负责提示用户且不更新本地 state。
   fetchMovies: async (roomId) => {
     const res = await apiFetch(
-      `${API_URL}/api/rooms/${encodeURIComponent(roomId)}/movies`
+      `/api/rooms/${encodeURIComponent(roomId)}/movies`
     )
     const data = await parseResponse<{
       success: boolean
@@ -499,7 +499,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   addMovie: async (roomId, payload) => {
     const res = await apiFetch(
-      `${API_URL}/api/rooms/${encodeURIComponent(roomId)}/movies`,
+      `/api/rooms/${encodeURIComponent(roomId)}/movies`,
       {
         method: 'POST',
         headers: jsonHeaders(),
@@ -519,7 +519,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   updateMovie: async (roomId, movieId, payload) => {
     const res = await apiFetch(
-      `${API_URL}/api/rooms/${encodeURIComponent(roomId)}/movies/${movieId}`,
+      `/api/rooms/${encodeURIComponent(roomId)}/movies/${movieId}`,
       {
         method: 'PUT',
         headers: jsonHeaders(),
@@ -537,7 +537,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   removeMovie: async (roomId, movieId) => {
     const res = await apiFetch(
-      `${API_URL}/api/rooms/${encodeURIComponent(roomId)}/movies/${movieId}`,
+      `/api/rooms/${encodeURIComponent(roomId)}/movies/${movieId}`,
       {
         method: 'DELETE',
       }
@@ -557,7 +557,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   reorderMovies: async (roomId, orderedIds) => {
     const res = await apiFetch(
-      `${API_URL}/api/rooms/${encodeURIComponent(roomId)}/movies/reorder`,
+      `/api/rooms/${encodeURIComponent(roomId)}/movies/reorder`,
       {
         method: 'POST',
         headers: jsonHeaders(),

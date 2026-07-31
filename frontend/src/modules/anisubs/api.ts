@@ -5,7 +5,7 @@
  * 完全独立于 resolveSource.ts 中的 Anime* API 函数。
  */
 
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch, getApiUrl } from '@/lib/api'
 import type {
   AniSubsSource,
   AniSubsSearchResult,
@@ -13,7 +13,7 @@ import type {
   AniSubsResolvedSource,
 } from './types'
 
-const getBaseUrl = () => `${API_URL}/api/stream/anisubs`
+const getBaseUrl = () => `${getApiUrl()}/api/stream/anisubs`
 
 /** 列出可用数据源 */
 export async function getAniSubsSources(): Promise<AniSubsSource[]> {
@@ -122,8 +122,8 @@ export function needsAniSubsProxy(
 ): boolean {
   if (headers && Object.keys(headers).length > 0) return true
   try {
-    const target = new URL(url, API_URL)
-    return target.origin !== API_URL
+    const target = new URL(url, getApiUrl())
+    return target.origin !== getApiUrl()
   } catch {
     return false
   }

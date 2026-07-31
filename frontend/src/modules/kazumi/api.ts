@@ -5,7 +5,7 @@
  * 完全独立于 resolveSource.ts 中的 Anime* API 函数。
  */
 
-import { apiFetch, API_URL } from '@/lib/api'
+import { apiFetch, getApiUrl } from '@/lib/api'
 import type {
   KazumiSource,
   KazumiSearchResult,
@@ -13,7 +13,7 @@ import type {
   KazumiResolvedSource,
 } from './types'
 
-const getBaseUrl = () => `${API_URL}/api/stream/kazumi`
+const getBaseUrl = () => `${getApiUrl()}/api/stream/kazumi`
 
 /** 列出可用数据源 */
 export async function getKazumiSources(): Promise<KazumiSource[]> {
@@ -122,8 +122,9 @@ export function needsKazumiProxy(
 ): boolean {
   if (headers && Object.keys(headers).length > 0) return true
   try {
-    const target = new URL(url, API_URL)
-    return target.origin !== API_URL
+    const baseUrl = getApiUrl()
+    const target = new URL(url, baseUrl)
+    return target.origin !== baseUrl
   } catch {
     return false
   }

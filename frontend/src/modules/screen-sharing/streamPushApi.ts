@@ -2,7 +2,7 @@
  * 推流模式（OBS RTMP + HTTP-FLV）API 层
  */
 
-import { apiFetch, API_URL, FLV_BASE_URL, RTMP_PORT } from '@/lib/api'
+import { apiFetch, getFlvBaseUrl, getRtmpPort } from '@/lib/api'
 
 /**
  * 构建拉流地址。
@@ -18,7 +18,7 @@ import { apiFetch, API_URL, FLV_BASE_URL, RTMP_PORT } from '@/lib/api'
  * 观众端需从 roomStore 或后端广播中获取 streamKey。
  */
 export function buildFlvUrl(streamKey: string): string {
-  return `${FLV_BASE_URL}/live/${streamKey}.flv`
+  return `${getFlvBaseUrl()}/live/${streamKey}.flv`
 }
 
 /**
@@ -28,7 +28,7 @@ export function buildFlvUrl(streamKey: string): string {
  */
 export function getRtmpPushUrl(): string {
   const host = window.location.hostname
-  return `rtmp://${host}:${RTMP_PORT}/live`
+  return `rtmp://${host}:${getRtmpPort()}/live`
 }
 
 /**
@@ -36,7 +36,7 @@ export function getRtmpPushUrl(): string {
  * 后端返回 JSON 文件，浏览器直接下载。
  */
 export async function downloadObsConfig(roomId: string): Promise<void> {
-  const url = `${API_URL}/api/stream-push/obs-config/${encodeURIComponent(roomId)}`
+  const url = `/api/stream-push/obs-config/${encodeURIComponent(roomId)}`
   const response = await apiFetch(url)
   if (!response.ok) {
     const text = await response.text().catch(() => '')

@@ -11,7 +11,7 @@
  * - 可配置最低级别，生产环境默认收集 warn / error，开发环境收集全部。
  */
 
-import { API_URL } from './api'
+import { getApiUrl } from './api'
 
 type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug'
 
@@ -215,9 +215,9 @@ class ClientLogger {
     if (entries.length === 0) return
     this.isSending = true
     try {
-      // 使用 API_URL 避免开发模式下相对路径请求发到 Vite dev server（5174）
+      // 使用 getApiUrl() 避免开发模式下相对路径请求发到 Vite dev server（5174）
       // 而非后端（3333），导致 /api/client-logs 404 或被 Vite proxy 中断。
-      await fetch(`${API_URL}/api/client-logs`, {
+      await fetch(`${getApiUrl()}/api/client-logs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
