@@ -25,18 +25,10 @@ CERT_FORCE=""
 # ==================== 工具函数 ====================
 
 # 从 .env 读取 PORT
-read_env_port() {
-  [ -f "$ENV_FILE" ] || return 1
-  grep -E '^PORT=' "$ENV_FILE" | head -n 1 | cut -d= -f2- | tr -d '"' | xargs
-}
-
-# 端口固定：后端 = .env 的 PORT 或默认 3333；前端 = 4173
+# 端口固定：后端 3333，前端 4173
 resolve_ports() {
-  local env_port
-  env_port=$(read_env_port)
   if [ -z "$BACKEND_PORT" ]; then
-    if [ -n "$env_port" ]; then BACKEND_PORT="$env_port"
-    else BACKEND_PORT="$DEFAULT_PORT"; fi
+    BACKEND_PORT="$DEFAULT_PORT"
   fi
   if [ -z "$FRONTEND_PORT" ]; then
     FRONTEND_PORT="$DEFAULT_FRONTEND_PORT"
@@ -321,7 +313,7 @@ start/restart/cert/https 选项:
       --https              start 时使用 HTTPS
       --force              证书强制重新签发
 
-端口: 后端默认取 .env 的 PORT（否则 3333），前端固定 4173
+端口: 后端 3333，前端 4173
 
 示例:
   ./start.sh                    # 交互菜单
