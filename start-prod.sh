@@ -377,11 +377,11 @@ do_menu() {
     printf "请输入编号 (0-9): "
     read CHOICE
     case "$CHOICE" in
-      1) cmd_start; wait_key ;;
+      1) BACKEND_ONLY=0; HTTPS_MODE=0; cmd_start; wait_key ;;
       2) BACKEND_ONLY=1
         printf "  请选择类型 (1=HTTP 2=HTTPS，直接回车默认 HTTP): "
         read BO_CHOICE
-        [ "$BO_CHOICE" = "2" ] && HTTPS_MODE=1
+        if [ "$BO_CHOICE" = "2" ]; then HTTPS_MODE=1; else HTTPS_MODE=0; fi
         cmd_start; wait_key ;;
       3) cmd_stop; wait_key ;;
       4) cmd_restart; wait_key ;;

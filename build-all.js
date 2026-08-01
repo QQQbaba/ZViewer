@@ -325,6 +325,10 @@ function packageFrontend(targetPlatforms, frontendDist) {
         JSON.stringify(entry),
         '--targets', target,
         '--output', JSON.stringify(outputPath),
+        // 禁用 v8 bytecode cache：Windows 上 cross-compile 的 Linux 产物
+        // 会因 host/target V8 不匹配在目标平台启动即崩（V8 rejected bytecode cache）
+        '--public',
+        '--public-packages', '"*"',
       ].join(' ');
 
       try {
@@ -392,6 +396,9 @@ function packageBackend(targetPlatforms) {
         JSON.stringify(entry),
         '--targets', target,
         '--output', JSON.stringify(outputPath),
+        // 禁用 v8 bytecode cache：保证 cross-compile 的产物在目标平台可运行
+        '--public',
+        '--public-packages', '"*"',
         '-c', JSON.stringify(PKG_CONFIG),
       ].join(' ');
 
@@ -472,6 +479,9 @@ function packageCertTool(targetPlatforms) {
         JSON.stringify(entry),
         '--targets', target,
         '--output', JSON.stringify(outputPath),
+        // 禁用 v8 bytecode cache：保证 cross-compile 的产物在目标平台可运行
+        '--public',
+        '--public-packages', '"*"',
       ].join(' ');
 
       try {

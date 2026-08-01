@@ -344,18 +344,18 @@ do_menu() {
     printf "  请输入编号 (0-8): "
     read CHOICE
     case "$CHOICE" in
-      1) do_start; wait_key ;;
+      1) BACKEND_ONLY=0; HTTPS_MODE=0; do_start; wait_key ;;
       2) BACKEND_ONLY=1
         printf "  请选择类型 (1=HTTP 2=HTTPS，直接回车默认 HTTP): "
         read BO_CHOICE
-        [ "$BO_CHOICE" = "2" ] && HTTPS_MODE=1
+        if [ "$BO_CHOICE" = "2" ]; then HTTPS_MODE=1; else HTTPS_MODE=0; fi
         do_start; wait_key ;;
       3) do_stop; wait_key ;;
       4) do_restart; wait_key ;;
       5) do_status; wait_key ;;
       6) do_logs; wait_key ;;
       7) do_cert; wait_key ;;
-      8) HTTPS_MODE=1; do_start; wait_key ;;
+      8) BACKEND_ONLY=0; HTTPS_MODE=1; do_start; wait_key ;;
       0) return 0 ;;
       *) echo "  无效输入，请重新选择"; sleep 1 ;;
     esac
