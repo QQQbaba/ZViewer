@@ -375,9 +375,7 @@ function packageBackend(targetPlatforms) {
     process.exit(1);
   }
 
-  // 原生模块复制
-  const sqliteSrc = path.join(ROOT, 'node_modules', 'better-sqlite3');
-  const hasSqlite = fs.existsSync(sqliteSrc);
+  // 数据库使用 sql.js（wasm）驱动，纯 JS 无原生模块，无需复制
 
   const results = [];
 
@@ -412,17 +410,6 @@ function packageBackend(targetPlatforms) {
       if (!fs.existsSync(outputPath)) {
         warn(`后端打包失败：未生成 ${outputPath}`);
         continue;
-      }
-
-      // 复制 better-sqlite3 原生模块
-      if (hasSqlite) {
-        const sqliteDest = path.join(outputFolder, 'node_modules', 'better-sqlite3');
-        log('复制 better-sqlite3 原生模块...');
-        if (fs.existsSync(sqliteDest)) {
-          fs.rmSync(sqliteDest, { recursive: true, force: true });
-        }
-        copyDirSync(sqliteSrc, sqliteDest);
-        success('已复制 better-sqlite3');
       }
 
       // 复制后端 .env（如果存在）；单文件版端口已固定，过滤掉 PORT 行

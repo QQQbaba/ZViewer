@@ -1,0 +1,27 @@
+FROM debian:bullseye-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 复制单文件产物
+COPY dist/linux/zviewer-backend .
+COPY dist/linux/zviewer-frontend .
+COPY dist/linux/zviewer-cert .
+COPY dist/linux/start.sh .
+COPY dist/linux/.env .
+COPY dist/linux/frontend/dist ./frontend/dist/
+
+# 创建运行时数据目录
+RUN mkdir -p config/ssl config/uploads log
+
+# 暴露端口
+EXPOSE 3333
+
+# Entrypoint（自动签发证书 + 启动 HTTPS 后端）
+COPY docker/entrypoint-linux-single.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+CMD ["/app/entrypoint.sh"]

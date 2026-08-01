@@ -1,0 +1,13 @@
+services:
+  zviewer:
+    build:
+      context: .
+      dockerfile: Dockerfile.linux-single
+    ports:
+      - "3333:3333"
+    volumes:
+      - zviewer-data:/app/config
+    restart: unless-stopped
+
+volumes:
+  zviewer-data:

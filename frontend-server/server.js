@@ -230,57 +230,75 @@ server.on('upgrade', (req, socket, head) => {
   }
 
   const target = parseTargetUrl(BACKEND_URL);
-  const proxySocket = http.request({
+  const options = {
     hostname: target.hostname,
     port: parseInt(target.port, 10),
     path: url,
-    method: 'CONNECT',
+    method: 'GET',
     headers: {
       ...req.headers,
       host: `${target.hostname}:${target.port}`,
     },
+  };
+
+  const proxyReq = http.request(options);
+
+  // 后端返回普通 HTTP 响应（非 101 升级）— 说明后端拒绝了 WebSocket 升级
+  // 需要将拒绝响应转发给客户端，否则客户端会收到 ECONNRESET 而非后端的错误信息
+  proxyReq.on('response', (proxyRes) => {
+    let body = '';
+    proxyRes.on('data', (chunk) => { body += chunk; });
+    proxyRes.on('end', () => {
+      if (!socket.destroyed) {
+        socket.write(`HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage}\r\n`);
+        for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
+          socket.write(`${proxyRes.rawHeaders[i]}: ${proxyRes.rawHeaders[i + 1]}\r\n`);
+        }
+        socket.write('\r\n');
+        socket.write(body);
+        socket.destroy();
+      }
+    });
   });
 
-  // 连接后端 WebSocket 服务器
-  const net = require('net');
-  const backendSocket = net.createConnection(
-    { host: target.hostname, port: parseInt(target.port, 10) },
-    () => {
-      // 发送 HTTP Upgrade 请求
-      const upgradeReq = [
-        `GET ${url} HTTP/1.1`,
-        `Host: ${target.hostname}:${target.port}`,
-        'Upgrade: websocket',
-        'Connection: Upgrade',
-        ...Object.entries(req.headers)
-          .filter(([k]) => !['host', 'connection', 'upgrade'].includes(k.toLowerCase()))
-          .map(([k, v]) => `${k}: ${v}`),
-        '',
-        '',
-      ].join('\r\n');
-
-      backendSocket.write(upgradeReq);
-    },
-  );
-
-  backendSocket.on('data', (data) => {
-    const response = data.toString('utf8');
-    if (response.includes('101 Switching Protocols')) {
-      // WebSocket 握手成功，双向转发数据
-      socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
-
-      backendSocket.pipe(socket);
-      socket.pipe(backendSocket);
+  proxyReq.on('upgrade', (proxyRes, proxySocket) => {
+    // 转发后端返回的完整 101 响应头（包含 Sec-WebSocket-Accept 等必要头）
+    // 不能手动构造响应，必须转发后端返回的完整头，否则浏览器会拒绝握手
+    let responseHeaders = 'HTTP/1.1 101 Switching Protocols\r\n';
+    for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
+      responseHeaders += `${proxyRes.rawHeaders[i]}: ${proxyRes.rawHeaders[i + 1]}\r\n`;
     }
+    responseHeaders += '\r\n';
+    socket.write(responseHeaders);
+
+    // 转发 head 中可能存在的初始数据
+    if (head && head.length > 0) {
+      proxySocket.write(head);
+    }
+
+    // 双向转发数据
+    proxySocket.pipe(socket);
+    socket.pipe(proxySocket);
+
+    // 任一端断开时，清理另一端，防止未处理 error 导致进程崩溃
+    proxySocket.on('close', () => { if (!socket.destroyed) socket.destroy(); });
+    socket.on('close', () => { if (!proxySocket.destroyed) proxySocket.destroy(); });
+    proxySocket.on('error', () => { if (!socket.destroyed) socket.destroy(); });
+    socket.on('error', () => { if (!proxySocket.destroyed) proxySocket.destroy(); });
   });
 
-  backendSocket.on('error', () => {
+  proxyReq.on('error', (err) => {
+    console.error(`[frontend-server] WebSocket 代理连接失败 (${url}): ${err.message}`);
     socket.destroy();
   });
 
-  socket.on('error', () => {
-    backendSocket.destroy();
+  proxyReq.on('timeout', () => {
+    proxyReq.destroy();
+    socket.destroy();
   });
+
+  proxyReq.setTimeout(15000);
+  proxyReq.end();
 });
 
 // ==================== 启动 ====================

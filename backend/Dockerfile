@@ -2,10 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# better-sqlite3 是原生模块，需要在容器内重新编译
-# 安装 Python、make、g++ 等构建工具
 # ffmpeg：B站视频下载 DASH 模式合并 m4s 流需要（可选，未安装时仅支持 MP4 1080P 下载）
-RUN apk add --no-cache python3 make g++ sqlite ffmpeg
+# 数据库使用 sql.js（wasm），纯 JS 实现，无需原生编译工具
+RUN apk add --no-cache ffmpeg
 
 # 先复制依赖清单并安装依赖（利用缓存层）
 COPY package*.json ./

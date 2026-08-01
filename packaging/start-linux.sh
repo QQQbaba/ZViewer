@@ -60,6 +60,21 @@ port_in_use() {
   fi
 }
 
+# 等待端口开始监听（后端初始化需要数秒，避免前端先就绪后页面请求被拒）
+wait_port_ready() {
+  local port="$1"
+  local timeout="${2:-30}"
+  local waited=0
+  while [ "$waited" -lt "$timeout" ]; do
+    if port_in_use "$port"; then
+      return 0
+    fi
+    sleep 0.5
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
 kill_port() {
   local port="$1"
   if command -v lsof >/dev/null 2>&1; then
@@ -184,13 +199,22 @@ do_start() {
 
   echo "  启动后端..."
   if [ "$HTTPS_MODE" -eq 1 ]; then
-    PORT="$BACKEND_PORT" NODE_ENV=production HOST='::' HTTPS=true \
+    PORT="$BACKEND_PORT" NODE_ENV=production HTTPS=true \
       nohup "$BACKEND_BIN" >> "$LOG_DIR/backend.log" 2>> "$LOG_DIR/backend.err.log" &
   else
-    PORT="$BACKEND_PORT" NODE_ENV=production HOST='::' \
+    PORT="$BACKEND_PORT" NODE_ENV=production \
       nohup "$BACKEND_BIN" >> "$LOG_DIR/backend.log" 2>> "$LOG_DIR/backend.err.log" &
   fi
   local_backend_pid=$!
+
+  # 等待后端就绪（TypeORM 初始化 + NMS 启动需要数秒），
+  # 避免前端先就绪时页面请求被 ECONNREFUSED
+  echo "  等待后端就绪..."
+  if ! wait_port_ready "$BACKEND_PORT"; then
+    echo "  错误：后端在 30 秒内未就绪，请检查日志: $LOG_DIR/backend.err.log" >&2
+    kill "$local_backend_pid" 2>/dev/null || true
+    return 1
+  fi
 
   if [ "$HTTPS_MODE" -eq 1 ]; then
     write_pids "$local_backend_pid" ""

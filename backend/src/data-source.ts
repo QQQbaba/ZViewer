@@ -13,10 +13,14 @@ import { ServerFolder } from './entities/ServerFolder';
 import { DATABASE_PATH } from './services/paths';
 
 export const AppDataSource = new DataSource({
-  type: 'better-sqlite3',
+  // sql.js（wasm）驱动：纯 JS 实现，无原生模块，单文件版可在任意平台运行
+  type: 'sqljs',
   // 数据库文件统一存放在 config/ 目录下，便于升级时整体保留。
   // 路径解析详见 services/paths.ts（支持 DATABASE_URL 环境变量覆盖）。
-  database: DATABASE_PATH,
+  location: DATABASE_PATH,
+  // 变更后自动保存到文件（Node 环境使用文件系统持久化，而非浏览器 IndexedDB）
+  autoSave: true,
+  useLocalForage: false,
   synchronize: true,
   logging: process.env.NODE_ENV === 'development',
   entities: [Room, Session, User, Comment, BilibiliCredential, Movie, UserMount, SystemSettings, PlaybackState, ServerFolder],

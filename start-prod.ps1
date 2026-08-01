@@ -59,6 +59,17 @@ function Test-PortInUse($localPort) {
     return $null -ne $conn
 }
 
+# 等待端口开始监听（后端初始化需要数秒，避免前端先就绪后页面请求被拒）
+function Wait-PortReady {
+    param([int]$Port, [int]$TimeoutSeconds = 30)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-PortInUse $Port) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
 function Stop-ProcessByPort($localPort) {
     $conn = Get-NetTCPConnection -LocalPort $localPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($conn -and $conn.OwningProcess) {
@@ -69,7 +80,7 @@ function Stop-ProcessByPort($localPort) {
 function Test-DepsInstalled {
     return (Test-Path (Join-Path $rootDir "node_modules")) -and
            (Test-Path (Join-Path $rootDir "node_modules\express")) -and
-           (Test-Path (Join-Path $rootDir "node_modules\better-sqlite3")) -and
+           (Test-Path (Join-Path $rootDir "node_modules\sql.js")) -and
            (Test-Path (Join-Path $rootDir "node_modules\typeorm"))
 }
 
@@ -88,22 +99,6 @@ function Install-Deps {
     } finally {
         Pop-Location
     }
-}
-
-function Test-SqliteOk {
-    try {
-        node -e "require('better-sqlite3')" 2>$null
-        return $LASTEXITCODE -eq 0
-    } catch {
-        return $false
-    }
-}
-
-function Rebuild-Sqlite {
-    if (Test-SqliteOk) { return }
-    Write-Host "  better-sqlite3 原生模块缺失，重建中..."
-    Push-Location $rootDir
-    try { npm rebuild better-sqlite3 } finally { Pop-Location }
 }
 
 function Resolve-ViteJs {
@@ -170,7 +165,6 @@ function Invoke-Start {
     }
 
     Install-Deps
-    Rebuild-Sqlite
 
     if ($Build) {
         Build-Projects
@@ -233,6 +227,15 @@ function Invoke-Start {
         -RedirectStandardOutput "$logDir/backend.log" `
         -RedirectStandardError "$logDir/backend.err.log" -PassThru
 
+    # 等待后端就绪（TypeORM 初始化 + NMS 启动需要数秒），
+    # 避免前端先就绪时页面请求被 ECONNREFUSED
+    Write-Host "  等待后端就绪..."
+    if (-not (Wait-PortReady $Port)) {
+        Write-Host "  错误：后端在 30 秒内未就绪，请检查日志: $logDir\backend.err.log" -ForegroundColor Red
+        Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
+        exit 1
+    }
+
     if ($Https) {
       # HTTPS 模式：后端已提供前端静态文件服务，无需单独启动前端
       Write-PidsFile -backendPid $backend.Id -frontendPid $null
@@ -264,7 +267,6 @@ function Invoke-Start {
 
 function Invoke-Build {
     Install-Deps
-    Rebuild-Sqlite
     Build-Projects
 }
 

@@ -49,6 +49,17 @@ function Test-PortInUse($localPort) {
     return $null -ne $conn
 }
 
+# 等待端口开始监听（后端初始化需要数秒，避免前端先就绪后页面请求被拒）
+function Wait-PortReady {
+    param([int]$Port, [int]$TimeoutSeconds = 30)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-PortInUse $Port) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
 function Stop-ProcessByPort($localPort) {
     $conn = Get-NetTCPConnection -LocalPort $localPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($conn -and $conn.OwningProcess) {
@@ -199,6 +210,15 @@ function Invoke-Start([switch]$BackendOnly) {
     if ($Https) { $backendEnv.HTTPS = "true" }
     $backend = Start-ExeWithEnv -FilePath $backendExe -EnvVars $backendEnv  `
         -OutFile "$logDir/backend.log" -ErrFile "$logDir/backend.err.log"
+
+    # 等待后端就绪（TypeORM 初始化 + NMS 启动需要数秒），
+    # 避免前端先就绪时页面请求被 ECONNREFUSED
+    Write-Host "  等待后端就绪..."
+    if (-not (Wait-PortReady $BackendPort)) {
+        Write-Host "  错误：后端在 30 秒内未就绪，请检查日志: $logDir\backend.err.log" -ForegroundColor Red
+        Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
+        exit 1
+    }
 
     if ($Https) {
         # HTTPS 模式：后端提供前端静态文件，无需启动前端
