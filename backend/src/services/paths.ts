@@ -92,6 +92,12 @@ export function ensureDataDirs(): void {
       fs.mkdirSync(dir, { recursive: true });
     }
   }
+  // 兜底：确保数据库文件所在目录存在（DATABASE_URL 指向自定义/挂载路径时目录可能尚未创建），
+  // 否则 sql.js 的 autoSave 会在首次写入时报 ENOENT 导致后端启动失败
+  const dbDir = path.dirname(DATABASE_PATH);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
 }
 
 /**

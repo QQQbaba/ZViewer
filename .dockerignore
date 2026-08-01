@@ -1,0 +1,13 @@
+# 依赖与构建缓存
+node_modules/
+.git/
+.gitignore
+
+# 运行时日志
+log/
+
+# 文档
+*.md
+
+# 保留 dist/（单文件产物）和 docker/（entrypoint 脚本）
+# Dockerfile.linux-single 在根目录，不会被忽略

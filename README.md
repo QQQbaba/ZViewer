@@ -111,8 +111,8 @@ https://t.me/Zero_251
 ┌─────────────────────────────────────────────────────────────────┐
 │                         ZViewer 后端                             │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ Express API  │  │ Socket.IO    │  │ TypeORM + better-    │  │
-│  │ 路由层        │  │ 事件处理器    │  │ sqlite3 数据持久化    │  │
+│  │ Express API  │  │ Socket.IO    │  │ TypeORM + sql.js     │  │
+│  │ 路由层        │  │ 事件处理器    │  │ （wasm SQLite）持久化 │  │
 │  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
 │         │                 │                     │              │
 │  ┌──────▼───────┐  ┌──────▼───────┐  ┌──────────▼───────────┐  │
@@ -158,7 +158,7 @@ https://t.me/Zero_251
 - Node.js + TypeScript
 - Express 5 Web 框架
 - Socket.IO 实时通信
-- TypeORM + better-sqlite3 数据持久化（可选 PostgreSQL）
+- TypeORM + sql.js（wasm SQLite）数据持久化（可选 PostgreSQL）
 - node-media-server 流媒体推送
 - bcryptjs 密码加密
 - JSON Web Token 鉴权
@@ -567,9 +567,9 @@ ZViewerCLI 是一个可选的本地代理客户端，用于解决浏览器端无
 - 80 端口是否空闲、防火墙/安全组是否放行；
 - 是否触发速率限制（可用 `--staging` 测试环境验证流程）。
 
-### better-sqlite3 编译失败
+### SQLite 数据库说明
 
-better-sqlite3 包含 C++ 扩展，必须在目标环境重新编译。后端 Dockerfile 已安装 `python3`、`make`、`g++` 等构建工具。本地开发时如遇编译失败，确认系统已安装构建工具链。
+后端使用 TypeORM + sql.js（wasm 版 SQLite）持久化，纯 JS 实现、无原生模块——单文件 exe 版可在任意平台直接运行，无需编译。数据库文件为标准 SQLite 格式（`config/dev.sqlite`），可用常规 SQLite 工具查看。
 
 ### WebSocket 连接失败
 

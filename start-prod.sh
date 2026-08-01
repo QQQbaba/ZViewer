@@ -44,10 +44,25 @@ port_in_use() {
   fi
 }
 
+# 等待端口开始监听（后端初始化需要数秒，避免前端先就绪后页面请求被拒）
+wait_port_ready() {
+  local port="$1"
+  local timeout="${2:-30}"
+  local waited=0
+  while [ "$waited" -lt "$timeout" ]; do
+    if port_in_use "$port"; then
+      return 0
+    fi
+    sleep 0.5
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
 deps_ok() {
   [[ -d "$ROOT_DIR/node_modules" ]] \
     && [[ -d "$ROOT_DIR/node_modules/express" ]] \
-    && [[ -d "$ROOT_DIR/node_modules/better-sqlite3" ]] \
+    && [[ -d "$ROOT_DIR/node_modules/sql.js" ]] \
     && [[ -d "$ROOT_DIR/node_modules/typeorm" ]]
 }
 
@@ -59,18 +74,6 @@ install_deps() {
   echo "  安装依赖..."
   (cd "$ROOT_DIR" && npm ci --no-audit --no-fund --prefer-offline --include=dev) || \
   (cd "$ROOT_DIR" && npm install --no-audit --no-fund --include=dev)
-}
-
-sqlite_ok() {
-  node -e "require('better-sqlite3')" 2>/dev/null
-}
-
-rebuild_sqlite() {
-  if sqlite_ok; then
-    return
-  fi
-  echo "  better-sqlite3 原生模块缺失，重建中..."
-  (cd "$ROOT_DIR" && npm rebuild better-sqlite3)
 }
 
 build() {
@@ -109,7 +112,6 @@ cmd_start() {
   fi
 
   install_deps
-  rebuild_sqlite
 
   if [[ "$DO_BUILD" -eq 1 ]]; then
     build
@@ -157,11 +159,19 @@ cmd_start() {
   pushd "$BACKEND_DIR" >/dev/null
   PORT="$BACKEND_PORT" \
     NODE_ENV="production" \
-    HOST="::" \
     HTTPS="$([[ "$HTTPS_MODE" -eq 1 ]] && echo "true" || echo "")" \
     nohup node dist/index.js > "$LOG_DIR/backend.log" 2>&1 &
   local backend_pid=$!
   popd >/dev/null
+
+  # 等待后端就绪（TypeORM 初始化 + NMS 启动需要数秒），
+  # 避免前端先就绪时页面请求被 ECONNREFUSED
+  echo "  等待后端就绪..."
+  if ! wait_port_ready "$BACKEND_PORT"; then
+    echo "  错误：后端在 30 秒内未就绪，请检查日志: $LOG_DIR/backend.log" >&2
+    kill "$backend_pid" 2>/dev/null || true
+    return 1
+  fi
 
   if [[ "$HTTPS_MODE" -eq 1 ]]; then
     # HTTPS 模式：后端提供前端静态文件，无需启动前端预览服务器
@@ -211,7 +221,6 @@ cmd_start() {
 
 cmd_build() {
   install_deps
-  rebuild_sqlite
   build
 }
 
