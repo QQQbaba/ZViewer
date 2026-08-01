@@ -57,19 +57,9 @@ function Stop-ProcessByPort($localPort) {
 }
 
 # 从 .env 读取 PORT（与后端 dotenv 行为一致）
-function Read-EnvPort {
-    if (-not (Test-Path $envFile)) { return $null }
-    $line = Get-Content $envFile | Where-Object { $_ -match '^\s*PORT\s*=' } | Select-Object -First 1
-    if (-not $line) { return $null }
-    $val = ($line -split '=', 2)[1].Trim().Trim('"').Trim()
-    if ($val -match '^\d+$') { return [int]$val }
-    return $null
-}
-
-# 端口固定：后端 = .env 的 PORT 或默认 3333；前端 = 4173
+# 端口固定：后端 3333，前端 4173
 function Set-Ports {
-    $envPort = Read-EnvPort
-    $script:BackendPort = if ($envPort) { $envPort } else { 3333 }
+    $script:BackendPort = 3333
     $script:FrontendPort = 4173
 }
 
@@ -83,27 +73,6 @@ function Test-Exe([string]$Exe, [string]$Name) {
 }
 
 # 解析端口：显式参数 > 持久化 > .env / 默认
-function Resolve-Ports {
-    $saved = Read-PortsFile
-    $script:BackendPort = if ($Port -gt 0) { $Port }
-        elseif ($saved -and $saved.backend) { $saved.backend }
-        else { $envPort = Read-EnvPort; if ($envPort) { $envPort } else { 3333 } }
-    $script:FrontendPortFinal = if ($FrontendPort -gt 0) { $FrontendPort }
-        elseif ($saved -and $saved.frontend) { $saved.frontend }
-        else { 4173 }
-}
-
-# 解析端口：显式参数 > 持久化 > .env / 默认
-function Resolve-Ports {
-    $saved = Read-PortsFile
-    $script:BackendPort = if ($Port -gt 0) { $Port }
-        elseif ($saved -and $saved.backend) { $saved.backend }
-        else { $envPort = Read-EnvPort; if ($envPort) { $envPort } else { 3333 } }
-    $script:FrontendPortFinal = if ($FrontendPort -gt 0) { $FrontendPort }
-        elseif ($saved -and $saved.frontend) { $saved.frontend }
-        else { 4173 }
-}
-
 # ==================== 证书 ====================
 
 # 交互选择证书签发类型（localhost / 域名或公网 IP）
@@ -366,7 +335,7 @@ function Show-Help {
     Write-Host "  -Https                    start 时使用 HTTPS"
     Write-Host "  -Force                    证书强制重新签发"
     Write-Host ""
-    Write-Host "端口: 后端默认取 .env 的 PORT（否则 3333），前端固定 4173"
+    Write-Host "端口: 后端 3333，前端 4173"
     Write-Host ""
     Write-Host "示例:"
     Write-Host "  start.bat                  # 交互菜单"

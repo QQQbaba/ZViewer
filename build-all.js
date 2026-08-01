@@ -418,12 +418,17 @@ function packageBackend(targetPlatforms) {
         success('已复制 better-sqlite3');
       }
 
-      // 复制后端 .env（如果存在）
+      // 复制后端 .env（如果存在）；单文件版端口已固定，过滤掉 PORT 行
       const envSrc = path.join(BACKEND, '.env');
       const envDest = path.join(outputFolder, '.env');
       if (fs.existsSync(envSrc) && !fs.existsSync(envDest)) {
-        fs.copyFileSync(envSrc, envDest);
-        log('已复制 .env 配置模板');
+        const envContent = fs.readFileSync(envSrc, 'utf8');
+        const filtered = envContent
+          .split('\n')
+          .filter((line) => !/^\s*PORT\s*=/.test(line))
+          .join('\n');
+        fs.writeFileSync(envDest, filtered, 'utf8');
+        log('已复制 .env 配置模板（已移除 PORT，端口固定为 3333）');
       }
 
       const stats = fs.statSync(outputPath);
