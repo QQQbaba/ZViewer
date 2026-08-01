@@ -5,7 +5,7 @@
  * 零外部依赖（全部使用 Node.js 内置模块）。
  *
  * 输出目录结构：
- *   dist-exe/
+ *   dist/
  *   ├── zviewer-frontend.exe   - 前端服务可执行程序
  *   └── frontend/
  *       └── dist/              - 前端构建产物（需 exe 同级或在 FRONTEND_DIST 指定）
@@ -22,7 +22,7 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const FRONTEND_SERVER = path.join(ROOT, 'frontend-server');
 const FRONTEND = path.join(ROOT, 'frontend');
-const DIST_EXE = path.join(ROOT, 'dist-exe');
+const DIST_EXE = path.join(ROOT, 'dist');
 const OUTPUT_NAME = 'zviewer-frontend.exe';
 const OUTPUT_PATH = path.join(DIST_EXE, OUTPUT_NAME);
 const SKIP_BUILD = process.argv.includes('--skip-build');

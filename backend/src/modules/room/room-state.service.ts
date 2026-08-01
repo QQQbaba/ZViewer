@@ -27,7 +27,7 @@ export interface RoomRuntimeState {
 }
 
 /** 房主重连宽限期（毫秒） */
-export const HOST_RECONNECT_GRACE_MS = 5 * 60 * 1000; // 5 分钟
+export const HOST_RECONNECT_GRACE_MS = 10 * 60 * 1000; // 10 分钟
 
 /**
  * 房间运行时状态服务。

@@ -10,7 +10,7 @@
  *   node scripts/build-exe.js --skip-build    # 仅打包（跳过 tsc 编译）
  *
  * 输出：
- *   dist-exe/zviewer-backend.exe  - 单文件可执行程序
+ *   dist/zviewer-backend.exe  - 单文件可执行程序
  */
 
 const { execSync } = require('child_process');
@@ -19,7 +19,7 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const BACKEND = path.join(ROOT, 'backend');
-const DIST_EXE = path.join(ROOT, 'dist-exe');
+const DIST_EXE = path.join(ROOT, 'dist');
 const OUTPUT_NAME = 'zviewer-backend.exe';
 const OUTPUT_PATH = path.join(DIST_EXE, OUTPUT_NAME);
 
@@ -93,10 +93,10 @@ function main() {
     process.exit(1);
   }
 
-  // Step 5: 复制 better-sqlite3 原生模块到 dist-exe
+  // Step 5: 复制 better-sqlite3 原生模块到 dist
   //
   // pkg.assets 已将 .node 文件嵌入 exe 快照，运行时 pkg 会提取到临时目录加载。
-  // 但部分场景下 bindings 路径解析可能失效，因此在 dist-exe 外部保留一份
+  // 但部分场景下 bindings 路径解析可能失效，因此在 dist 外部保留一份
   // better-sqlite3 完整副本作为 fallback，确保 exe 能在目标机器上正常运行。
   const sqliteSrc = path.join(ROOT, 'node_modules', 'better-sqlite3');
   const sqliteDest = path.join(DIST_EXE, 'node_modules', 'better-sqlite3');

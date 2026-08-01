@@ -167,7 +167,7 @@ https://t.me/Zero_251
 
 - Docker + Docker Compose
 - 跨平台一键启动脚本（源码版 PowerShell / Bash）
-- 单文件 exe 版（pkg 打包，Windows / Linux / Linux-arm64）
+- 单文件 exe 版（pkg 打包，Windows / Linux）
 
 ---
 
@@ -195,7 +195,7 @@ ZViewer/
 │   ├── start-win.bat        # Windows 转发器（→ start-win.ps1）
 │   ├── start-win.ps1        # Windows 单文件版主逻辑（含交互菜单）
 │   └── start-linux.sh       # Linux 单文件版一键启动脚本
-├── dist-exe/                # build-all 编译产物（win/linux/linux-arm64）
+├── dist/                # build-all 编译产物（win/linux）
 ├── docker-compose.yml       # Docker 生产编排
 ├── start-prod.bat           # 源码版 Windows 转发器（→ start-prod.ps1）
 ├── start-prod.ps1           # 源码版 Windows 一键启动脚本（含交互菜单）
@@ -266,7 +266,7 @@ ZViewer/
 
 ## 一键启动脚本
 
-源码版（`start-prod.*`）与单文件版（`packaging/start-*` → `dist-exe/` 内的 `start.bat` / `start.sh`）功能一致，均提供：
+源码版（`start-prod.*`）与单文件版（`packaging/start-*` → `dist/` 内的 `start.bat` / `start.sh`）功能一致，均提供：
 
 ### 交互菜单
 
@@ -327,14 +327,13 @@ ZViewer/
 npm run build:all        # 或 node build-all.js
 ```
 
-产物输出到 `dist-exe/`：
+产物输出到 `dist/`：
 
 ```text
-dist-exe/
+dist/
 ├── win/                 # start.bat + start.ps1 + zviewer-backend.exe
 │                        #   + zviewer-frontend.exe + zviewer-cert.exe
-├── linux/               # start.sh + zviewer-backend + zviewer-frontend + zviewer-cert
-└── linux-arm64/
+└── linux/               # start.sh + zviewer-backend + zviewer-frontend + zviewer-cert
 ```
 
 ### 使用

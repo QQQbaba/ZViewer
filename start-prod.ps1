@@ -6,7 +6,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'backend', 'stop', 'restart', 'status', 'logs', 'build', 'help', 'menu', '')]
+    [ValidateSet('start', 'backend', 'cert', 'https', 'stop', 'restart', 'status', 'logs', 'build', 'help', 'menu', '')]
     [string]$Command = 'menu',
 
     [Parameter(Position = 1)]
@@ -356,12 +356,79 @@ function Invoke-Logs {
     }
 }
 
+# ==================== 证书 ====================
+
+# 交互选择证书签发类型（localhost / 域名或公网 IP）
+function Select-CertHost {
+    Write-Host ""
+    Write-Host "  请选择证书签发类型："
+    Write-Host "    [1] localhost（本机访问，默认，自签证书）"
+    Write-Host "    [2] 域名或公网 IP（如 example.com 或 1.2.3.4）"
+    Write-Host "        - 域名将自动申请 Let's Encrypt 可信 CA 证书"
+    Write-Host "          （需域名已解析到本机且 80 端口可访问）"
+    Write-Host "        - 公网 IP 或内网地址使用自签证书"
+    $choice = Read-Host "  请输入 1 或 2（直接回车默认 1）"
+    if ($choice -eq '2') {
+        $hostValue = Read-Host "  请输入域名或公网 IP 地址"
+        if ([string]::IsNullOrWhiteSpace($hostValue)) {
+            Write-Host "  [提示] 未输入地址，将使用 localhost"
+            return 'localhost'
+        }
+        Write-Host ""
+        Write-Host "  [提示] 若输入的是域名，将自动申请 Let's Encrypt 可信 CA 证书；"
+        Write-Host "         若无法申请（域名未解析 / 80 端口不可达），可改输入 IP 或 localhost 使用自签证书。"
+        return $hostValue.Trim()
+    }
+    return 'localhost'
+}
+
+# 一键签发证书：交互选择类型后调用 scripts/generate-cert.js
+function Invoke-Cert {
+    $certScript = Join-Path $rootDir "scripts\generate-cert.js"
+    if (-not (Test-Path $certScript)) {
+        Write-Host "  [错误] 证书生成脚本缺失: $certScript" -ForegroundColor Red
+        return 1
+    }
+    $certHost = Select-CertHost
+    Write-Host "  [证书] 签发类型: $certHost"
+    & node $certScript $certHost
+    $code = $LASTEXITCODE
+    Write-Host ""
+    if ($code -ne 0) {
+        Write-Host "  [证书] 签发失败（退出码 $code）" -ForegroundColor Red
+    } else {
+        Write-Host "  [证书] 签发完成，证书位于 config/ssl/" -ForegroundColor Green
+    }
+    return $code
+}
+
+# HTTPS 启动：交互选择证书类型 → 签发 → 以 HTTPS 启动
+function Invoke-HttpsStart {
+    $certScript = Join-Path $rootDir "scripts\generate-cert.js"
+    if (-not (Test-Path $certScript)) {
+        Write-Host "  [错误] 证书生成脚本缺失: $certScript" -ForegroundColor Red
+        return 1
+    }
+    $certHost = Select-CertHost
+    Write-Host "  [证书] 签发类型: $certHost"
+    & node $certScript $certHost
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [证书] 签发失败，HTTPS 启动中止" -ForegroundColor Red
+        return 1
+    }
+    $script:Https = $true
+    Invoke-Start
+    return 0
+}
+
 function Show-Help {
-    Write-Host "用法: .\start-prod.ps1 {start|backend|stop|restart|status|logs|build|help} [选项]"
+    Write-Host "用法: .\start-prod.ps1 {start|backend|cert|https|stop|restart|status|logs|build|help} [选项]"
     Write-Host ""
     Write-Host "命令:"
     Write-Host "  start              安装依赖后直接启动（默认不构建）"
     Write-Host "  backend            仅启动后端（加 -Https 使用 HTTPS）"
+    Write-Host "  cert               一键签发 SSL 证书（localhost / 域名(Let's Encrypt) / 公网 IP）"
+    Write-Host "  https              签发证书后以 HTTPS 启动（仅后端，统一提供前端页面）"
     Write-Host "  build              单独构建前后端"
     Write-Host "  stop               停止服务"
     Write-Host "  restart            重启服务"
@@ -392,9 +459,11 @@ function Show-Menu {
         Write-Host "  5) 查看状态"
         Write-Host "  6) 查看日志"
         Write-Host "  7) 构建前后端"
+        Write-Host "  8) 一键签发 SSL 证书"
+        Write-Host "  9) HTTPS 启动（自动签发证书）"
         Write-Host "  0) 退出"
         Write-Host ""
-        $choice = Read-Host "请输入编号 (0-7)"
+        $choice = Read-Host "请输入编号 (0-9)"
         switch ($choice) {
             '1' { Invoke-Start; Wait-MenuKey }
             '2' {
@@ -408,6 +477,8 @@ function Show-Menu {
             '5' { Invoke-Status; Wait-MenuKey }
             '6' { Invoke-Logs -LogTarget $Target; Wait-MenuKey }
             '7' { Invoke-Build; Wait-MenuKey }
+            '8' { Invoke-Cert; Wait-MenuKey }
+            '9' { Invoke-HttpsStart; Wait-MenuKey }
             '0' { return }
             default { Write-Host "  无效输入，请重新选择"; Start-Sleep -Milliseconds 800 }
         }
@@ -424,6 +495,8 @@ function Wait-MenuKey {
 switch ($Command) {
     'start'   { Invoke-Start }
     'backend' { Invoke-Start -BackendOnly }
+    'cert'    { $null = Invoke-Cert; exit 0 }
+    'https'   { $null = Invoke-HttpsStart; exit 0 }
     'build'   { Invoke-Build }
     'stop'    { Invoke-Stop }
     'restart' { Invoke-Restart }
