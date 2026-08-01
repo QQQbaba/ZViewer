@@ -7,7 +7,7 @@
  *
  * 支持的目标平台：
  *   1) Windows  (win-x64)
- *   2) Linux    (linux-x64 + linux-arm64)
+ *   2) Linux    (linux-x64)
  *   3) 全平台   (以上全部)
  *   4) 自定义   (手动输入逗号分隔的 pkg target 列表)
  *
@@ -30,7 +30,7 @@ const ROOT = path.resolve(__dirname);
 const BACKEND = path.join(ROOT, 'backend');
 const FRONTEND = path.join(ROOT, 'frontend');
 const FRONTEND_SERVER = path.join(ROOT, 'frontend-server');
-const DIST_EXE = path.join(ROOT, 'dist-exe');
+const DIST_EXE = path.join(ROOT, 'dist');
 const PKG_CONFIG = path.join(ROOT, 'package.json');
 const PACKAGING_DIR = path.join(ROOT, 'packaging');
 
@@ -46,11 +46,6 @@ const PLATFORM_TARGETS = {
     folder: 'linux',
     targets: ['node22-linux-x64'],
   },
-  linuxArm: {
-    label: 'Linux ARM64',
-    folder: 'linux-arm64',
-    targets: ['node22-linux-arm64'],
-  },
 }
 
 // 预定义平台组
@@ -64,14 +59,14 @@ const PLATFORM_PRESETS = [
   {
     key: 'linux',
     label: 'Linux',
-    description: 'node22-linux-x64 + arm64',
-    platforms: ['linux', 'linuxArm'],
+    description: 'node22-linux-x64',
+    platforms: ['linux'],
   },
   {
     key: 'all',
     label: '全平台',
     description: 'Windows + Linux',
-    platforms: ['win', 'linux', 'linuxArm'],
+    platforms: ['win', 'linux'],
   },
 ]
 
@@ -80,8 +75,8 @@ const SKIP_BUILD = process.argv.includes('--skip-build');
 // 命令行快捷方式
 const CLI_SHORTCUTS = {
   '--win': ['win'],
-  '--linux': ['linux', 'linuxArm'],
-  '--all': ['win', 'linux', 'linuxArm'],
+  '--linux': ['linux'],
+  '--all': ['win', 'linux'],
 }
 
 // 解析 --custom 参数
@@ -493,7 +488,6 @@ function copyStartScripts(targetPlatforms) {
       { src: 'start-win.ps1', dest: 'start.ps1' },
     ],
     linux: [{ src: 'start-linux.sh', dest: 'start.sh' }],
-    'linux-arm64': [{ src: 'start-linux.sh', dest: 'start.sh' }],
   };
 
   const folders = [];

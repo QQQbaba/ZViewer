@@ -3,7 +3,7 @@
  *
  * 处理 socket 断开连接事件，区分房主与观众两种角色分别处理：
  * - 房主断开：清空 hostSocketId（但保留播放状态），广播 host-disconnected，
- *   启动重连宽限定时器（5 分钟），超时则关闭房间
+ *   启动重连宽限定时器（10 分钟），超时则关闭房间
  *   期间服务器继续推算播放进度并广播给观众，观众可继续观看
  * - 观众断开：广播 viewer-left（统一使用 viewerSocketId 字段）
  *
@@ -43,7 +43,7 @@ export class RoomDisconnectHandler implements SocketEventHandler {
             roomId: session.roomId,
           });
 
-          // 启动重连定时器：超时（5 分钟）则关闭房间
+          // 启动重连定时器：超时（10 分钟）则关闭房间
           roomStateService.startReconnectTimer(session.roomId, () => {
             void roomStateService.closeRoomAndNotify(
               io,

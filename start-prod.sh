@@ -260,9 +260,78 @@ cmd_logs() {
   fi
 }
 
+# ==================== 证书 ====================
+
+# 交互选择证书签发类型（localhost / 域名或公网 IP）
+select_cert_host() {
+  echo ""
+  echo "  请选择证书签发类型："
+  echo "    [1] localhost（本机访问，默认，自签证书）"
+  echo "    [2] 域名或公网 IP（如 example.com 或 1.2.3.4）"
+  echo "        - 域名将自动申请 Let's Encrypt 可信 CA 证书"
+  echo "          （需域名已解析到本机且 80 端口可访问）"
+  echo "        - 公网 IP 或内网地址使用自签证书"
+  printf "  请输入 1 或 2（直接回车默认 1）: "
+  read CERT_CHOICE
+  if [ "$CERT_CHOICE" = "2" ]; then
+    printf "  请输入域名或公网 IP 地址: "
+    read CERT_HOST
+    if [ -z "$CERT_HOST" ]; then
+      echo "  [提示] 未输入地址，将使用 localhost"
+      CERT_HOST="localhost"
+    else
+      echo ""
+      echo "  [提示] 若输入的是域名，将自动申请 Let's Encrypt 可信 CA 证书；"
+      echo "         若无法申请（域名未解析 / 80 端口不可达），可改输入 IP 或 localhost 使用自签证书。"
+    fi
+  else
+    CERT_HOST="localhost"
+  fi
+}
+
+# 一键签发证书：交互选择类型后调用 scripts/generate-cert.js
+do_cert() {
+  local cert_script="$ROOT_DIR/scripts/generate-cert.js"
+  if [[ ! -f "$cert_script" ]]; then
+    echo "  [错误] 证书生成脚本缺失: $cert_script" >&2
+    return 1
+  fi
+  select_cert_host
+  echo "  [证书] 签发类型: $CERT_HOST"
+  node "$cert_script" "$CERT_HOST"
+  local rc=$?
+  echo ""
+  if [[ $rc -ne 0 ]]; then
+    echo "  [证书] 签发失败（退出码 $rc）" >&2
+    return 1
+  fi
+  echo "  [证书] 签发完成，证书位于 config/ssl/"
+  return 0
+}
+
+# HTTPS 启动：交互选择证书类型 → 签发 → 以 HTTPS 启动（仅后端）
+do_https() {
+  local cert_script="$ROOT_DIR/scripts/generate-cert.js"
+  if [[ ! -f "$cert_script" ]]; then
+    echo "  [错误] 证书生成脚本缺失: $cert_script" >&2
+    return 1
+  fi
+  select_cert_host
+  echo "  [证书] 签发类型: $CERT_HOST"
+  node "$cert_script" "$CERT_HOST"
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "  [证书] 签发失败，HTTPS 启动中止" >&2
+    return 1
+  fi
+  HTTPS_MODE=1
+  cmd_start
+  return 0
+}
+
 usage() {
   cat <<EOF
-用法: $0 {start|backend|stop|restart|status|logs|build|menu|help} [选项]
+用法: $0 {start|backend|cert|https|stop|restart|status|logs|build|menu|help} [选项]
 
 命令:
   start              安装依赖后直接启动（默认不构建）
@@ -272,6 +341,8 @@ usage() {
   restart            重启服务
   status             查看运行状态
   logs [backend|frontend]  查看日志（默认 backend）
+  cert               一键签发 SSL 证书（localhost / 域名(Let's Encrypt) / 公网 IP）
+  https              签发证书后以 HTTPS 启动（仅后端，统一提供前端页面）
   menu               交互菜单（无参数时自动进入）
   help               显示此帮助
 
@@ -299,9 +370,11 @@ do_menu() {
     echo "  5) 查看状态"
     echo "  6) 查看日志"
     echo "  7) 构建前后端"
+    echo "  8) 一键签发 SSL 证书"
+    echo "  9) HTTPS 启动（自动签发证书）"
     echo "  0) 退出"
     echo ""
-    printf "请输入编号 (0-7): "
+    printf "请输入编号 (0-9): "
     read CHOICE
     case "$CHOICE" in
       1) cmd_start; wait_key ;;
@@ -315,6 +388,8 @@ do_menu() {
       5) cmd_status; wait_key ;;
       6) cmd_logs; wait_key ;;
       7) cmd_build; wait_key ;;
+      8) do_cert; wait_key ;;
+      9) do_https; wait_key ;;
       0) return 0 ;;
       *) echo "  无效输入，请重新选择"; sleep 1 ;;
     esac
@@ -368,6 +443,12 @@ main() {
       ;;
     logs)
       cmd_logs "$1"
+      ;;
+    cert)
+      do_cert
+      ;;
+    https)
+      do_https
       ;;
     menu)
       do_menu

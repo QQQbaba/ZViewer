@@ -12,7 +12,7 @@
  * UI 通过 createPortal 挂载到 Shell 提供的 ArtPlayer 插槽（弹幕图层 / 覆盖层 / 设置面板），
  * 底部控制栏由 PlayerControlBar 直接渲染为覆盖层。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type Artplayer from 'artplayer'
 import { cn } from '@/lib/utils'
@@ -230,7 +230,17 @@ export function WatchTogetherCore({
   )
 
   // ── 控制栏显隐状态 ────────────────────────────────────
-  const [controlBarVisible, setControlBarVisible] = useState(true)
+  // ── 移动端检测：粗指针（触屏）或支持多点触控即视为移动端 ──
+  const isMobile = useMemo(
+    () =>
+      typeof window !== 'undefined' &&
+      (navigator.maxTouchPoints > 0 ||
+        window.matchMedia('(pointer: coarse)').matches),
+    []
+  )
+
+  // 控制栏可见性：移动端默认隐藏（触摸显示），桌面端默认显示
+  const [controlBarVisible, setControlBarVisible] = useState(!isMobile)
   const [controlBarHideMode, setControlBarHideMode] = useState(false)
   const controlBarCooldownRef = useRef<number>(0)
   const controlBarIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -271,14 +281,17 @@ export function WatchTogetherCore({
   }, [stageRef])
 
   // ── 控制栏显隐逻辑 ────────────────────────────────────
-  // 默认：鼠标 2s 内无移动即自动隐藏，暂停时不强制显示。
+  // 桌面端：鼠标 2s 内无移动即自动隐藏，暂停时不强制显示。
+  // 移动端：默认隐藏，手指触摸屏幕时显示，3s 后自动隐藏。
   // 开启“隐藏模式”后，点击按钮立即隐藏并进入 2s 冷却，冷却期间任何方式都无法显示，
-  // 冷却结束后仅当鼠标位于播放器底部时才显示。
+  // 冷却结束后仅当指针位于播放器底部时才显示（桌面端）/ 触摸即显示（移动端）。
   useEffect(() => {
     const stage = stageRef.current
     if (!stage) return
 
     const BOTTOM_HEIGHT = 80
+    // 移动端触摸显示后 3s 自动隐藏；桌面端鼠标空闲 2s 自动隐藏
+    const HIDE_DELAY = isMobile ? 3000 : 2000
 
     const clearIdleTimer = () => {
       if (controlBarIdleTimerRef.current) {
@@ -291,7 +304,7 @@ export function WatchTogetherCore({
       clearIdleTimer()
       controlBarIdleTimerRef.current = setTimeout(() => {
         setControlBarVisible(false)
-      }, 2000)
+      }, HIDE_DELAY)
     }
 
     const handlePointerMove = (e: PointerEvent) => {
@@ -305,36 +318,95 @@ export function WatchTogetherCore({
         const rect = stage.getBoundingClientRect()
         const inBottom = e.clientY >= rect.bottom - BOTTOM_HEIGHT
         setControlBarVisible(inBottom)
-      } else {
-        setControlBarVisible(true)
+        scheduleIdleHide()
+        return
+      }
+      setControlBarVisible(true)
+      // 触摸滑动：手指按住期间一直显示，不启动隐藏计时，松开后再计时
+      if (e.pointerType === 'touch') {
+        clearIdleTimer()
+        return
       }
       scheduleIdleHide()
     }
 
-    const handlePointerLeave = () => {
+    const handlePointerLeave = (e: PointerEvent) => {
+      // 触摸场景不因 pointerleave 隐藏：触摸的显隐由 pointerup / touch 事件控制
+      // （部分浏览器触摸时会派发 pointerleave，若在此隐藏会导致控制栏刚显示就消失）
+      if (e.pointerType === 'touch') return
       setControlBarVisible(false)
       clearIdleTimer()
     }
 
     const handlePointerDown = (e: PointerEvent) => {
-      // 点击/触摸同样视为一次交互，触发与移动相同的显隐规则
+      setControlBarVisible(true)
+      // 移动端触摸：按住期间一直显示，松开（pointerup）后再计时隐藏
+      if (e.pointerType === 'touch' && !controlBarHideMode) {
+        clearIdleTimer()
+        return
+      }
       handlePointerMove(e)
+    }
+
+    const handlePointerUp = (e: PointerEvent) => {
+      // 触摸松开：开始 3s 隐藏倒计时
+      if (e.pointerType === 'touch' && !controlBarHideMode) {
+        scheduleIdleHide()
+      }
+    }
+
+    // ── touch 事件兜底（旧设备 / 不支持 PointerEvent 的浏览器）────
+    const handleTouchStart = () => {
+      setControlBarVisible(true)
+      if (!controlBarHideMode) {
+        clearIdleTimer()
+      }
+    }
+    const handleTouchMove = () => {
+      // 触摸滑动：手指按住期间一直显示，不启动隐藏计时
+      setControlBarVisible(true)
+      if (!controlBarHideMode) {
+        clearIdleTimer()
+      }
+    }
+    const handleTouchEnd = () => {
+      // 触摸松开：开始 3s 隐藏倒计时
+      if (!controlBarHideMode) {
+        scheduleIdleHide()
+      }
     }
 
     stage.addEventListener('pointermove', handlePointerMove)
     stage.addEventListener('pointerleave', handlePointerLeave)
     stage.addEventListener('pointerdown', handlePointerDown)
+    // pointerup 绑到 window：确保手指在任意位置松开都能触发隐藏计时
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+    // touch 兜底
+    stage.addEventListener('touchstart', handleTouchStart, { passive: true })
+    stage.addEventListener('touchmove', handleTouchMove, { passive: true })
+    stage.addEventListener('touchend', handleTouchEnd, { passive: true })
+    stage.addEventListener('touchcancel', handleTouchEnd, { passive: true })
 
-    // 初始默认显示，随后按空闲逻辑自动隐藏
-    scheduleIdleHide()
+    if (!isMobile) {
+      // 桌面端：初始默认显示，随后按空闲逻辑自动隐藏
+      scheduleIdleHide()
+    }
+    // 移动端：初始已隐藏（见 useState 初始值），触摸屏幕时显示并 3s 后自动隐藏
 
     return () => {
       stage.removeEventListener('pointermove', handlePointerMove)
       stage.removeEventListener('pointerleave', handlePointerLeave)
       stage.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+      stage.removeEventListener('touchstart', handleTouchStart)
+      stage.removeEventListener('touchmove', handleTouchMove)
+      stage.removeEventListener('touchend', handleTouchEnd)
+      stage.removeEventListener('touchcancel', handleTouchEnd)
       clearIdleTimer()
     }
-  }, [stageRef, controlBarHideMode])
+  }, [stageRef, controlBarHideMode, isMobile])
 
   const handleToggleHideMode = useCallback(() => {
     setControlBarHideMode((prev) => {
@@ -642,10 +714,13 @@ export function WatchTogetherCore({
     const handleSeekResponse = (data: { accept: boolean; time?: number }) => {
       setSeekPending(false)
       if (data?.accept) {
-        addPlayerNotice(
-          `房主已同意跳转到 ${formatSeekTime(data.time ?? 0)}`,
-          'success'
-        )
+        // 自动通过模式下申请时已提示“已跳转”，此处不再重复提示
+        if (!autoApproveRef.current) {
+          addPlayerNotice(
+            `房主已同意跳转到 ${formatSeekTime(data.time ?? 0)}`,
+            'success'
+          )
+        }
       } else {
         addPlayerNotice('房主拒绝了您的跳转申请', 'info')
       }
@@ -653,7 +728,10 @@ export function WatchTogetherCore({
     const handlePauseResponse = (data: { accept: boolean }) => {
       setPausePending(false)
       if (data?.accept) {
-        addPlayerNotice('房主已同意暂停', 'success')
+        // 自动通过模式下申请时已提示“已暂停”，此处不再重复提示
+        if (!autoApproveRef.current) {
+          addPlayerNotice('房主已同意暂停', 'success')
+        }
       } else {
         addPlayerNotice('房主拒绝了您的暂停申请', 'info')
       }
@@ -661,7 +739,10 @@ export function WatchTogetherCore({
     const handlePlayResponse = (data: { accept: boolean }) => {
       setPlayPending(false)
       if (data?.accept) {
-        addPlayerNotice('房主已同意继续播放', 'success')
+        // 自动通过模式下申请时已提示“继续播放”，此处不再重复提示
+        if (!autoApproveRef.current) {
+          addPlayerNotice('房主已同意继续播放', 'success')
+        }
       } else {
         addPlayerNotice('房主拒绝了您的继续播放申请', 'info')
       }
@@ -824,7 +905,12 @@ export function WatchTogetherCore({
             setSeekPending(false)
             addPlayerNotice(response.message || '申请跳转失败', 'error')
           } else {
-            addPlayerNotice('已发送跳转申请，等待房主确认', 'info')
+            addPlayerNotice(
+              autoApproveRef.current
+                ? '已跳转'
+                : '已发送跳转申请，等待房主确认',
+              'info'
+            )
           }
         }
       )
@@ -843,7 +929,10 @@ export function WatchTogetherCore({
           setPausePending(false)
           addPlayerNotice(response.message || '申请暂停失败', 'error')
         } else {
-          addPlayerNotice('已发送暂停申请，等待房主确认', 'info')
+          addPlayerNotice(
+            autoApproveRef.current ? '已暂停' : '已发送暂停申请，等待房主确认',
+            'info'
+          )
         }
       }
     )
@@ -860,7 +949,12 @@ export function WatchTogetherCore({
           setPlayPending(false)
           addPlayerNotice(response.message || '申请继续播放失败', 'error')
         } else {
-          addPlayerNotice('已发送继续播放申请，等待房主确认', 'info')
+          addPlayerNotice(
+            autoApproveRef.current
+              ? '继续播放'
+              : '已发送继续播放申请，等待房主确认',
+            'info'
+          )
         }
       }
     )
@@ -1148,11 +1242,13 @@ export function WatchTogetherCore({
             <div
               key={notice.id}
               className={cn(
-                'pointer-events-auto animate-in slide-in-from-left-2 fade-in rounded-lg px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-md transition-all duration-300',
-                notice.type === 'success' && 'bg-green-500/80 text-white',
-                notice.type === 'error' && 'bg-red-500/80 text-white',
-                notice.type === 'info' && 'bg-black/60 text-white'
+                'pointer-events-auto animate-in slide-in-from-left-2 fade-in font-medium transition-all duration-300',
+                'text-white/50'
               )}
+              style={{
+                fontSize: 'clamp(9px, 1.1vw, 12px)',
+                textShadow: '0 1px 2px rgba(0, 0, 0, 0.8)',
+              }}
             >
               {notice.text}
             </div>
