@@ -465,10 +465,10 @@ function Show-Menu {
         Write-Host ""
         $choice = Read-Host "请输入编号 (0-9)"
         switch ($choice) {
-            '1' { Invoke-Start; Wait-MenuKey }
+            '1' { $script:Https = $false; Invoke-Start; Wait-MenuKey }
             '2' {
                 $boChoice = Read-Host "  请选择类型 (1=HTTP 2=HTTPS，直接回车默认 HTTP)"
-                if ($boChoice -eq '2') { $script:Https = $true }
+                if ($boChoice -eq '2') { $script:Https = $true } else { $script:Https = $false }
                 Invoke-Start -BackendOnly
                 Wait-MenuKey
             }

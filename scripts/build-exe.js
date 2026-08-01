@@ -82,6 +82,9 @@ function main() {
     JSON.stringify(entry),
     `--targets`, `node22-win-x64`,
     `--output`, JSON.stringify(OUTPUT_PATH),
+    // 禁用 v8 bytecode cache：保证 cross-compile 的产物在目标平台可运行
+    '--public',
+    '--public-packages', `"*"`,
     `-c`, JSON.stringify(path.join(ROOT, 'package.json')),
   ].join(' ');
 
