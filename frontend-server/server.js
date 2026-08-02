@@ -96,6 +96,33 @@ function parseTargetUrl(targetUrl) {
   };
 }
 
+/**
+ * Hop-by-hop 头部列表（RFC 2616 13.5.1）。
+ * 这些头部仅在单跳 TCP 连接中有意义，代理必须过滤，
+ * 否则会导致响应体损坏（尤其 NDJSON 流式响应）。
+ */
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailers',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+/** 过滤 hop-by-hop 头部 */
+function filterHopByHopHeaders(headers) {
+  const filtered = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
+      filtered[key] = value;
+    }
+  }
+  return filtered;
+}
+
 /** 创建 HTTP 代理请求 */
 function proxyRequest(req, res, targetUrl, pathPrefix) {
   const target = parseTargetUrl(targetUrl);
@@ -106,14 +133,16 @@ function proxyRequest(req, res, targetUrl, pathPrefix) {
     path: targetPath,
     method: req.method,
     headers: {
-      ...req.headers,
+      ...filterHopByHopHeaders(req.headers),
       host: `${target.hostname}:${target.port}`,
     },
     timeout: 120_000,
   };
 
   const proxyReq = http.request(options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    // 过滤响应中的 hop-by-hop 头部，防止 Transfer-Encoding 等头部冲突
+    // 导致 NDJSON 流式响应被浏览器解析失败
+    res.writeHead(proxyRes.statusCode, filterHopByHopHeaders(proxyRes.headers));
     proxyRes.pipe(res);
   });
 

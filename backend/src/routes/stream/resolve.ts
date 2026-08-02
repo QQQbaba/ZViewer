@@ -51,17 +51,18 @@ interface ResolveProgressMessage {
  * NDJSON 流式响应写入器。
  *
  * - Content-Type: application/x-ndjson，逐行写入 JSON；
- * - Connection: close：避免浏览器因 keep-alive 连接被服务端提前关闭而报 abort；
  * - X-Accel-Buffering: no：禁用 nginx 缓冲，实时推送解析进度；
  * - 每次写入后尝试 flush（compression 中间件存在时生效）。
+ *
+ * 注意：不显式设置 Connection / Transfer-Encoding 等 hop-by-hop 头部。
+ * 这些头部由 HTTP 服务器自动管理，显式设置会导致经 frontend-server 代理时
+ * 产生头部冲突，使浏览器无法正确解析 NDJSON 流式响应（MP4 直连功能失效）。
  */
 class NdjsonWriter {
   constructor(private readonly res: Response) {
     res.setHeader('Content-Type', 'application/x-ndjson');
     res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'close');
     res.setHeader('X-Accel-Buffering', 'no');
-    res.setHeader('Transfer-Encoding', 'chunked');
   }
 
   send(payload: ResolveProgressMessage): void {
