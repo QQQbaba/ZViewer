@@ -47,6 +47,7 @@ export function VoiceChatPanel({
     micVolume,
     monitorEnabled,
     bitrate,
+    audioLevels,
     join,
     leave,
     toggleMic,
@@ -191,6 +192,8 @@ export function VoiceChatPanel({
               {members.map((member) => {
                 const me = isMe(member.socketId)
                 const peerVolume = peerVolumes.get(member.socketId) ?? 1
+                const levelKey = me ? 'self' : member.socketId
+                const audioLevel = audioLevels.get(levelKey) ?? 0
                 return (
                   <div
                     key={member.socketId}
@@ -218,9 +221,21 @@ export function VoiceChatPanel({
                           <Users className="h-3 w-3" />
                         )}
                       </div>
-                      <span className="flex-1 truncate text-xs font-medium text-[var(--md-sys-color-on-surface)]">
+                      <span className="shrink-0 truncate text-xs font-medium text-[var(--md-sys-color-on-surface)]">
                         {me ? '我' : member.username || '观众'}
                       </span>
+                      {/* 横向实时音量条 */}
+                      <div className="flex h-1.5 flex-1 items-center overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container-high)]">
+                        <div
+                          className="h-full rounded-full transition-[width] duration-75"
+                          style={{
+                            width: `${Math.max(2, audioLevel * 100)}%`,
+                            backgroundColor: audioLevel > 0.05
+                              ? 'var(--md-sys-color-primary)'
+                              : 'var(--md-sys-color-outline)',
+                          }}
+                        />
+                      </div>
                       {!me && (
                         <span className="text-[10px] tabular-nums text-[var(--md-sys-color-on-surface-variant)]">
                           {peerLatencies.has(member.socketId)

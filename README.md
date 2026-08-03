@@ -24,7 +24,6 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
   </a>
 </p>
 
-
 ---
 
 ## 目录
@@ -32,12 +31,12 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 - [功能特性](#功能特性)
 - [整体架构](#整体架构)
 - [技术栈](#技术栈)
-- [项目结构](#项目结构)
 - [快速开始](#快速开始)
 - [一键启动脚本](#一键启动脚本)
 - [单文件 exe 版](#单文件-exe-版)
 - [HTTPS 与证书](#https-与证书)
 - [Docker 部署](#docker-部署)
+- [GitHub Actions 自动构建](#github-actions-自动构建)
 - [本地开发](#本地开发)
 - [环境变量](#环境变量)
 - [权限模型](#权限模型)
@@ -53,10 +52,6 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 
 ---
 
-可以来群组玩玩捏
-
-https://t.me/Zero_251
-
 ## 功能特性
 
 ### 一起看房间
@@ -65,6 +60,7 @@ https://t.me/Zero_251
 - 房主拥有播放控制权：播放、暂停、跳转、倍速。
 - 观众可申请控制，房主确认后执行。
 - 播放记忆：房主短暂断线后，由服务器继续广播当前状态。
+- 房主离线超时自动关房（10 分钟），期间观众可自由控制（需关闭自动审批模式）。
 
 ### 多源视频解析
 
@@ -91,7 +87,7 @@ https://t.me/Zero_251
 ### 主题系统
 
 - Material You (Monet) 动态主题，从壁纸提取色彩生成完整色板。
-- 明暗主题切换、自定义背景、玻璃拟态 UI、减少动效模式。
+- 明暗主题切换、自定义背景、玻璃拟态 UI、精简动画模式。
 
 ---
 
@@ -158,52 +154,16 @@ https://t.me/Zero_251
 - Node.js + TypeScript
 - Express 5 Web 框架
 - Socket.IO 实时通信
-- TypeORM + sql.js（wasm SQLite）数据持久化（可选 PostgreSQL）
+- TypeORM + sql.js（wasm SQLite）数据持久化
 - node-media-server 流媒体推送
-- bcryptjs 密码加密
 - JSON Web Token 鉴权
 
 ### 部署
 
-- Docker + Docker Compose
-- 跨平台一键启动脚本（源码版 PowerShell / Bash）
-- 单文件 exe 版（pkg 打包，Windows / Linux）
-
----
-
-## 项目结构
-
-```text
-ZViewer/
-├── frontend/                # 前端 (React + Vite)
-│   ├── src/
-│   │   ├── components/      # 通用 UI 组件
-│   │   ├── modules/         # 业务模块（房间/播放器/Bilibili/挂载源/后台…）
-│   │   ├── pages/           # 页面组件
-│   │   ├── store/           # Zustand 状态
-│   │   ├── hooks/           # 通用 Hooks
-│   │   └── lib/             # 工具库
-│   └── nginx.conf           # 生产 Nginx 配置
-├── backend/                 # 后端 (Express + TypeORM)
-│   └── src/                 # entities/routes/services/modules/middleware/utils
-├── frontend-server/         # 前端静态服务 + API 反代（零依赖，单文件 exe 用）
-├── scripts/
-│   ├── generate-cert.js     # 证书签发工具（自签 / Let's Encrypt 可信 CA）
-│   ├── acme-client.js       # ACME v2 HTTP-01 客户端（申请 Let's Encrypt 证书）
-│   └── test/                # 证书工具与启动脚本的本地 mock 测试
-├── packaging/               # 单文件版一键启动脚本模板
-│   ├── start-win.bat        # Windows 转发器（→ start-win.ps1）
-│   ├── start-win.ps1        # Windows 单文件版主逻辑（含交互菜单）
-│   └── start-linux.sh       # Linux 单文件版一键启动脚本
-├── dist/                # build-all 编译产物（win/linux）
-├── docker-compose.yml       # Docker 生产编排
-├── start-prod.bat           # 源码版 Windows 转发器（→ start-prod.ps1）
-├── start-prod.ps1           # 源码版 Windows 一键启动脚本（含交互菜单）
-├── start-prod.sh            # 源码版 Linux/macOS 一键启动脚本
-├── build-all.js             # 一键编译全部单文件 exe（可执行 build-all.bat）
-├── prepare-cli-build.ps1    # 准备 ZViewerCLI 构建源
-└── package.json             # npm workspaces 根配置
-```
+- 一键启动脚本（源码版 PowerShell / Bash，含交互菜单）
+- 单文件 exe 版（pkg 打包，Windows / Linux，零依赖）
+- Docker 镜像（Linux 单文件版，自动构建推送到 Docker Hub）
+- GitHub Actions 自动构建与发布
 
 ---
 
@@ -220,7 +180,7 @@ ZViewer/
 
 ### 方式一：源码版一键启动（推荐）
 
-项目根目录的 `start-prod` 脚本会自动检测并安装依赖、按需构建、启动服务，无需手动执行 `npm install` / `npm run build`。
+项目根目录的 `start-prod` 脚本会自动检测并安装依赖、按需构建、启动服务。
 
 **Windows**：双击 `start-prod.bat` 进入交互菜单，或使用命令：
 
@@ -229,44 +189,53 @@ ZViewer/
 .\start-prod.bat start        # 启动（HTTP 前后端）
 .\start-prod.bat backend      # 仅启动后端
 .\start-prod.bat stop         # 停止服务
-.\start-prod.bat restart      # 重启
 .\start-prod.bat status       # 查看状态
-.\start-prod.bat logs         # 查看后端日志
-.\start-prod.bat build        # 构建前后端
+.\start-prod.bat cert         # 签发 SSL 证书（交互选择类型）
+.\start-prod.bat https        # 签发证书 + HTTPS 启动
 ```
 
 **Linux / macOS**：
 
 ```bash
-./start-prod.sh               # 交互菜单（无参数默认进入）
+./start-prod.sh               # 交互菜单
 ./start-prod.sh start
-./start-prod.sh backend
 ./start-prod.sh stop
-./start-prod.sh restart
 ./start-prod.sh status
-./start-prod.sh logs
-./start-prod.sh build
 ```
 
 启动后访问：
 
 - 前端：http://localhost:4173
-- 后端 API：http://localhost:3333/api
-- 健康检查：http://localhost:3333/health
+- HTTPS 模式：https://localhost:3333
 
 ### 方式二：单文件 exe 版
 
-无需安装 Node.js / npm，直接运行编译好的可执行文件（见下文 [单文件 exe 版](#单文件-exe-版)）。
+无需安装 Node.js / npm，直接下载 [Releases](https://github.com/Zero-wyc/ZViewer/releases) 中的压缩包，解压后运行：
 
-### 方式三：Docker Compose
+```bash
+# Windows
+start.bat              # 交互菜单
+start.bat start        # 启动服务
 
-见下文 [Docker 部署](#docker-部署)。
+# Linux
+./start.sh             # 交互菜单
+./start.sh start       # 启动服务
+```
+
+### 方式三：Docker
+
+```bash
+docker pull zerowyc0721/zviewer:latest
+docker run -d -p 3333:3333 -v zviewer-data:/app/config zerowyc0721/zviewer:latest
+```
+
+访问 `https://localhost:3333`。
 
 ---
 
 ## 一键启动脚本
 
-源码版（`start-prod.*`）与单文件版（`packaging/start-*` → `dist/` 内的 `start.bat` / `start.sh`）功能一致，均提供：
+源码版（`start-prod.*`）与单文件版（`packaging/start-*`）功能一致，均提供交互菜单与命令行两种模式。
 
 ### 交互菜单
 
@@ -282,8 +251,9 @@ ZViewer/
   4) 重启服务
   5) 查看状态
   6) 查看日志
-  7) 一键签发 SSL 证书（单文件版） / 构建前后端（源码版）
-  8) HTTPS 启动（自动签发证书，单文件版）
+  7) 一键签发 SSL 证书
+  8) HTTPS 启动（自动签发证书）
+  9) 构建前后端（源码版）
   0) 退出
 ```
 
@@ -291,12 +261,12 @@ ZViewer/
 
 | 命令 | 说明 |
 |---|---|
-| `start` | 启动服务（HTTP 前后端；加 `-Https` / `--https` 使用 HTTPS） |
-| `backend` | 仅启动后端（HTTP；加 `-Https` / `--https` 使用 HTTPS，自动签发证书） |
-| `https [host]` | 签发证书后以 HTTPS 启动（单文件版，仅后端，后端统一提供前端页面） |
-| `cert [host]` | 一键签发 SSL 证书（单文件版，见 [HTTPS 与证书](#https-与证书)） |
+| `start` | 启动服务（HTTP 前后端；加 `-Https` 使用 HTTPS 单进程模式） |
+| `backend` | 仅启动后端（可选 HTTP/HTTPS，启动时交互选择） |
+| `cert [host]` | 签发 SSL 证书，host 缺省时交互选择类型 |
+| `https [host]` | 签发证书后以 HTTPS 启动（仅后端，后端统一提供前端页面） |
 | `stop` / `restart` | 停止 / 重启服务 |
-| `status` | 查看运行状态（PID、端口监听、证书/产物状态） |
+| `status` | 查看运行状态（PID、端口监听、证书状态） |
 | `logs [backend\|frontend]` | 查看日志（默认 backend） |
 | `build` | 构建前后端（源码版） |
 | `help` / `menu` | 帮助 / 交互菜单 |
@@ -305,13 +275,18 @@ ZViewer/
 
 端口固定，不支持自定义：
 
-- 后端：`.env` 中的 `PORT`，未设置时为 `3333`
-- 前端：`4173`（HTTP 模式）
+| 服务 | 端口 | 说明 |
+|---|---|---|
+| 后端 | 3333 | HTTP / HTTPS API |
+| 前端 | 4173 | HTTP 模式下的前端静态服务器 |
+| RTMP 推流 | 3334 | OBS 推流端口 |
+| HTTP-FLV 拉流 | 3335 | 直播流播放 |
 
-### 运行管理
+### 进程管理
 
-- 进程信息写入根目录 `.prod.pids.json`，`stop` 按 PID 停止并兜底清理占用端口。
+- 进程信息写入 `.prod.pids.json`，`stop` 按 PID 停止并兜底清理占用端口。
 - 日志写入 `log/backend.log`、`log/frontend.log`（及 `.err.log`）。
+- 启动后端后自动等待就绪（轮询端口），再启动前端，避免竞态。
 
 ---
 
@@ -321,10 +296,13 @@ ZViewer/
 
 ### 编译
 
-在源码目录执行（Windows 可用 `build-all.bat`）：
-
 ```bash
-npm run build:all        # 或 node build-all.js
+# 编译全部平台
+npm run build:all
+
+# 或指定平台
+node build-all.js --win         # 仅 Windows
+node build-all.js --linux        # 仅 Linux
 ```
 
 产物输出到 `dist/`：
@@ -342,8 +320,6 @@ dist/
 
 - **Windows**：双击 `start.bat`（交互菜单）或 `start.bat start`
 - **Linux**：`./start.sh`（交互菜单）或 `./start.sh start`
-
-单文件版额外提供证书相关命令：`cert`、`https`、`backend --https`（见下节）。
 
 ---
 
@@ -412,34 +388,83 @@ HTTPS 模式下后端同时提供前端静态页面，访问 `https://localhost:
 
 ## Docker 部署
 
-```bash
-# 1. 复制环境变量模板
-cp .env.example .env
-
-# 2. 修改 JWT 密钥（必须）
-# 编辑 .env，将 JWT_ACCESS_SECRET 和 JWT_REFRESH_SECRET 替换为强随机字符串
-
-# 3. 构建并启动
-docker compose up -d --build
-
-# 4. 查看日志
-docker compose logs -f
-```
-
-启动后访问：
-
-- 前端（Nginx）：http://localhost:80
-- 后端 API：http://localhost:3333/api
-- 健康检查：http://localhost:3333/health
-
-停止服务：
+### 使用 Docker Hub 镜像
 
 ```bash
-docker compose down          # 保留数据
-docker compose down -v       # 同时删除数据卷
+# 拉取镜像
+docker pull zerowyc0721/zviewer:latest
+
+# 启动容器
+docker run -d \
+  --name zviewer \
+  -p 3333:3333 \
+  -v zviewer-data:/app/config \
+  zerowyc0721/zviewer:latest
 ```
 
-> Docker 方式使用 Nginx 提供前端页面并反向代理后端，HTTPS 建议由 Nginx 终止 TLS（certbot + Let's Encrypt，详见 `frontend/nginx.conf` 注释）。
+### 自行构建
+
+```bash
+# 使用项目根目录的 Dockerfile.linux-single
+docker build -t zviewer -f Dockerfile.linux-single .
+
+# 或使用 docker compose
+docker compose -f docker-compose.linux-single.yml up -d
+```
+
+### 访问
+
+- **HTTPS**：`https://localhost:3333`
+- 首次启动自动签发 `localhost` 自签证书。
+
+### 容器管理
+
+```bash
+# 查看日志
+docker logs -f zviewer
+
+# 进入容器
+docker exec -it zviewer sh
+
+# 查看运行状态
+docker exec zviewer ./start.sh status
+
+# 签发域名证书
+docker exec zviewer ./zviewer-cert your-domain.com
+```
+
+### 数据持久化
+
+`/app/config` 目录挂载 volume，包含：
+
+| 路径 | 内容 |
+|---|---|
+| `/app/config/dev.sqlite` | 数据库 |
+| `/app/config/ssl/` | SSL 证书（自签或 Let's Encrypt） |
+| `/app/config/uploads/` | 用户上传文件 |
+
+---
+
+## GitHub Actions 自动构建
+
+每次 push 到 `main` 分支或打 tag（`v*`）时，自动完成：
+
+1. **构建 Linux 单文件版** → 上传 artifact + 推送到 Docker Hub（`zerowyc0721/zviewer`）
+2. **构建 Windows 单文件版** → 上传 artifact
+
+打 tag 时自动创建 GitHub Release，包含两个平台的压缩包。
+
+### 手动触发
+
+在 GitHub 仓库 → Actions → "Build Single-File (Windows + Linux)" → "Run workflow"。
+
+### 构建产物
+
+| 平台 | 压缩包 | 说明 |
+|---|---|---|
+| Linux | `zviewer-linux-x64.tar.gz` | 含 `zviewer-backend`、`zviewer-frontend`、`zviewer-cert`、`start.sh` |
+| Windows | `zviewer-windows-x64.zip` | 含 `zviewer-backend.exe`、`zviewer-frontend.exe`、`zviewer-cert.exe`、`start.bat`、`start.ps1` |
+| Docker | `zerowyc0721/zviewer:latest` | Linux 单文件版的 Docker 镜像，自动推送到 Docker Hub |
 
 ---
 
@@ -474,8 +499,7 @@ npm run dev:frontend
 
 | 变量 | 说明 | 默认值 |
 |---|---|---|
-| `PORT` | 后端服务端口（一键启动脚本亦读取此值） | `3333` |
-| `HOST` | 监听地址，`::` 表示 IPv4/IPv6 双栈 | `::` |
+| `PORT` | 后端服务端口 | `3333` |
 | `NODE_ENV` | 运行环境 | `production` |
 | `DATABASE_URL` | SQLite 文件路径或 PostgreSQL 连接串 | `<config>/dev.sqlite` |
 | `CONFIG_DIR` | 数据根目录 | `<project-root>/config` |
@@ -534,17 +558,11 @@ npm run dev:frontend
 
 ## ZViewerCLI 本地代理
 
-ZViewerCLI 是一个可选的本地代理客户端，用于解决浏览器端无法直接使用用户 Bilibili Cookie 与高画质地址的问题：
+[ZViewerCLI](https://github.com/Zero-wyc/ZViewerCLI) 是一个可选的本地代理客户端，用于解决浏览器端无法直接使用用户 Bilibili Cookie 与高画质地址的问题：
 
 - 使用用户本地 Cookie 解析 Bilibili 视频，获取大会员等高画质地址。
 - 在本地代理视频流请求，注入正确的 Referer/Origin/User-Agent，绕过 CDN 防盗链与 CORS 限制。
 - 通过 WebSocket 向房间注册，前端自动检测并使用本地代理。
-
-### 使用方式
-
-1. 在本地运行 ZViewerCLI（详见 [ZViewerCLI 项目](https://github.com/Zero-wyc/ZViewerCLI)）。
-2. 在房间中开启「CLI 本地高画质代理」开关。
-3. 播放器将自动通过本地 CLI 加载视频。
 
 ---
 
@@ -552,12 +570,12 @@ ZViewerCLI 是一个可选的本地代理客户端，用于解决浏览器端无
 
 ### 自签证书浏览器提示"不安全"
 
-`localhost` 与公网 IP 使用自签证书，浏览器会提示"证书颁发机构不受信任"（`NET::ERR_CERT_AUTHORITY_INVALID`）。解决方法：
+`localhost` 与公网 IP 使用自签证书，浏览器会提示"证书颁发机构不受信任"。解决方法：
 
 - 将 `config/ssl/cert.pem` 导入客户端"受信任的根证书颁发机构"；或
-- 使用域名并通过 Let's Encrypt 申请可信证书（见 [HTTPS 与证书](#https-与证书)）。
+- 使用域名并通过 Let's Encrypt 申请可信证书。
 
-自签证书与地址不匹配（`NET::ERR_CERT_COMMON_NAME_INVALID`）时，说明访问地址不在证书 SAN 中——请为实际访问的域名/IP 重新签发。
+自签证书与地址不匹配时，说明访问地址不在证书 SAN 中——请为实际访问的域名/IP 重新签发。
 
 ### 域名申请 Let's Encrypt 证书失败
 
@@ -567,13 +585,9 @@ ZViewerCLI 是一个可选的本地代理客户端，用于解决浏览器端无
 - 80 端口是否空闲、防火墙/安全组是否放行；
 - 是否触发速率限制（可用 `--staging` 测试环境验证流程）。
 
-### SQLite 数据库说明
-
-后端使用 TypeORM + sql.js（wasm 版 SQLite）持久化，纯 JS 实现、无原生模块——单文件 exe 版可在任意平台直接运行，无需编译。数据库文件为标准 SQLite 格式（`config/dev.sqlite`），可用常规 SQLite 工具查看。
-
 ### WebSocket 连接失败
 
-确认 Nginx 已正确配置 WebSocket 升级头：
+确认反向代理（Nginx 等）已正确配置 WebSocket 升级头：
 
 ```nginx
 proxy_http_version 1.1;
@@ -585,22 +599,9 @@ proxy_set_header Connection "upgrade";
 
 WebRTC 的 `getUserMedia` 要求 HTTPS 访问。生产环境请配置 SSL 证书。若双方处于严格 NAT 之后，可能需要部署 TURN 服务器（如 coturn）。
 
-### CORS 报错
+### 数据库说明
 
-生产环境将 `CORS_ORIGIN` 设置为实际前端域名而非 `*`，修改后重新构建后端：
-
-```bash
-docker compose up -d --build backend
-```
-
-### 数据库数据丢失
-
-Docker 部署时 SQLite 位于 `/app/config/dev.sqlite`，通过 `backend-data` 命名卷持久化。检查卷是否正常挂载：
-
-```bash
-docker volume ls
-docker inspect zviewer_backend-data
-```
+后端使用 TypeORM + sql.js（wasm 版 SQLite）持久化，纯 JS 实现、无原生模块——单文件 exe 版可在任意平台直接运行，无需编译。数据库文件为标准 SQLite 格式（`config/dev.sqlite`），可用常规 SQLite 工具查看。
 
 ### Bilibili 解析失败
 

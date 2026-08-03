@@ -221,8 +221,8 @@ router.post(
 /** 登出：清空 auth cookie。前端调用此接口后浏览器立即清除 token。 */
 router.post(
   '/logout',
-  (_req: import('express').Request, res: import('express').Response): void => {
-    clearAuthCookies(res);
+  (req: import('express').Request, res: import('express').Response): void => {
+    clearAuthCookies(req, res);
     res.json({ success: true, message: '已退出登录' });
   },
 );

@@ -185,14 +185,6 @@ function HomePage() {
 
               {isAdmin && (
                 <Fade delay={360} className="w-full">
-                  <div
-                    className="w-full my-1"
-                    style={{
-                      height: '1px',
-                      backgroundColor:
-                        'color-mix(in srgb, var(--md-sys-color-outline) 40%, transparent)',
-                    }}
-                  />
                   <Button
                     variant="secondary"
                     size="lg"
