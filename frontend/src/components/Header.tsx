@@ -11,6 +11,7 @@ import {
   SlidersHorizontal,
   Shield,
   ShieldAlert,
+  Info,
   UserCircle,
   LayoutDashboard,
   ChevronDown,
@@ -870,34 +871,90 @@ export function Header() {
         }
       >
         <div className="space-y-4">
+          <div
+            className="rounded-lg p-3"
+            style={{
+              backgroundColor:
+                'var(--md-sys-color-surface-container-high)',
+            }}
+          >
+            <div className="flex items-start gap-2">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--md-sys-color-primary)]" />
+              <div className="space-y-1.5 text-xs leading-relaxed text-[var(--md-sys-color-on-surface-variant)]">
+                <p className="font-medium text-[var(--md-sys-color-on-surface)]">
+                  只需填写一个域名即可
+                </p>
+                <p>
+                  填写你的服务器域名（例如{' '}
+                  <code className="rounded bg-[var(--md-sys-color-surface-container)] px-1 py-0.5">
+                    example.com
+                  </code>
+                  ），其余三项留空将自动跟随。请确保已在服务器上配置反向代理（Nginx
+                  / Caddy），将以下路径统一转发到后端服务：
+                </p>
+                <ul className="ml-1 list-inside list-disc space-y-0.5">
+                  <li>
+                    <code className="rounded bg-[var(--md-sys-color-surface-container)] px-1 py-0.5">
+                      /api/*
+                    </code>{' '}
+                    → REST API（端口 3333）
+                  </li>
+                  <li>
+                    <code className="rounded bg-[var(--md-sys-color-surface-container)] px-1 py-0.5">
+                      /socket.io/*
+                    </code>{' '}
+                    → WebSocket 信令（端口 3333）
+                  </li>
+                  <li>
+                    <code className="rounded bg-[var(--md-sys-color-surface-container)] px-1 py-0.5">
+                      /live/*
+                    </code>{' '}
+                    → HTTP-FLV 拉流（端口 3335）
+                  </li>
+                </ul>
+                <p>
+                  反向代理需启用 HTTPS（SSL 证书），否则 HTTPS
+                  页面下的连接会被浏览器阻止。
+                </p>
+              </div>
+            </div>
+          </div>
+
           <Input
-            label="REST API 地址"
+            label="服务器域名"
             value={customApiUrl}
             onChange={(e) => setCustomApiUrlState(e.target.value)}
-            placeholder="例如: http://example.com:3000（可省略 http://）"
+            placeholder="例如: example.com"
             size="md"
           />
-          <Input
-            label="WebSocket / 信令地址（留空则跟随 API 地址）"
-            value={customSocketUrl}
-            onChange={(e) => setCustomSocketUrlState(e.target.value)}
-            placeholder="例如: http://example.com:3000（可省略 http://）"
-            size="md"
-          />
-          <Input
-            label="HTTP-FLV 拉流基础地址（留空则按页面协议自动推断）"
-            value={customFlvBaseUrl}
-            onChange={(e) => setCustomFlvBaseUrlState(e.target.value)}
-            placeholder="例如: http://example.com:3335 或 /live"
-            size="md"
-          />
-          <Input
-            label="RTMP 推流端口（留空则使用默认 3334）"
-            value={customRtmpPort}
-            onChange={(e) => setCustomRtmpPortState(e.target.value)}
-            placeholder="例如: 3334"
-            size="md"
-          />
+          <details className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
+            <summary className="cursor-pointer select-none font-medium">
+              高级设置（通常无需修改）
+            </summary>
+            <div className="mt-3 space-y-3">
+              <Input
+                label="WebSocket / 信令地址（留空则跟随上方域名）"
+                value={customSocketUrl}
+                onChange={(e) => setCustomSocketUrlState(e.target.value)}
+                placeholder="留空即可"
+                size="md"
+              />
+              <Input
+                label="HTTP-FLV 拉流基础地址（留空则自动推断）"
+                value={customFlvBaseUrl}
+                onChange={(e) => setCustomFlvBaseUrlState(e.target.value)}
+                placeholder="留空即可"
+                size="md"
+              />
+              <Input
+                label="RTMP 推流端口（留空则使用默认 3334）"
+                value={customRtmpPort}
+                onChange={(e) => setCustomRtmpPortState(e.target.value)}
+                placeholder="留空即可"
+                size="md"
+              />
+            </div>
+          </details>
           <div className="space-y-1 text-xs text-[var(--md-sys-color-on-surface-variant)]">
             <p>
               当前 API 地址:{' '}
