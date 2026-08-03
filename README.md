@@ -238,10 +238,45 @@ docker run -d \
 ```bash
 # 构建镜像
 docker build -t zviewer -f Dockerfile.linux-single .
-
-# 使用 docker compose
-docker compose -f docker-compose.linux-single.yml up -d
 ```
+
+### Docker Compose
+
+项目已包含 `docker-compose.linux-single.yml`，可直接使用：
+
+```bash
+# 启动（后台运行）
+docker compose -f docker-compose.linux-single.yml up -d
+
+# 查看日志
+docker compose -f docker-compose.linux-single.yml logs -f
+
+# 停止
+docker compose -f docker-compose.linux-single.yml down
+```
+
+compose 文件内容参考：
+
+```yaml
+services:
+  zviewer:
+    build:
+      context: .
+      dockerfile: Dockerfile.linux-single
+    ports:
+      - "3333:3333"   # 后端 API + WebSocket
+      - "4173:4173"   # 前端页面
+      - "3334:3334"   # RTMP 推流 (OBS)
+      - "3335:3335"   # HTTP-FLV 拉流
+    volumes:
+      - zviewer-data:/app/config
+    restart: unless-stopped
+
+volumes:
+  zviewer-data:
+```
+
+如需使用 Docker Hub 镜像而非本地构建，将 `build` 块替换为 `image: zerowyc0721/zviewer:latest` 即可。
 
 ### 访问
 
