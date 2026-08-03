@@ -46,6 +46,7 @@ jobs:
         # - tag 推送 (v*)：用 tag 名作为版本号（如 1.0.0）
         # - main 分支推送：用 0.0.0-dev.<sha前7位> 作为版本号
         # - 手动触发：用 0.0.0-manual 作为版本号
+        shell: bash
         run: |
           if [ "${GITHUB_REF#refs/tags/}" != "${GITHUB_REF}" ]; then
             VERSION="${GITHUB_REF#refs/tags/v}"

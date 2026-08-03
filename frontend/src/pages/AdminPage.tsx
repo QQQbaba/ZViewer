@@ -127,6 +127,9 @@ export default function AdminPage() {
   const [updateLoading, setUpdateLoading] = useState(false)
   const [applyLoading, setApplyLoading] = useState(false)
   const [uploadLoading, setUploadLoading] = useState(false)
+  const [includePrerelease, setIncludePrerelease] = useState(
+    () => localStorage.getItem('update-include-prerelease') === 'true'
+  )
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const authHeaders = {
@@ -215,9 +218,12 @@ export default function AdminPage() {
   const checkUpdate = async () => {
     setUpdateLoading(true)
     try {
-      const res = await apiFetch('/api/system/update/check', {
-        headers: authHeaders,
-      })
+      const res = await apiFetch(
+        `/api/system/update/check?includePrerelease=${includePrerelease}`,
+        {
+          headers: authHeaders,
+        }
+      )
       const data = (await res.json()) as {
         success: boolean
         info?: UpdateInfo
@@ -248,10 +254,13 @@ export default function AdminPage() {
   const handleApplyUpdate = async () => {
     setApplyLoading(true)
     try {
-      const res = await apiFetch('/api/system/update/apply', {
-        method: 'POST',
-        headers: authHeaders,
-      })
+      const res = await apiFetch(
+        `/api/system/update/apply?includePrerelease=${includePrerelease}`,
+        {
+          method: 'POST',
+          headers: authHeaders,
+        }
+      )
       const data = (await res.json()) as {
         success: boolean
         message?: string
@@ -1234,6 +1243,24 @@ export default function AdminPage() {
                   版本更新
                 </Title>
                 <div className="glass-card mb-6 p-4">
+                  <div className="flex items-center justify-between pb-3 mb-3 border-b border-[var(--md-sys-color-outline-variant)]">
+                    <div className="flex-1 min-w-0 pr-3">
+                      <Text className="text-sm font-medium">接收预发布版本更新</Text>
+                      <Text type="secondary" className="block text-xs mt-0.5">
+                        开启后可更新到预发布版本，关闭则仅在正式版之间更新
+                      </Text>
+                    </div>
+                    <Switch
+                      checked={includePrerelease}
+                      onChange={(e) => {
+                        setIncludePrerelease(e.target.checked)
+                        localStorage.setItem(
+                          'update-include-prerelease',
+                          String(e.target.checked)
+                        )
+                      }}
+                    />
+                  </div>
                   {updateLoading ? (
                     <div className="py-4">
                       <Spinner tip="检查更新中..." size={24} />
