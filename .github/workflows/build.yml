@@ -31,13 +31,33 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
+
+      - name: Inject version
+        # 根据触发方式注入版本号：
+        # - tag 推送 (v*)：用 tag 名作为版本号（如 1.0.0）
+        # - main 分支推送：用 0.0.0-dev.<sha前7位> 作为版本号
+        # - 手动触发：用 0.0.0-manual 作为版本号
+        run: |
+          if [ "${GITHUB_REF#refs/tags/}" != "${GITHUB_REF}" ]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          elif [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            VERSION="0.0.0-dev.${GITHUB_SHA:0:7}"
+          else
+            VERSION="0.0.0-manual"
+          fi
+          echo "Injecting version: $VERSION"
+          node -e "const fs=require('fs');const p=require('./package.json');p.version='$VERSION';fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+          # 同步更新 backend/package.json
+          node -e "const fs=require('fs');const p=require('./backend/package.json');p.version='$VERSION';fs.writeFileSync('./backend/package.json',JSON.stringify(p,null,2)+'\n')"
 
       - name: Install dependencies
         run: npm ci
@@ -58,7 +78,7 @@ jobs:
 
       # 先上传 artifact，确保即使后续 Docker 步骤失败产物也不会丢失
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact-name }}
           path: ${{ matrix.artifact-name }}${{ matrix.ext }}
@@ -107,7 +127,7 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: 'zviewer-*'
           merge-multiple: true
@@ -118,7 +138,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create prerelease (latest)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
           name: Latest Build (main)
@@ -148,13 +168,13 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: 'zviewer-*'
           merge-multiple: true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             zviewer-linux-x64.tar.gz

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Users,
@@ -13,6 +13,7 @@ import {
   Settings,
   Download,
   UserCheck,
+  Upload,
 } from 'lucide-react'
 import { PageBackButton } from '@/components/PageBackButton'
 import { Button } from '@/components/ui/Button'
@@ -30,7 +31,7 @@ import { AniSubsGithubBrowser } from '@/modules/admin/components/AniSubsGithubBr
 import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, getApiUrl } from '@/lib/api'
 
 interface AdminUser {
   id: number
@@ -58,9 +59,13 @@ interface UpdateInfo {
   currentVersion: string
   remoteVersion: string
   hasUpdate: boolean
-  commitMessage: string
-  commitUrl: string
+  releaseNotes: string
+  releaseUrl: string
   publishedAt: string
+  downloadUrl: string
+  isPrerelease: boolean
+  assetName: string
+  assetSize: number
 }
 
 type RegistrationMode = 'open' | 'approval' | 'closed'
@@ -121,6 +126,8 @@ export default function AdminPage() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateLoading, setUpdateLoading] = useState(false)
   const [applyLoading, setApplyLoading] = useState(false)
+  const [uploadLoading, setUploadLoading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const authHeaders = {
     'Content-Type': 'application/json',
@@ -219,7 +226,11 @@ export default function AdminPage() {
       if (data.success && data.info) {
         setUpdateInfo(data.info)
         if (data.info.hasUpdate) {
-          message.info('发现新版本')
+          message.info(
+            data.info.isPrerelease
+              ? '发现新预发布版本'
+              : '发现新版本'
+          )
         } else {
           message.success('当前已是最新版本')
         }
@@ -255,6 +266,90 @@ export default function AdminPage() {
       message.error('更新失败')
     } finally {
       setApplyLoading(false)
+    }
+  }
+
+  const handleFileUpload = async (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    // 验证文件类型
+    const lowerName = file.name.toLowerCase()
+    if (!lowerName.endsWith('.zip') && !lowerName.endsWith('.tar.gz')) {
+      message.error('仅支持 .zip 或 .tar.gz 格式的压缩包')
+      event.target.value = ''
+      return
+    }
+
+    setUploadLoading(true)
+    try {
+      const apiUrl = getApiUrl()
+      const res = await fetch(
+        `${apiUrl}/api/system/update/upload?filename=${encodeURIComponent(file.name)}`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': lowerName.endsWith('.tar.gz')
+              ? 'application/gzip'
+              : 'application/zip',
+          },
+          body: file,
+        }
+      )
+      // 401/403 处理：尝试 refresh
+      if (res.status === 401 || res.status === 403) {
+        const refreshRes = await fetch(`${apiUrl}/api/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+        })
+        if (refreshRes.ok) {
+          // 重试上传
+          const retryRes = await fetch(
+            `${apiUrl}/api/system/update/upload?filename=${encodeURIComponent(file.name)}`,
+            {
+              method: 'POST',
+              credentials: 'include',
+              headers: {
+                'Content-Type': lowerName.endsWith('.tar.gz')
+                  ? 'application/gzip'
+                  : 'application/zip',
+              },
+              body: file,
+            }
+          )
+          const retryData = (await retryRes.json()) as {
+            success: boolean
+            message?: string
+          }
+          if (retryData.success) {
+            message.success(retryData.message ?? '更新已触发')
+          } else {
+            message.error(retryData.message ?? '上传更新失败')
+          }
+        } else {
+          message.error('登录已过期，请重新登录后再试')
+        }
+      } else {
+        const data = (await res.json()) as {
+          success: boolean
+          message?: string
+        }
+        if (data.success) {
+          message.success(data.message ?? '更新已触发')
+        } else {
+          message.error(data.message ?? '上传更新失败')
+        }
+      }
+    } catch (err) {
+      console.error('[AdminPage] upload update error:', err)
+      message.error('上传更新失败')
+    } finally {
+      setUploadLoading(false)
+      event.target.value = ''
     }
   }
 
@@ -1144,35 +1239,54 @@ export default function AdminPage() {
                       <Spinner tip="检查更新中..." size={24} />
                     </div>
                   ) : updateInfo ? (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <Text className="text-sm">
                           当前版本：
                           <span className="font-mono text-[var(--md-sys-color-on-surface-variant)]">
-                            {updateInfo.currentVersion.slice(0, 7)}
+                            {updateInfo.currentVersion}
                           </span>
                         </Text>
                         <Text className="text-sm">
                           远程版本：
                           <span className="font-mono text-[var(--md-sys-color-on-surface-variant)]">
-                            {updateInfo.remoteVersion.slice(0, 7)}
+                            {updateInfo.remoteVersion}
                           </span>
                         </Text>
                       </div>
+                      {updateInfo.isPrerelease && (
+                        <div className="inline-flex rounded-full bg-[var(--md-sys-color-tertiary-container)] px-2 py-0.5">
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--md-sys-color-on-tertiary-container)]">
+                            预发布版本
+                          </span>
+                        </div>
+                      )}
                       {updateInfo.publishedAt && (
                         <Text type="secondary" className="text-xs">
-                          提交时间：
+                          发布时间：
                           {new Date(updateInfo.publishedAt).toLocaleString(
                             'zh-CN'
                           )}
                         </Text>
                       )}
-                      {updateInfo.commitMessage && (
-                        <Text className="text-xs leading-relaxed">
-                          {updateInfo.commitMessage.split('\n')[0]}
+                      {updateInfo.assetSize > 0 && (
+                        <Text type="secondary" className="text-xs">
+                          构建产物：{updateInfo.assetName} (
+                          {(
+                            updateInfo.assetSize /
+                            (1024 * 1024)
+                          ).toFixed(1)}
+                          MB)
                         </Text>
                       )}
-                      <div className="flex items-center gap-2 pt-2">
+                      {updateInfo.releaseNotes && (
+                        <div className="max-h-32 overflow-y-auto rounded-[var(--md-sys-radius-small)] bg-[var(--md-sys-color-surface-container-high)] p-2">
+                          <Text className="whitespace-pre-wrap text-xs leading-relaxed">
+                            {updateInfo.releaseNotes.split('\n').slice(0, 10).join('\n')}
+                          </Text>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
                         <Button
                           variant="primary"
                           size="sm"
@@ -1191,31 +1305,91 @@ export default function AdminPage() {
                         >
                           重新检测
                         </Button>
-                        {updateInfo.commitUrl && (
+                        {updateInfo.releaseUrl && (
                           <a
-                            href={updateInfo.commitUrl}
+                            href={updateInfo.releaseUrl}
                             target="_blank"
                             rel="noreferrer"
                             className="text-xs text-[var(--md-sys-color-primary)] hover:underline"
                           >
-                            查看提交
+                            查看发布
                           </a>
                         )}
                       </div>
+                      {/* 分割线 */}
+                      <div className="my-2 border-t border-[var(--md-sys-color-outline-variant)]" />
+                      {/* 手动导入压缩包 */}
+                      <div className="space-y-2">
+                        <Text className="text-xs font-medium text-[var(--md-sys-color-on-surface-variant)]">
+                          手动导入更新包
+                        </Text>
+                        <div className="flex items-center gap-2">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".zip,.tar.gz"
+                            onChange={handleFileUpload}
+                            className="hidden"
+                          />
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={<Upload className="h-4 w-4" />}
+                            onClick={() => fileInputRef.current?.click()}
+                            loading={uploadLoading}
+                            disabled={uploadLoading}
+                          >
+                            选择压缩包
+                          </Button>
+                          <Text type="secondary" className="text-xs">
+                            支持 .zip / .tar.gz 格式
+                          </Text>
+                        </div>
+                      </div>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-between py-2">
-                      <Text type="secondary" className="text-sm">
-                        未获取版本信息
-                      </Text>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={checkUpdate}
-                        disabled={updateLoading}
-                      >
-                        检查更新
-                      </Button>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between py-2">
+                        <Text type="secondary" className="text-sm">
+                          未获取版本信息
+                        </Text>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={checkUpdate}
+                          disabled={updateLoading}
+                        >
+                          检查更新
+                        </Button>
+                      </div>
+                      <div className="my-2 border-t border-[var(--md-sys-color-outline-variant)]" />
+                      <div className="space-y-2">
+                        <Text className="text-xs font-medium text-[var(--md-sys-color-on-surface-variant)]">
+                          手动导入更新包
+                        </Text>
+                        <div className="flex items-center gap-2">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".zip,.tar.gz"
+                            onChange={handleFileUpload}
+                            className="hidden"
+                          />
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={<Upload className="h-4 w-4" />}
+                            onClick={() => fileInputRef.current?.click()}
+                            loading={uploadLoading}
+                            disabled={uploadLoading}
+                          >
+                            选择压缩包
+                          </Button>
+                          <Text type="secondary" className="text-xs">
+                            支持 .zip / .tar.gz 格式
+                          </Text>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
