@@ -1,8 +1,8 @@
 # ZViewer
 
-> 多人同步追番、观影与远程共享平台。
+> 多人同步观影、追番与远程共享平台。
 
-ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影。房主控制播放进度，观众实时跟随；支持 Bilibili、WebDAV、FTP、OpenList、MP4 直链等多种视频源，并内置屏幕共享、弹幕、评论等互动能力。
+ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影。房主控制播放进度，观众实时跟随；支持 Bilibili、WebDAV、FTP、OpenList、MP4 直链等多种视频源，并内置屏幕共享、弹幕、评论、语音聊天等互动能力。
 
 <p align="left">
   <a href="LICENSE">
@@ -19,9 +19,6 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
   <a href="https://t.me/Zero_251">
     <img src="https://img.shields.io/badge/Telegram-26A5E4?style=flat-square&logo=telegram&logoColor=white" alt="Telegram">
   </a>
-  <a href="https://qm.qq.com/q/jOQUoISESs">
-    <img src="https://img.shields.io/badge/QQ-12B7F5?style=flat-square&logo=tencentqq&logoColor=white" alt="QQ">
-  </a>
 </p>
 
 ---
@@ -29,11 +26,9 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 ## 目录
 
 - [功能特性](#功能特性)
-- [整体架构](#整体架构)
-- [技术栈](#技术栈)
 - [快速开始](#快速开始)
-- [一键启动脚本](#一键启动脚本)
-- [单文件 exe 版](#单文件-exe-版)
+- [部署方式](#部署方式)
+- [端口说明](#端口说明)
 - [HTTPS 与证书](#https-与证书)
 - [Docker 部署](#docker-部署)
 - [GitHub Actions 自动构建](#github-actions-自动构建)
@@ -46,21 +41,14 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 
 ---
 
-| ![image-20260730001949027](https://github.cdn.zero251.xyz/Zero-wyc/Image/main/All/20260730001949577.webp) | ![image-20260730002020513](https://github.cdn.zero251.xyz/Zero-wyc/Image/main/All/20260730002021032.webp) |
-| ------------------------------------------------------------ | ------------------------------------------------------------ |
-| ![image-20260730002033267](https://github.cdn.zero251.xyz/Zero-wyc/Image/main/All/20260730002033753.webp) | ![image-20260730002058938](https://github.cdn.zero251.xyz/Zero-wyc/Image/main/All/20260730002059371.webp) |
-
----
-
 ## 功能特性
 
 ### 一起看房间
 
 - 创建或加入房间，与好友同步观看。
-- 房主拥有播放控制权：播放、暂停、跳转、倍速。
-- 观众可申请控制，房主确认后执行。
-- 播放记忆：房主短暂断线后，由服务器继续广播当前状态。
-- 房主离线超时自动关房（10 分钟），期间观众可自由控制（需关闭自动审批模式）。
+- 房主拥有播放控制权：播放、暂停、跳转、倍速。观众可申请控制，房主确认后执行。
+- 播放记忆：房主短暂断线后，由服务器继续广播当前状态，观众无需中断观看。
+- 房主离线超时自动关房（10 分钟），期间观众可自由控制。
 
 ### 多源视频解析
 
@@ -74,10 +62,10 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 
 ### 实时互动
 
-- 评论面板：房间内实时收发文字评论。
-- 弹幕系统：支持 Bilibili 官方弹幕、DandanPlay 弹幕、自定义弹幕轨道。
+- 评论面板与弹幕系统：支持 Bilibili 官方弹幕、DandanPlay 弹幕、自定义弹幕轨道。
 - 播放状态同步：房主操作实时同步给所有观众。
-- 观众申请：观众可申请跳转进度或暂停。
+- 观众申请：观众可申请跳转进度或暂停，房主在播放器左上角查看通知。
+- 语音聊天：房主可配置语音比特率（32/96/128/192 kbps），观众实时收听。
 
 ### 屏幕共享与推流
 
@@ -91,106 +79,22 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 
 ---
 
-## 整体架构
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                         用户浏览器                               │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │  React 前端   │  │ Socket.IO    │  │  WebRTC 屏幕共享      │  │
-│  │  播放器引擎   │  │ 实时状态同步  │  │  P2P 数据传输         │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
-└─────────┼─────────────────┼─────────────────────┼──────────────┘
-          │                 │                     │
-          │ HTTP / WS       │ Socket.IO           │ Signaling
-          ▼                 ▼                     ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         ZViewer 后端                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ Express API  │  │ Socket.IO    │  │ TypeORM + sql.js     │  │
-│  │ 路由层        │  │ 事件处理器    │  │ （wasm SQLite）持久化 │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
-│         │                 │                     │              │
-│  ┌──────▼───────┐  ┌──────▼───────┐  ┌──────────▼───────────┐  │
-│  │ Bilibili 解析 │  │ 房间/同步播放 │  │ 挂载源 (WebDAV/FTP/  │  │
-│  │ 弹幕/评论    │  │ 观众管理     │  │ OpenList/ani-subs)   │  │
-│  └──────────────┘  └──────────────┘  └──────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-          ▲
-          │ WebSocket + HTTP API
-          │
-┌─────────────────────────────────────────────────────────────────┐
-│                     ZViewerCLI（可选本地代理）                    │
-│  本地 Go 服务，使用用户自己的 Bilibili Cookie 解析高画质地址，      │
-│  并代理视频流请求，绕过浏览器 CORS 与 CDN 防盗链限制。             │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-核心数据流：
-
-1. 房主在房间中选择视频源，后端解析出真实播放地址。
-2. 房主播放器加载视频，并将播放状态通过 Socket.IO 广播到房间。
-3. 观众前端收到状态后，同步加载相同视频，播放器根据房主心跳不断校准进度。
-4. 若启用 ZViewerCLI，视频解析与流代理由本地 CLI 完成，后端仅做房间状态同步。
-
----
-
-## 技术栈
-
-### 前端
-
-- React 18 + TypeScript
-- Vite 8 构建工具
-- Tailwind CSS 原子化样式
-- Zustand 状态管理
-- Socket.IO Client 实时通信
-- React Router v6 路由
-- Material Color Utilities 主题色彩生成
-- dash.js / flv.js / hls.js / ArtPlayer 播放器引擎
-- danmaku 弹幕引擎
-
-### 后端
-
-- Node.js + TypeScript
-- Express 5 Web 框架
-- Socket.IO 实时通信
-- TypeORM + sql.js（wasm SQLite）数据持久化
-- node-media-server 流媒体推送
-- JSON Web Token 鉴权
-
-### 部署
-
-- 一键启动脚本（源码版 PowerShell / Bash，含交互菜单）
-- 单文件 exe 版（pkg 打包，Windows / Linux，零依赖）
-- Docker 镜像（Linux 单文件版，自动构建推送到 Docker Hub）
-- GitHub Actions 自动构建与发布
-
----
-
 ## 快速开始
 
-### 默认管理员
+系统首次启动时自动创建超级管理员账号：用户名 `root`，密码 `root`。生产环境部署后请立即修改默认密码。
 
-系统首次启动时自动创建超级管理员账号：
-
-- 用户名：`root`
-- 密码：`root`
-
-> 生产环境部署后请立即修改默认密码。
-
-### 方式一：源码版一键启动（推荐）
+### 源码版一键启动（推荐）
 
 项目根目录的 `start-prod` 脚本会自动检测并安装依赖、按需构建、启动服务。
 
-**Windows**：双击 `start-prod.bat` 进入交互菜单，或使用命令：
+**Windows**：
 
 ```powershell
-.\start-prod.bat              # 交互菜单（双击默认进入）
+.\start-prod.bat              # 交互菜单
 .\start-prod.bat start        # 启动（HTTP 前后端）
-.\start-prod.bat backend      # 仅启动后端
 .\start-prod.bat stop         # 停止服务
 .\start-prod.bat status       # 查看状态
-.\start-prod.bat cert         # 签发 SSL 证书（交互选择类型）
+.\start-prod.bat cert         # 签发 SSL 证书
 .\start-prod.bat https        # 签发证书 + HTTPS 启动
 ```
 
@@ -203,12 +107,9 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 ./start-prod.sh status
 ```
 
-启动后访问：
+启动后访问 `http://localhost:4173`（HTTP 模式）或 `https://localhost:3333`（HTTPS 模式）。
 
-- 前端：http://localhost:4173
-- HTTPS 模式：https://localhost:3333
-
-### 方式二：单文件 exe 版
+### 单文件 exe 版
 
 无需安装 Node.js / npm，直接下载 [Releases](https://github.com/Zero-wyc/ZViewer/releases) 中的压缩包，解压后运行：
 
@@ -222,26 +123,13 @@ start.bat start        # 启动服务
 ./start.sh start       # 启动服务
 ```
 
-### 方式三：Docker
+### 一键启动脚本详解
 
-```bash
-docker pull zerowyc0721/zviewer:latest
-docker run -d -p 3333:3333 -v zviewer-data:/app/config zerowyc0721/zviewer:latest
+源码版（`start-prod.*`）与单文件版（`start.bat` / `start.sh`）功能一致，均提供交互菜单与命令行两种模式。
+
+交互菜单：
+
 ```
-
-访问 `https://localhost:3333`。
-
----
-
-## 一键启动脚本
-
-源码版（`start-prod.*`）与单文件版（`packaging/start-*`）功能一致，均提供交互菜单与命令行两种模式。
-
-### 交互菜单
-
-无参数运行（或双击）进入交互菜单：
-
-```text
 ========================================
   ZViewer 服务管理
 ========================================
@@ -257,12 +145,12 @@ docker run -d -p 3333:3333 -v zviewer-data:/app/config zerowyc0721/zviewer:lates
   0) 退出
 ```
 
-### 命令
+命令行用法：
 
 | 命令 | 说明 |
 |---|---|
 | `start` | 启动服务（HTTP 前后端；加 `-Https` 使用 HTTPS 单进程模式） |
-| `backend` | 仅启动后端（可选 HTTP/HTTPS，启动时交互选择） |
+| `backend` | 仅启动后端（可选 HTTP/HTTPS） |
 | `cert [host]` | 签发 SSL 证书，host 缺省时交互选择类型 |
 | `https [host]` | 签发证书后以 HTTPS 启动（仅后端，后端统一提供前端页面） |
 | `stop` / `restart` | 停止 / 重启服务 |
@@ -271,55 +159,18 @@ docker run -d -p 3333:3333 -v zviewer-data:/app/config zerowyc0721/zviewer:lates
 | `build` | 构建前后端（源码版） |
 | `help` / `menu` | 帮助 / 交互菜单 |
 
-### 端口
+---
 
-端口固定，不支持自定义：
+## 端口说明
 
 | 服务 | 端口 | 说明 |
 |---|---|---|
-| 后端 | 3333 | HTTP / HTTPS API |
-| 前端 | 4173 | HTTP 模式下的前端静态服务器 |
+| 后端 REST API + WebSocket | 3333 | HTTP / HTTPS API 及 Socket.IO 实时通信 |
+| 前端静态文件服务 | 4173 | HTTP 模式下的前端页面，含 API 反向代理 |
 | RTMP 推流 | 3334 | OBS 推流端口 |
-| HTTP-FLV 拉流 | 3335 | 直播流播放 |
+| HTTP-FLV 拉流 | 3335 | 直播流播放（Node Media Server） |
 
-### 进程管理
-
-- 进程信息写入 `.prod.pids.json`，`stop` 按 PID 停止并兜底清理占用端口。
-- 日志写入 `log/backend.log`、`log/frontend.log`（及 `.err.log`）。
-- 启动后端后自动等待就绪（轮询端口），再启动前端，避免竞态。
-
----
-
-## 单文件 exe 版
-
-将前后端与证书工具编译为单个可执行文件，目标机器无需安装 Node.js。
-
-### 编译
-
-```bash
-# 编译全部平台
-npm run build:all
-
-# 或指定平台
-node build-all.js --win         # 仅 Windows
-node build-all.js --linux        # 仅 Linux
-```
-
-产物输出到 `dist/`：
-
-```text
-dist/
-├── win/                 # start.bat + start.ps1 + zviewer-backend.exe
-│                        #   + zviewer-frontend.exe + zviewer-cert.exe
-└── linux/               # start.sh + zviewer-backend + zviewer-frontend + zviewer-cert
-```
-
-### 使用
-
-将对应平台目录整体拷贝到目标机器，运行：
-
-- **Windows**：双击 `start.bat`（交互菜单）或 `start.bat start`
-- **Linux**：`./start.sh`（交互菜单）或 `./start.sh start`
+HTTP 模式下，用户通过 `http://localhost:4173` 访问前端页面，前端通过反向代理将 `/api`、`/socket.io`、`/live` 请求转发到后端，无需单独配置跨域。
 
 ---
 
@@ -333,20 +184,7 @@ dist/
 |---|---|---|
 | `localhost` | 自签证书 | SAN 含 `localhost`、`127.0.0.1`、`::1`，10 年有效 |
 | 域名（如 `example.com`） | **Let's Encrypt 可信 CA 证书** | 通过内置 ACME 客户端自动申请，浏览器不报警告 |
-| 公网 IP（如 `1.2.3.4`） | 自签证书 | SAN 写入 IP 条目（iPAddress） |
-
-### 交互签发
-
-菜单选择"一键签发 SSL 证书"后按提示操作：
-
-```text
-请选择证书签发类型：
-  [1] localhost（本机访问，默认，自签证书）
-  [2] 域名或公网 IP（如 example.com 或 1.2.3.4）
-      - 域名将自动申请 Let's Encrypt 可信 CA 证书
-        （需域名已解析到本机且 80 端口可访问）
-      - 公网 IP 或内网地址使用自签证书
-```
+| 公网 IP（如 `1.2.3.4`） | 自签证书 | SAN 写入 IP 条目 |
 
 ### 命令行签发
 
@@ -355,38 +193,28 @@ dist/
 start.bat cert example.com
 ./start.sh cert example.com
 
-# 公网 IP → 自签（SAN 含该 IP）
+# 公网 IP → 自签证书
 start.bat cert 1.2.3.4
 
-# 强制重新签发 / 使用测试环境
+# 强制重新签发
 start.bat cert example.com --force
-./start.sh cert example.com --staging
-
-# 域名强制使用自签（如内网域名）
-./start.sh cert myhost.local --selfsigned
 ```
 
-### HTTPS 启动
-
-```bash
-start.bat https example.com     # 签发证书后以 HTTPS 启动（仅后端）
-start.bat start -Https          # 同上
-start.bat backend -Https        # 仅后端 + HTTPS
-```
-
-HTTPS 模式下后端同时提供前端静态页面，访问 `https://localhost:3333`（证书签发为域名/IP 时按实际地址访问）。
+HTTPS 模式下后端同时提供前端静态页面，访问 `https://localhost:3333`。
 
 ### 域名申请 Let's Encrypt 证书的前置条件
 
-1. 域名已解析到本机公网 IP；
-2. 本机 **80 端口**空闲且防火墙/安全组放行（ACME HTTP-01 验证）；
+1. 域名已解析到本机公网 IP。
+2. 本机 **80 端口**空闲且防火墙/安全组放行（ACME HTTP-01 验证）。
 3. 正式环境有速率限制（每域名每周 5 张），调试可用 `--staging` 测试环境。
 
-证书文件位于 `config/ssl/`（`cert.pem` 证书链、`key.pem` 私钥、`acme-account.key` ACME 账号），HTTPS 启动时自动加载。
+证书文件位于 `config/ssl/`（`cert.pem` 证书链、`key.pem` 私钥、`acme-account.key` ACME 账号）。
 
 ---
 
 ## Docker 部署
+
+Docker 镜像使用 HTTP 模式启动，分别运行后端和前端两个进程，不自动签发证书。如需 HTTPS，建议在 Docker 前加一层反向代理（Nginx / Caddy）。
 
 ### 使用 Docker Hub 镜像
 
@@ -394,10 +222,13 @@ HTTPS 模式下后端同时提供前端静态页面，访问 `https://localhost:
 # 拉取镜像
 docker pull zerowyc0721/zviewer:latest
 
-# 启动容器
+# 启动容器（映射全部端口）
 docker run -d \
   --name zviewer \
+  -p 4173:4173 \
   -p 3333:3333 \
+  -p 3334:3334 \
+  -p 3335:3335 \
   -v zviewer-data:/app/config \
   zerowyc0721/zviewer:latest
 ```
@@ -405,33 +236,16 @@ docker run -d \
 ### 自行构建
 
 ```bash
-# 使用项目根目录的 Dockerfile.linux-single
+# 构建镜像
 docker build -t zviewer -f Dockerfile.linux-single .
 
-# 或使用 docker compose
+# 使用 docker compose
 docker compose -f docker-compose.linux-single.yml up -d
 ```
 
 ### 访问
 
-- **HTTPS**：`https://localhost:3333`
-- 首次启动自动签发 `localhost` 自签证书。
-
-### 容器管理
-
-```bash
-# 查看日志
-docker logs -f zviewer
-
-# 进入容器
-docker exec -it zviewer sh
-
-# 查看运行状态
-docker exec zviewer ./start.sh status
-
-# 签发域名证书
-docker exec zviewer ./zviewer-cert your-domain.com
-```
+用户通过浏览器访问 `http://localhost:4173` 即可使用全部功能。OBS 推流直连 `rtmp://localhost:3334/live`。
 
 ### 数据持久化
 
@@ -440,8 +254,9 @@ docker exec zviewer ./zviewer-cert your-domain.com
 | 路径 | 内容 |
 |---|---|
 | `/app/config/dev.sqlite` | 数据库 |
-| `/app/config/ssl/` | SSL 证书（自签或 Let's Encrypt） |
+| `/app/config/ssl/` | SSL 证书 |
 | `/app/config/uploads/` | 用户上传文件 |
+| `/app/config/media/` | NMS 推流媒体切片 |
 
 ---
 
@@ -449,21 +264,26 @@ docker exec zviewer ./zviewer-cert your-domain.com
 
 每次 push 到 `main` 分支或打 tag（`v*`）时，自动完成：
 
-1. **构建 Linux 单文件版** → 上传 artifact + 推送到 Docker Hub（`zerowyc0721/zviewer`）
-2. **构建 Windows 单文件版** → 上传 artifact
+1. **构建 Linux 单文件版** → 上传 artifact + 推送到 Docker Hub（`zerowyc0721/zviewer`）。
+2. **构建 Windows 单文件版** → 上传 artifact。
+3. 打 tag 时自动创建 GitHub Release，包含两个平台的压缩包。
 
-打 tag 时自动创建 GitHub Release，包含两个平台的压缩包。
+### 版本管理
 
-### 手动触发
+| 触发方式 | 版本号 | 示例 |
+|---|---|---|
+| 推送 tag `v1.0.0` | 正式版 | `1.0.0` |
+| 推送 `main` 分支 | 开发版（预发布） | `0.0.0-dev.a1b2c3d` |
+| 手动触发 | 手动构建 | `0.0.0-manual` |
 
-在 GitHub 仓库 → Actions → "Build Single-File (Windows + Linux)" → "Run workflow"。
+管理员可在管理后台通过开关控制是否接收预发布版本更新。
 
 ### 构建产物
 
 | 平台 | 压缩包 | 说明 |
 |---|---|---|
 | Linux | `zviewer-linux-x64.tar.gz` | 含 `zviewer-backend`、`zviewer-frontend`、`zviewer-cert`、`start.sh` |
-| Windows | `zviewer-windows-x64.zip` | 含 `zviewer-backend.exe`、`zviewer-frontend.exe`、`zviewer-cert.exe`、`start.bat`、`start.ps1` |
+| Windows | `zviewer-windows-x64.zip` | 含 `zviewer-backend.exe`、`zviewer-frontend.exe`、`zviewer-cert.exe`、`start.bat` |
 | Docker | `zerowyc0721/zviewer:latest` | Linux 单文件版的 Docker 镜像，自动推送到 Docker Hub |
 
 ---
@@ -486,10 +306,34 @@ npm run dev:frontend
 
 开发端口：
 
-- 前端：http://localhost:5174
-- 后端：http://localhost:3333
+- 前端：`http://localhost:5174`
+- 后端：`http://localhost:3333`
 
 前端开发时默认通过 Vite 代理连接后端，无需额外配置 `VITE_API_URL`。
+
+### 项目结构
+
+```
+ZViewer/
+├── backend/          # Express 后端（TypeScript + TypeORM + sql.js）
+│   └── src/
+│       ├── routes/          # REST API 路由
+│       ├── services/        # 业务逻辑（B站解析、代理、更新等）
+│       ├── modules/         # 模块化架构（房间、观众、同步等）
+│       ├── entities/        # TypeORM 实体
+│       └── middleware/      # 鉴权中间件
+├── frontend/         # React 前端（Vite + Tailwind CSS）
+│   └── src/
+│       ├── pages/           # 页面组件
+│       ├── components/      # 通用 UI 组件
+│       ├── modules/         # 功能模块
+│       └── store/           # Zustand 状态管理
+├── frontend-server/  # 前端静态文件服务（零外部依赖）
+├── docker/           # Docker 入口脚本
+├── packaging/        # 启动脚本模板
+├── dist/             # 构建产物
+└── build-all.js      # 单文件编译脚本
+```
 
 ---
 
@@ -500,6 +344,7 @@ npm run dev:frontend
 | 变量 | 说明 | 默认值 |
 |---|---|---|
 | `PORT` | 后端服务端口 | `3333` |
+| `HOST` | 监听地址 | 空（双栈监听） |
 | `NODE_ENV` | 运行环境 | `production` |
 | `DATABASE_URL` | SQLite 文件路径或 PostgreSQL 连接串 | `<config>/dev.sqlite` |
 | `CONFIG_DIR` | 数据根目录 | `<project-root>/config` |
@@ -508,20 +353,15 @@ npm run dev:frontend
 | `JWT_REFRESH_SECRET` | Refresh Token 密钥（生产必须修改） | — |
 | `JWT_ACCESS_EXPIRES_IN` | Access Token 有效期 | `15m` |
 | `JWT_REFRESH_EXPIRES_IN` | Refresh Token 有效期 | `7d` |
+| `RTMP_PORT` | RTMP 推流端口 | `3334` |
+| `HTTP_FLV_PORT` | HTTP-FLV 拉流端口 | `3335` |
 
-### 前端
+### 前端构建
 
 | 变量 | 说明 | 默认值 |
 |---|---|---|
 | `VITE_API_URL` | API / Socket.IO 基础地址，留空时使用 `window.location.origin` | — |
 | `VITE_FLV_BASE_URL` | OBS 推流模式 HTTP-FLV 拉流基础地址 | — |
-
-### 推流服务（可选）
-
-| 变量 | 说明 | 默认值 |
-|---|---|---|
-| `RTMP_PORT` | RTMP 推流端口 | `3334` |
-| `HTTP_FLV_PORT` | HTTP-FLV 拉流端口 | `3335` |
 
 ---
 
@@ -531,15 +371,12 @@ npm run dev:frontend
 
 | 角色 | 说明 | 权限 |
 |---|---|---|
-| `root` | 超级管理员 | 创建/控制/删除任意房间，审核用户，修改角色 |
+| `root` | 超级管理员 | 创建/控制/删除任意房间，审核用户，修改角色，管理后台 |
 | `admin` | 管理员 | 创建房间并完全控制自己的房间，不能删除他人房间 |
 | `user` | 普通用户 | 加入房间观看、发送评论与弹幕，无法创建房间 |
 | `guest` | 游客 | 加入房间观看、发送评论与弹幕，无法创建房间 |
 
-### 注册审核
-
-- 新用户注册后角色为 `guest`，状态为 `pending`。
-- 仅 `root` 可在「权限管理」页面审核通过用户，通过后升级为 `user`。
+新用户注册后角色为 `guest`，状态为 `pending`。仅 `root` 可在管理后台审核通过用户，通过后升级为 `user`。
 
 ---
 
@@ -575,16 +412,6 @@ npm run dev:frontend
 - 将 `config/ssl/cert.pem` 导入客户端"受信任的根证书颁发机构"；或
 - 使用域名并通过 Let's Encrypt 申请可信证书。
 
-自签证书与地址不匹配时，说明访问地址不在证书 SAN 中——请为实际访问的域名/IP 重新签发。
-
-### 域名申请 Let's Encrypt 证书失败
-
-依次检查：
-
-- 域名是否已解析到本机公网 IP；
-- 80 端口是否空闲、防火墙/安全组是否放行；
-- 是否触发速率限制（可用 `--staging` 测试环境验证流程）。
-
 ### WebSocket 连接失败
 
 确认反向代理（Nginx 等）已正确配置 WebSocket 升级头：
@@ -608,3 +435,7 @@ WebRTC 的 `getUserMedia` 要求 HTTPS 访问。生产环境请配置 SSL 证书
 - 检查后端是否正确携带 Referer 等请求头。
 - 封面与视频地址通过后端代理获取，避免 CORS 与防盗链问题。
 - 大会员专享内容需在后台配置有效的 Bilibili 登录凭证，或使用 ZViewerCLI 本地代理。
+
+### 更新机制
+
+系统支持从 GitHub Releases 自动检测并应用更新，也支持手动上传压缩包更新。管理员可在管理后台控制是否接收预发布版（main 分支自动构建）的更新。
