@@ -534,6 +534,25 @@ function copyStartScripts(targetPlatforms) {
   }
 }
 
+// Copy package.json into each output folder so the updater can read the version.
+function copyPackageJson(targetPlatforms) {
+  const folders = [];
+  for (const p of targetPlatforms) {
+    if (!folders.includes(p.folder)) folders.push(p.folder);
+  }
+
+  for (const folder of folders) {
+    const outputFolder = path.join(DIST_EXE, folder);
+    const destPath = path.join(outputFolder, 'package.json');
+    try {
+      fs.copyFileSync(PKG_CONFIG, destPath);
+      success(`package.json: ${folder}/package.json`);
+    } catch (e) {
+      warn(`failed to copy package.json to ${folder}: ${e.message}`);
+    }
+  }
+}
+
 function printSummary(allResults) {
   console.log('');
   console.log('========================================');
@@ -683,6 +702,9 @@ async function main() {
 
   // 复制各平台一键启动脚本到产物目录
   copyStartScripts(targetPlatforms);
+
+  // 复制 package.json 到产物目录（供更新功能读取版本号）
+  copyPackageJson(targetPlatforms);
 
   if (allResults.length > 0) {
     printSummary(allResults);
