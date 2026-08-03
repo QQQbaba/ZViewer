@@ -412,17 +412,28 @@ function packageBackend(targetPlatforms) {
         continue;
       }
 
-      // 复制后端 .env（如果存在）；单文件版端口已固定，过滤掉 PORT 行
-      const envSrc = path.join(BACKEND, '.env');
+      // 复制后端 .env；单文件版端口已固定，过滤掉 PORT 行。
+      // CI 环境中 backend/.env 被 .gitignore 排除，回退到 .env.example。
       const envDest = path.join(outputFolder, '.env');
-      if (fs.existsSync(envSrc) && !fs.existsSync(envDest)) {
-        const envContent = fs.readFileSync(envSrc, 'utf8');
-        const filtered = envContent
-          .split('\n')
-          .filter((line) => !/^\s*PORT\s*=/.test(line))
-          .join('\n');
-        fs.writeFileSync(envDest, filtered, 'utf8');
-        log('已复制 .env 配置模板（已移除 PORT，端口固定为 3333）');
+      if (!fs.existsSync(envDest)) {
+        const envCandidates = [
+          path.join(BACKEND, '.env'),
+          path.join(BACKEND, '.env.example'),
+        ];
+        const envSrc = envCandidates.find((p) => fs.existsSync(p));
+        if (envSrc) {
+          const envContent = fs.readFileSync(envSrc, 'utf8');
+          const filtered = envContent
+            .split('\n')
+            .filter((line) => !/^\s*PORT\s*=/.test(line))
+            .join('\n');
+          fs.writeFileSync(envDest, filtered, 'utf8');
+          log(`已复制 .env 配置（来源: ${path.basename(envSrc)}，已移除 PORT）`);
+        } else {
+          // 兜底：创建空文件，避免后续 Docker COPY 失败
+          fs.writeFileSync(envDest, '', 'utf8');
+          log('已创建空 .env（未找到 .env / .env.example）');
+        }
       }
 
       const stats = fs.statSync(outputPath);
