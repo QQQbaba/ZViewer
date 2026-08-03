@@ -83,7 +83,21 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 
 系统首次启动时自动创建超级管理员账号：用户名 `root`，密码 `root`。生产环境部署后请立即修改默认密码。
 
-### 源码版一键启动（推荐）
+### 单文件版（推荐）
+
+无需安装 Node.js / npm，直接下载 [Releases](https://github.com/Zero-wyc/ZViewer/releases) 中的压缩包，解压后运行：
+
+```bash
+# Windows
+start.bat              # 交互菜单
+start.bat start        # 启动服务
+
+# Linux
+./start.sh             # 交互菜单
+./start.sh start       # 启动服务
+```
+
+### 源码版一键启动
 
 项目根目录的 `start-prod` 脚本会自动检测并安装依赖、按需构建、启动服务。
 
@@ -108,20 +122,6 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 ```
 
 启动后访问 `http://localhost:4173`（HTTP 模式）或 `https://localhost:3333`（HTTPS 模式）。
-
-### 单文件 exe 版
-
-无需安装 Node.js / npm，直接下载 [Releases](https://github.com/Zero-wyc/ZViewer/releases) 中的压缩包，解压后运行：
-
-```bash
-# Windows
-start.bat              # 交互菜单
-start.bat start        # 启动服务
-
-# Linux
-./start.sh             # 交互菜单
-./start.sh start       # 启动服务
-```
 
 ### 一键启动脚本详解
 
@@ -216,13 +216,9 @@ HTTPS 模式下后端同时提供前端静态页面，访问 `https://localhost:
 
 Docker 镜像使用 HTTP 模式启动，分别运行后端和前端两个进程，不自动签发证书。如需 HTTPS，建议在 Docker 前加一层反向代理（Nginx / Caddy）。
 
-### 使用 Docker Hub 镜像
+### docker run
 
 ```bash
-# 拉取镜像
-docker pull zerowyc0721/zviewer:latest
-
-# 启动容器（映射全部端口）
 docker run -d \
   --name zviewer \
   -p 4173:4173 \
@@ -233,36 +229,14 @@ docker run -d \
   zerowyc0721/zviewer:latest
 ```
 
-### 自行构建
-
-```bash
-# 构建镜像
-docker build -t zviewer -f Dockerfile.linux-single .
-```
-
 ### Docker Compose
 
-项目已包含 `docker-compose.linux-single.yml`，可直接使用：
-
-```bash
-# 启动（后台运行）
-docker compose -f docker-compose.linux-single.yml up -d
-
-# 查看日志
-docker compose -f docker-compose.linux-single.yml logs -f
-
-# 停止
-docker compose -f docker-compose.linux-single.yml down
-```
-
-compose 文件内容参考：
+创建 `docker-compose.yml`：
 
 ```yaml
 services:
   zviewer:
-    build:
-      context: .
-      dockerfile: Dockerfile.linux-single
+    image: zerowyc0721/zviewer:latest
     ports:
       - "3333:3333"   # 后端 API + WebSocket
       - "4173:4173"   # 前端页面
@@ -276,7 +250,20 @@ volumes:
   zviewer-data:
 ```
 
-如需使用 Docker Hub 镜像而非本地构建，将 `build` 块替换为 `image: zerowyc0721/zviewer:latest` 即可。
+然后启动：
+
+```bash
+docker compose up -d
+```
+
+### 自行构建
+
+如需自行构建镜像，项目已包含 `Dockerfile.linux-single` 和 `docker-compose.linux-single.yml`（使用 `build` 而非 `image`），构建方法：
+
+```bash
+docker build -t zviewer -f Dockerfile.linux-single .
+docker compose -f docker-compose.linux-single.yml up -d
+```
 
 ### 访问
 
@@ -463,7 +450,7 @@ WebRTC 的 `getUserMedia` 要求 HTTPS 访问。生产环境请配置 SSL 证书
 
 ### 数据库说明
 
-后端使用 TypeORM + sql.js（wasm 版 SQLite）持久化，纯 JS 实现、无原生模块——单文件 exe 版可在任意平台直接运行，无需编译。数据库文件为标准 SQLite 格式（`config/dev.sqlite`），可用常规 SQLite 工具查看。
+后端使用 TypeORM + sql.js（wasm 版 SQLite）持久化，纯 JS 实现、无原生模块——单文件版可在任意平台直接运行，无需编译。数据库文件为标准 SQLite 格式（`config/dev.sqlite`），可用常规 SQLite 工具查看。
 
 ### Bilibili 解析失败
 

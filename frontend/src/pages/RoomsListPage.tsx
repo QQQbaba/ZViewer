@@ -13,7 +13,6 @@ import {
 import { PageBackButton } from '@/components/PageBackButton'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Space } from '@/components/ui/Space'
 import { Title, Text } from '@/components/ui/Typography'
 import { Tag } from '@/components/ui/Tag'
 import { Spinner } from '@/components/ui/Spinner'
@@ -155,7 +154,7 @@ export default function RoomsListPage() {
         </div>
 
         <Fade delay={160}>
-          <Space justify="between" align="center" className="mb-4">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div
               className="glass flex items-center gap-1.5 rounded-[var(--md-sys-shape-corner)] px-3 py-1.5 text-sm font-medium"
               style={{
@@ -171,7 +170,7 @@ export default function RoomsListPage() {
               </span>
               <span>个房间</span>
             </div>
-            <Space>
+            <div className="flex flex-wrap items-center gap-2">
               <div
                 className="inline-flex rounded-[var(--md-sys-shape-corner)] border p-0.5"
                 style={{ borderColor: 'var(--md-sys-color-outline)' }}
@@ -242,8 +241,8 @@ export default function RoomsListPage() {
               >
                 刷新
               </Button>
-            </Space>
-          </Space>
+            </div>
+          </div>
         </Fade>
 
         {loading ? (

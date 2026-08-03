@@ -30,12 +30,11 @@ interface AnnotationLayerProps {
   socket: Socket | null
   roomId: string
   readOnly?: boolean
+  /** 是否激活批注模式（接收指针事件）。readOnly 模式忽略此值 */
+  active?: boolean
   tool?: AnnotationTool
   color?: string
   width?: number
-  onToolChange?: (tool: AnnotationTool) => void
-  onColorChange?: (color: string) => void
-  onWidthChange?: (width: number) => void
   className?: string
 }
 
@@ -67,6 +66,7 @@ export const AnnotationLayer = forwardRef<
     socket,
     roomId,
     readOnly = false,
+    active = true,
     tool = 'pen',
     color = '#f76f53',
     width = 3,
@@ -80,6 +80,21 @@ export const AnnotationLayer = forwardRef<
   const drawingRef = useRef(false)
   const currentPointsRef = useRef<{ x: number; y: number }[]>([])
   const strokesRef = useRef<AnnotationStroke[]>([])
+
+  // 用 ref 保存最新的 tool/color/width，避免 pointer 事件处理器闭包陈旧
+  const toolRef = useRef(tool)
+  const colorRef = useRef(color)
+  const widthRef = useRef(width)
+  useEffect(() => {
+    toolRef.current = tool
+  }, [tool])
+  useEffect(() => {
+    colorRef.current = color
+  }, [color])
+  useEffect(() => {
+    widthRef.current = width
+  }, [width])
+
   const [textInput, setTextInput] = useState<TextInputState>({
     visible: false,
     x: 0,
@@ -87,55 +102,78 @@ export const AnnotationLayer = forwardRef<
     value: '',
   })
 
+  // ---- 核心绘制 ----
+
+  /**
+   * 在当前 canvas 上绘制单条笔画。
+   * 使用归一化坐标 (0~1) × canvas CSS 尺寸，DPR 缩放由 ctx.scale 处理。
+   */
   const renderStroke = useCallback(
     (stroke: AnnotationStroke) => {
       const canvas = canvasRef.current
       const ctx = ctxRef.current
       if (!canvas || !ctx) return
 
-      const canvasWidth = canvas.clientWidth
-      const canvasHeight = canvas.clientHeight
-      if (!canvasWidth || !canvasHeight) return
+      const w = canvas.clientWidth
+      const h = canvas.clientHeight
+      if (!w || !h) return
 
       ctx.save()
       if (stroke.type === 'erase') {
         ctx.globalCompositeOperation = 'destination-out'
         ctx.strokeStyle = 'rgba(0,0,0,1)'
+        ctx.lineWidth = (stroke.width ?? 3) * 3
       } else {
         ctx.globalCompositeOperation = 'source-over'
-        ctx.strokeStyle = stroke.color ?? color
-        ctx.fillStyle = stroke.color ?? color
+        ctx.strokeStyle = stroke.color ?? '#f76f53'
+        ctx.fillStyle = stroke.color ?? '#f76f53'
+        ctx.lineWidth = stroke.width ?? 3
       }
-      ctx.lineWidth =
-        (stroke.width ?? width) * (stroke.type === 'erase' ? 3 : 1)
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
 
       if (stroke.type === 'text' && stroke.text) {
-        const fontSize = Math.max(14, (stroke.width ?? width) * 5)
+        const fontSize = Math.max(14, (stroke.width ?? 3) * 5)
         ctx.font = `${fontSize}px sans-serif`
-        ctx.fillText(
-          stroke.text,
-          (stroke.x ?? 0) * canvasWidth,
-          (stroke.y ?? 0) * canvasHeight
-        )
+        ctx.fillText(stroke.text, (stroke.x ?? 0) * w, (stroke.y ?? 0) * h)
       } else if (stroke.points && stroke.points.length > 1) {
         ctx.beginPath()
-        stroke.points.forEach((point, index) => {
-          const x = point.x * canvasWidth
-          const y = point.y * canvasHeight
-          if (index === 0) {
-            ctx.moveTo(x, y)
-          } else {
-            ctx.lineTo(x, y)
-          }
+        stroke.points.forEach((p, i) => {
+          const px = p.x * w
+          const py = p.y * h
+          if (i === 0) ctx.moveTo(px, py)
+          else ctx.lineTo(px, py)
         })
         ctx.stroke()
+      } else if (stroke.points && stroke.points.length === 1) {
+        // 单点：画一个小圆点
+        const p = stroke.points[0]
+        ctx.beginPath()
+        ctx.arc(p.x * w, p.y * h, ctx.lineWidth / 2, 0, Math.PI * 2)
+        ctx.fillStyle = ctx.strokeStyle
+        ctx.fill()
       }
       ctx.restore()
     },
-    [color, width]
+    []
   )
 
-  const drawStroke = useCallback(
+  /**
+   * 全量重绘：清空 canvas → 按 strokesRef 顺序逐条绘制。
+   * erase 笔画依赖 destination-out，必须保持绘制顺序。
+   */
+  const redrawAll = useCallback(() => {
+    const canvas = canvasRef.current
+    const ctx = ctxRef.current
+    if (!canvas || !ctx) return
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight)
+    strokesRef.current.forEach((s) => renderStroke(s))
+  }, [renderStroke])
+
+  /**
+   * 添加笔画到本地存储并绘制。
+   */
+  const addStroke = useCallback(
     (stroke: AnnotationStroke) => {
       strokesRef.current.push(stroke)
       renderStroke(stroke)
@@ -143,10 +181,13 @@ export const AnnotationLayer = forwardRef<
     [renderStroke]
   )
 
-  const drawStrokeRef = useRef(drawStroke)
+  // 用 ref 保存 addStroke 最新引用，供 socket 回调使用
+  const addStrokeRef = useRef(addStroke)
   useEffect(() => {
-    drawStrokeRef.current = drawStroke
-  }, [drawStroke])
+    addStrokeRef.current = addStroke
+  }, [addStroke])
+
+  // ---- Canvas 尺寸管理 ----
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -154,10 +195,15 @@ export const AnnotationLayer = forwardRef<
     if (!canvas || !container) return
 
     const rect = container.getBoundingClientRect()
+    if (!rect.width || !rect.height) return
+
     const dpr = window.devicePixelRatio || 1
-    if (canvas.width !== Math.floor(rect.width * dpr)) {
-      canvas.width = Math.floor(rect.width * dpr)
-      canvas.height = Math.floor(rect.height * dpr)
+    const targetW = Math.floor(rect.width * dpr)
+    const targetH = Math.floor(rect.height * dpr)
+
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW
+      canvas.height = targetH
       canvas.style.width = `${rect.width}px`
       canvas.style.height = `${rect.height}px`
       const ctx = canvas.getContext('2d')
@@ -166,10 +212,11 @@ export const AnnotationLayer = forwardRef<
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
         ctxRef.current = ctx
-        strokesRef.current.forEach((stroke) => renderStroke(stroke))
       }
     }
-  }, [renderStroke])
+    // 无论是否改变尺寸，都重绘一次确保内容正确
+    redrawAll()
+  }, [redrawAll])
 
   useEffect(() => {
     resizeCanvas()
@@ -184,6 +231,8 @@ export const AnnotationLayer = forwardRef<
     }
   }, [resizeCanvas])
 
+  // ---- Socket 同步 ----
+
   useEffect(() => {
     if (!socket) return
 
@@ -193,14 +242,14 @@ export const AnnotationLayer = forwardRef<
     }) => {
       // 忽略自己发送的 stroke，避免重复绘制
       if (data.senderId && data.senderId === socket.id) return
-      drawStrokeRef.current(data.stroke)
+      addStrokeRef.current(data.stroke)
     }
 
     const handleClear = () => {
+      strokesRef.current = []
       const canvas = canvasRef.current
       const ctx = ctxRef.current
       if (!canvas || !ctx) return
-      strokesRef.current = []
       ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight)
     }
 
@@ -213,15 +262,19 @@ export const AnnotationLayer = forwardRef<
     }
   }, [socket])
 
+  // ---- 对外暴露 clear ----
+
   useImperativeHandle(ref, () => ({
     clear: () => {
+      strokesRef.current = []
       const canvas = canvasRef.current
       const ctx = ctxRef.current
       if (!canvas || !ctx) return
-      strokesRef.current = []
       ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight)
     },
   }))
+
+  // ---- 指针事件 ----
 
   const getNormalizedPoint = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current
@@ -238,16 +291,20 @@ export const AnnotationLayer = forwardRef<
   }
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (readOnly || !canvasRef.current) return
+    if (readOnly || !active) return
     e.preventDefault()
     const canvas = canvasRef.current
+    if (!canvas) return
     canvas.setPointerCapture(e.pointerId)
 
-    if (tool === 'text') {
+    const currentTool = toolRef.current
+
+    if (currentTool === 'text') {
+      const rect = canvas.getBoundingClientRect()
       setTextInput({
         visible: true,
-        x: e.clientX - canvas.getBoundingClientRect().left,
-        y: e.clientY - canvas.getBoundingClientRect().top,
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
         value: '',
       })
       return
@@ -256,55 +313,72 @@ export const AnnotationLayer = forwardRef<
     drawingRef.current = true
     const point = getNormalizedPoint(e.clientX, e.clientY)
     currentPointsRef.current = [point]
-
-    const ctx = ctxRef.current
-    if (!ctx) return
-    ctx.save()
-    if (tool === 'erase') {
-      ctx.globalCompositeOperation = 'destination-out'
-      ctx.strokeStyle = 'rgba(0,0,0,1)'
-      ctx.lineWidth = width * 3
-    } else {
-      ctx.globalCompositeOperation = 'source-over'
-      ctx.strokeStyle = color
-      ctx.lineWidth = width
-    }
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.beginPath()
-    ctx.moveTo(point.x * canvas.clientWidth, point.y * canvas.clientHeight)
   }
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (readOnly || !drawingRef.current || tool === 'text') return
+    if (readOnly || !active || !drawingRef.current) return
     e.preventDefault()
+    const currentTool = toolRef.current
+    if (currentTool === 'text') return
+
     const point = getNormalizedPoint(e.clientX, e.clientY)
     currentPointsRef.current.push(point)
 
+    // 实时预览：直接在 canvas 上画线段
     const canvas = canvasRef.current
     const ctx = ctxRef.current
     if (!canvas || !ctx) return
-    ctx.lineTo(point.x * canvas.clientWidth, point.y * canvas.clientHeight)
-    ctx.stroke()
+
+    const w = canvas.clientWidth
+    const h = canvas.clientHeight
+
+    ctx.save()
+    if (currentTool === 'erase') {
+      ctx.globalCompositeOperation = 'destination-out'
+      ctx.strokeStyle = 'rgba(0,0,0,1)'
+      ctx.lineWidth = widthRef.current * 3
+    } else {
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.strokeStyle = colorRef.current
+      ctx.lineWidth = widthRef.current
+    }
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+
+    const pts = currentPointsRef.current
+    if (pts.length >= 2) {
+      const prev = pts[pts.length - 2]
+      const curr = pts[pts.length - 1]
+      ctx.beginPath()
+      ctx.moveTo(prev.x * w, prev.y * h)
+      ctx.lineTo(curr.x * w, curr.y * h)
+      ctx.stroke()
+    }
+    ctx.restore()
   }
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (readOnly || !drawingRef.current || tool === 'text') return
+    if (readOnly || !active || !drawingRef.current) return
     e.preventDefault()
     drawingRef.current = false
-    const ctx = ctxRef.current
-    if (ctx) ctx.restore()
 
-    if (currentPointsRef.current.length > 1) {
-      emitStroke({
-        id: generateId(),
-        type: tool,
-        points: currentPointsRef.current,
-        color,
-        width,
-      })
-    }
+    const currentTool = toolRef.current
+    const pts = currentPointsRef.current
     currentPointsRef.current = []
+
+    if (pts.length === 0) return
+
+    const stroke: AnnotationStroke = {
+      id: generateId(),
+      type: currentTool,
+      points: pts,
+      color: colorRef.current,
+      width: widthRef.current,
+    }
+
+    // 关键：本地存储 + 发送给其他客户端
+    addStroke(stroke)
+    emitStroke(stroke)
   }
 
   const handleTextSubmit = () => {
@@ -328,27 +402,29 @@ export const AnnotationLayer = forwardRef<
       text: value,
       x: normalized.x,
       y: normalized.y,
-      color,
-      width,
+      color: colorRef.current,
+      width: widthRef.current,
     }
 
-    drawStroke(stroke)
+    addStroke(stroke)
     emitStroke(stroke)
     setTextInput({ visible: false, x: 0, y: 0, value: '' })
   }
 
   const cursor =
-    readOnly || tool === 'text'
+    readOnly || !active
       ? 'default'
-      : tool === 'erase'
-        ? 'cell'
-        : 'crosshair'
+      : tool === 'text'
+        ? 'text'
+        : tool === 'erase'
+          ? 'cell'
+          : 'crosshair'
 
   return (
     <div
       ref={containerRef}
       className={`absolute inset-0 ${className ?? ''}`}
-      style={{ pointerEvents: readOnly ? 'none' : 'auto' }}
+      style={{ pointerEvents: readOnly || !active ? 'none' : 'auto' }}
     >
       <canvas
         ref={canvasRef}

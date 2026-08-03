@@ -412,15 +412,15 @@ export default function ProfilePage() {
               <Text className="text-sm font-medium">ZViewer 账号</Text>
             </div>
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
                   <Avatar
                     size="md"
                     alt={user.username}
                     src={buildAvatarUrl(user.avatar, user.username)}
                   />
-                  <div>
-                    <p className="text-base font-medium text-[var(--md-sys-color-on-surface)]">
+                  <div className="min-w-0">
+                    <p className="truncate text-base font-medium text-[var(--md-sys-color-on-surface)]">
                       {user.username}
                     </p>
                     <p className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
@@ -433,6 +433,7 @@ export default function ProfilePage() {
                   size="sm"
                   icon={<Pencil className="h-4 w-4" />}
                   onClick={openEditInfoModal}
+                  className="shrink-0"
                 >
                   编辑信息
                 </Button>
@@ -485,6 +486,7 @@ export default function ProfilePage() {
               </div>
             ) : bilibiliUser ? (
               <div className="space-y-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
                   <Avatar
                     size="md"
@@ -523,9 +525,11 @@ export default function ProfilePage() {
                   size="sm"
                   icon={<LogOut className="h-4 w-4" />}
                   onClick={handleLogoutBilibili}
+                  className="shrink-0"
                 >
                   退出 B站 登录
                 </Button>
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -556,7 +560,7 @@ export default function ProfilePage() {
         )}
 
         {!bilibiliLoading && bilibiliUser && (
-          <div className="mt-4 flex justify-end gap-2">
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end sm:gap-2">
             {betaFeaturesEnabled && (
               <Button
                 variant="ghost"

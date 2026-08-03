@@ -1030,11 +1030,11 @@ video {
 @keyframes zen-notification-exit {
   0% {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
   100% {
     opacity: 0;
-    transform: translateY(-24px) scale(0.96);
+    transform: translateY(0);
   }
 }
 

@@ -396,6 +396,7 @@ function WatchPage() {
           ref={annotationRef}
           socket={socket}
           roomId={roomId ?? ''}
+          active={showAnnotationToolbar}
           tool={annotationTool}
           color={annotationColor}
           width={annotationWidth}
