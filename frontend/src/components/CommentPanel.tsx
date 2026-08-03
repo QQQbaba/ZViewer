@@ -84,18 +84,42 @@ export function CommentPanel({
 
     socket.on('new-comment', handleNewComment)
 
-    socket.emit(
-      'comment-history',
-      { roomId },
-      (response: CommentHistoryResponse) => {
-        if (response.success && response.comments) {
-          setComments(response.comments)
+    // 请求评论历史，带重试机制。
+    // socket 连接后可能还没 join room（isInRoom 校验失败），延迟重试直到成功。
+    let retryCount = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+    const fetchHistory = () => {
+      socket.emit(
+        'comment-history',
+        { roomId },
+        (response: CommentHistoryResponse) => {
+          if (response.success && response.comments) {
+            setComments(response.comments)
+          } else if (retryCount < 5) {
+            retryCount++
+            retryTimer = setTimeout(fetchHistory, 800)
+          }
         }
+      )
+    }
+
+    // socket 已连接时立即请求，否则等 connect 事件
+    if (socket.connected) {
+      fetchHistory()
+    } else {
+      const onConnect = () => fetchHistory()
+      socket.on('connect', onConnect)
+      return () => {
+        socket.off('new-comment', handleNewComment)
+        socket.off('connect', onConnect)
+        if (retryTimer) clearTimeout(retryTimer)
       }
-    )
+    }
 
     return () => {
       socket.off('new-comment', handleNewComment)
+      if (retryTimer) clearTimeout(retryTimer)
     }
   }, [socket, roomId])
 
@@ -168,9 +192,9 @@ export function CommentPanel({
               ref={listRef}
               className="glass flex-1 min-h-0 overflow-y-auto rounded-[var(--md-sys-shape-corner)] p-3"
             >
-              <Space direction="vertical" className="w-full" size="sm">
+              <Space direction="vertical" className="w-full" size="sm" align="start">
                 {comments.length === 0 && (
-                  <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
+                  <div className="flex w-full flex-col items-center justify-center gap-2 py-8 text-center">
                     <MessagesSquare
                       className="h-8 w-8 opacity-40"
                       style={{
@@ -239,31 +263,6 @@ export function CommentPanel({
                         <Text className="mt-0.5 break-words text-xs leading-snug">
                           {comment.content}
                         </Text>
-                        {!comment.isDanmaku && sendAsDanmaku && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="mt-1 h-5 px-1.5 text-[10px]"
-                            icon={
-                              <MessageSquareQuote className="h-2.5 w-2.5" />
-                            }
-                            onClick={() => {
-                              socket?.emit(
-                                'send-danmaku',
-                                { roomId, content: comment.content },
-                                (response: SendCommentResponse) => {
-                                  if (!response.success) {
-                                    message.error(
-                                      response.message ?? '弹幕发送失败'
-                                    )
-                                  }
-                                }
-                              )
-                            }}
-                          >
-                            弹幕
-                          </Button>
-                        )}
                       </div>
                     </div>
                   </div>

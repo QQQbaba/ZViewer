@@ -53,13 +53,14 @@ export function DirPickerSidePanel({
       className="flex-shrink-0 overflow-hidden"
       style={{
         width: open ? SIDE_PANEL_WIDTH : 0,
-        transition: `width ${DURATION}ms var(--ease-out-expo)`,
+        maxWidth: open ? 'calc(100vw - 2rem)' : 0,
+        transition: `width ${DURATION}ms var(--ease-out-expo), max-width ${DURATION}ms var(--ease-out-expo)`,
         willChange: 'width',
       }}
     >
       <div
-        className="glass flex h-full max-h-[calc(100vh-160px)] flex-col overflow-hidden border-l border-[var(--glass-border)] p-3"
-        style={{ width: SIDE_PANEL_WIDTH }}
+        className="glass flex h-full max-h-[calc(100vh-160px)] flex-col overflow-hidden border-t border-[var(--glass-border)] p-3 md:border-l md:border-t-0"
+        style={{ width: SIDE_PANEL_WIDTH, maxWidth: 'calc(100vw - 2rem)' }}
       >
         {/* 标题栏 */}
         <div className="mb-2 flex shrink-0 items-center justify-between">

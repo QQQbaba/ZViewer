@@ -398,7 +398,7 @@ export function RoomLayout({
             aria-label={isRightPanelOpen ? '收起侧栏' : '展开侧栏'}
             aria-expanded={isRightPanelOpen}
             title={isRightPanelOpen ? '收起侧栏' : '展开侧栏'}
-            className="glass flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 hover:scale-105 active:scale-95"
+            className="glass hidden h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 hover:scale-105 active:scale-95 md:flex"
             style={{
               borderColor: 'var(--md-sys-color-outline-variant)',
               color: isRightPanelOpen
@@ -517,23 +517,46 @@ export function RoomLayout({
                 {/* 移动端：横向滚动卡片，顶部显示 Tab 标签便于切换 */}
                 <div className="flex flex-col gap-2 lg:hidden">
                   {controlChildren.length > 1 && (
-                    <div className="flex items-center justify-center gap-1 px-1">
-                      {mobileCardLabels.map((label, index) => (
-                        <button
-                          key={index}
-                          type="button"
-                          aria-label={`切换到${label}`}
-                          onClick={() => scrollToMobileCard(index)}
-                          className={cn(
-                            'min-w-[4rem] rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200',
-                            activeControlIndex === index
-                              ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md'
-                              : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
+                    <div className="flex items-center justify-between gap-1 px-1">
+                      <div className="flex flex-1 items-center justify-center gap-1">
+                        {mobileCardLabels.map((label, index) => (
+                          <button
+                            key={index}
+                            type="button"
+                            aria-label={`切换到${label}`}
+                            onClick={() => scrollToMobileCard(index)}
+                            className={cn(
+                              'min-w-[4rem] rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200',
+                              activeControlIndex === index
+                                ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md'
+                                : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                            )}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={toggleRightPanel}
+                        aria-label={
+                          isRightPanelOpen ? '收起侧栏' : '展开侧栏'
+                        }
+                        aria-expanded={isRightPanelOpen}
+                        title={isRightPanelOpen ? '收起侧栏' : '展开侧栏'}
+                        className="glass flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 hover:scale-105 active:scale-95"
+                        style={{
+                          borderColor: 'var(--md-sys-color-outline-variant)',
+                          color: isRightPanelOpen
+                            ? 'var(--md-sys-color-primary)'
+                            : 'var(--md-sys-color-on-surface-variant)',
+                        }}
+                      >
+                        {isRightPanelOpen ? (
+                          <PanelRightClose className="h-4 w-4" />
+                        ) : (
+                          <PanelRight className="h-4 w-4" />
+                        )}
+                      </button>
                     </div>
                   )}
                   <div
