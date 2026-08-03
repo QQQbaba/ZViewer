@@ -394,7 +394,7 @@ export default function ServerFileManager() {
   return (
     <div className="glass-card p-4">
       {/* 头部 */}
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-4 flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <div
             className="flex h-8 w-8 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
@@ -412,7 +412,7 @@ export default function ServerFileManager() {
             </Text>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="ghost"
             size="sm"
@@ -479,8 +479,8 @@ export default function ServerFileManager() {
       />
 
       {/* 根目录切换器 + 路径栏 */}
-      <div className="mb-2 flex items-center gap-2">
-        <div className="relative">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="relative shrink-0">
           <Button
             variant="secondary"
             size="sm"
@@ -495,7 +495,7 @@ export default function ServerFileManager() {
           </Button>
           {rootsMenuOpen && (
             <div
-              className="glass absolute left-0 top-full z-30 mt-1 min-w-[260px] rounded-[var(--md-sys-shape-corner)] p-1 shadow-lg"
+              className="glass absolute left-0 top-full z-30 mt-1 min-w-[260px] max-w-[calc(100vw-2rem)] rounded-[var(--md-sys-shape-corner)] p-1 shadow-lg"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="px-2 py-1.5">
@@ -583,6 +583,7 @@ export default function ServerFileManager() {
         <Button
           variant="ghost"
           size="sm"
+          className="shrink-0"
           icon={<ChevronLeft className="h-4 w-4" />}
           onClick={handleBack}
           disabled={
@@ -601,7 +602,7 @@ export default function ServerFileManager() {
         </Text>
         {readonly && (
           <span
-            className="shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
+            className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
             style={{
               backgroundColor:
                 'color-mix(in srgb, var(--md-sys-color-outline) 15%, transparent)',
@@ -709,7 +710,7 @@ export default function ServerFileManager() {
       {addRootModalOpen &&
         createPortal(
           <div
-            className="fixed inset-0 flex items-start justify-center"
+            className="fixed inset-0 flex items-start justify-center px-4"
             style={{
               zIndex: 999,
               paddingTop: '80px',
@@ -726,14 +727,14 @@ export default function ServerFileManager() {
             />
             {/* 主面板 + 副面板 flex 容器 */}
             <div
-              className="glass-strong relative z-10 flex max-h-[calc(100vh-160px)] overflow-hidden rounded-[var(--md-sys-shape-corner)] shadow-lg"
+              className="glass-strong relative z-10 flex max-h-[calc(100vh-160px)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[var(--md-sys-shape-corner)] shadow-lg md:flex-row"
               style={{
                 boxShadow:
                   '0 8px 24px -8px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent)',
               }}
             >
               {/* 主面板 */}
-              <div className="glass flex w-[360px] flex-shrink-0 flex-col p-5">
+              <div className="glass w-full flex-shrink-0 flex-col p-5 md:w-[360px] md:flex">
                 {/* 标题栏 */}
                 <div className="mb-4 flex items-center justify-between">
                   <div className="flex items-center gap-2">

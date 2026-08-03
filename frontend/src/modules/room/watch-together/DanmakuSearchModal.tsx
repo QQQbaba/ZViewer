@@ -197,6 +197,7 @@ export function DanmakuSearchModal({
       <div
         className="grid min-h-0 flex-1 gap-3"
         style={{
+          minHeight: '60vh',
           gridTemplateColumns: episodesOpen ? '1fr 340px' : '1fr 0fr',
           transition: 'grid-template-columns 0.4s var(--ease-out-expo)',
         }}
