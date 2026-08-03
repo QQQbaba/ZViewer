@@ -66,6 +66,49 @@ function isRequestSecure(req: Request): boolean {
   return false;
 }
 
+/**
+ * 判断当前请求是否为跨站请求（前端 Origin 与后端 Host 不同）。
+ *
+ * sameSite cookie 规则：
+ * - 同站请求：sameSite: 'lax' 即可，cookie 正常携带
+ * - 跨站请求：sameSite: 'lax' 会导致 cookie 不被发送（fetch/XHR 场景）
+ *   需要 sameSite: 'none' + secure: true 才能在跨站请求中携带 cookie
+ *
+ * 判断依据：比较请求 Origin 头的 host（含端口）与请求 Host 头。
+ * 两者不同即为跨站（不同域名或不同端口均算跨站）。
+ */
+function isCrossSiteRequest(req: Request): boolean {
+  const origin = req.headers.origin;
+  if (!origin || typeof origin !== 'string') return false;
+  try {
+    const originUrl = new URL(origin);
+    const host = req.headers.host || '';
+    return originUrl.host !== host;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 根据请求上下文计算 cookie 的 sameSite 和 secure 属性。
+ *
+ * - 跨站 + HTTPS → sameSite: 'none', secure: true（允许跨站携带 cookie）
+ * - 跨站 + HTTP  → sameSite: 'lax', secure: false（HTTP 无法设置 Secure cookie，
+ *   跨站 cookie 无法发送，这是浏览器安全限制，需通过反向代理解决）
+ * - 同站 → sameSite: 'lax'（安全且兼容）
+ */
+function getCookieSameSiteOptions(req: Request): {
+  sameSite: 'none' | 'lax';
+  secure: boolean;
+} {
+  const secure = isRequestSecure(req);
+  const crossSite = isCrossSiteRequest(req);
+  if (crossSite && secure) {
+    return { sameSite: 'none', secure: true };
+  }
+  return { sameSite: 'lax', secure };
+}
+
 /** 将 access_token / refresh_token 写入 httpOnly cookie。 */
 export function setAuthCookies(
   req: Request,
@@ -73,18 +116,18 @@ export function setAuthCookies(
   accessToken: string,
   refreshToken: string,
 ): void {
-  const secure = isRequestSecure(req);
+  const { sameSite, secure } = getCookieSameSiteOptions(req);
   res.cookie('access_token', accessToken, {
     httpOnly: true,
     secure,
-    sameSite: 'lax',
+    sameSite,
     maxAge: ACCESS_COOKIE_MAX_AGE,
     path: '/',
   });
   res.cookie('refresh_token', refreshToken, {
     httpOnly: true,
     secure,
-    sameSite: 'lax',
+    sameSite,
     maxAge: REFRESH_COOKIE_MAX_AGE,
     path: '/',
   });
@@ -96,19 +139,21 @@ export function setAccessTokenCookie(
   res: Response,
   accessToken: string,
 ): void {
+  const { sameSite, secure } = getCookieSameSiteOptions(req);
   res.cookie('access_token', accessToken, {
     httpOnly: true,
-    secure: isRequestSecure(req),
-    sameSite: 'lax',
+    secure,
+    sameSite,
     maxAge: ACCESS_COOKIE_MAX_AGE,
     path: '/',
   });
 }
 
-/** 清除 auth cookie（登出）。 */
-export function clearAuthCookies(res: Response): void {
-  res.clearCookie('access_token', { path: '/' });
-  res.clearCookie('refresh_token', { path: '/' });
+/** 清除 auth cookie（登出）。需传入 req 以匹配 sameSite 设置，否则跨站 cookie 无法被正确清除。 */
+export function clearAuthCookies(req: Request, res: Response): void {
+  const { sameSite, secure } = getCookieSameSiteOptions(req);
+  res.clearCookie('access_token', { path: '/', sameSite, secure });
+  res.clearCookie('refresh_token', { path: '/', sameSite, secure });
 }
 
 /** 从 cookie 或 Authorization Header 读取 access token。 */

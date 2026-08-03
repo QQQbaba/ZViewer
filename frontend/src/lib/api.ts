@@ -32,6 +32,24 @@ function normalizeUrl(url: string): string {
   return url.trim().replace(/\/$/, '')
 }
 
+/**
+ * 确保地址带有协议前缀（http:// 或 https://）。
+ *
+ * 用户在自定义后端地址输入框中可能只填写域名或域名:端口（如 example.com:3000），
+ * 浏览器会把不含协议前缀的地址当作相对路径甚至非法 scheme 来解析：
+ * - "example.com"        → 相对路径，请求实际发到当前 origin，自定义后端静默失效
+ * - "example.com:3000"   → "example.com" 被当作 URL scheme，fetch 直接拒绝
+ *
+ * 此函数在保存/计算时自动补全 http:// 前缀，确保地址始终是合法的绝对 URL。
+ * 以 "/" 开头的相对路径（如 FLV 的 /live）和空值不做处理。
+ */
+function ensureProtocol(url: string): string {
+  if (!url) return url
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  if (url.startsWith('/')) return url // 相对路径，不处理
+  return `http://${url}`
+}
+
 const rawApiUrl = normalizeUrl(import.meta.env.VITE_API_URL || '')
 const rawSocketUrl = normalizeUrl(import.meta.env.VITE_SOCKET_URL || '')
 const rawFlvBaseUrl = normalizeUrl(import.meta.env.VITE_FLV_BASE_URL || '')
@@ -43,24 +61,28 @@ function getStored(key: string): string | null {
 }
 
 function computeApiUrl(): string {
-  return normalizeUrl(
-    getStored(CUSTOM_API_URL_KEY) || rawApiUrl || window.location.origin
+  return ensureProtocol(
+    normalizeUrl(
+      getStored(CUSTOM_API_URL_KEY) || rawApiUrl || window.location.origin
+    )
   )
 }
 
 function computeSocketUrl(): string {
-  return normalizeUrl(
-    getStored(CUSTOM_SOCKET_URL_KEY) || rawSocketUrl || computeApiUrl()
+  return ensureProtocol(
+    normalizeUrl(
+      getStored(CUSTOM_SOCKET_URL_KEY) || rawSocketUrl || computeApiUrl()
+    )
   )
 }
 
 function computeFlvBaseUrl(): string {
-  return (
+  return ensureProtocol(
     getStored(CUSTOM_FLV_BASE_URL_KEY) ||
-    rawFlvBaseUrl ||
-    (window.location.protocol === 'https:'
-      ? ''
-      : `http://${window.location.hostname}:3335`)
+      rawFlvBaseUrl ||
+      (window.location.protocol === 'https:'
+        ? ''
+        : `http://${window.location.hostname}:3335`)
   )
 }
 
@@ -112,6 +134,21 @@ export function getRtmpPort(): string {
   return computeRtmpPort()
 }
 
+/**
+ * 实时获取 RTMP 推流主机名。
+ * 优先从自定义 API 地址中提取主机名，未自定义时回退到当前页面 hostname。
+ * 这样用户设置自定义后端地址后，OBS 推流地址会自动跟随变化。
+ */
+export function getRtmpHost(): string {
+  const apiUrl = getApiUrl()
+  try {
+    const parsed = new URL(apiUrl)
+    return parsed.hostname
+  } catch {
+    return window.location.hostname
+  }
+}
+
 function setStored(key: string, value: string): void {
   try {
     if (value) {
@@ -131,7 +168,7 @@ export function getCustomApiUrl(): string {
 
 /** 设置自定义 API 地址；传入空字符串则清除自定义设置 */
 export function setCustomApiUrl(url: string): void {
-  const normalized = url ? normalizeUrl(url) : ''
+  const normalized = url ? ensureProtocol(normalizeUrl(url)) : ''
   setStored(CUSTOM_API_URL_KEY, normalized)
   API_URL = computeApiUrl()
   // 当 socket 未单独配置时，跟随 API 地址变化
@@ -145,7 +182,7 @@ export function getCustomSocketUrl(): string {
 
 /** 设置自定义 socket.io 地址；传入空字符串则恢复默认（跟随 API_URL） */
 export function setCustomSocketUrl(url: string): void {
-  const normalized = url ? normalizeUrl(url) : ''
+  const normalized = url ? ensureProtocol(normalizeUrl(url)) : ''
   setStored(CUSTOM_SOCKET_URL_KEY, normalized)
   SOCKET_URL = computeSocketUrl()
 }
@@ -157,7 +194,7 @@ export function getCustomFlvBaseUrl(): string {
 
 /** 设置自定义 FLV 拉流基础地址；传入空字符串则恢复默认推断 */
 export function setCustomFlvBaseUrl(url: string): void {
-  const normalized = url ? normalizeUrl(url) : ''
+  const normalized = url ? ensureProtocol(normalizeUrl(url)) : ''
   setStored(CUSTOM_FLV_BASE_URL_KEY, normalized)
   FLV_BASE_URL = computeFlvBaseUrl()
 }

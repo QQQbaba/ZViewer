@@ -874,21 +874,21 @@ export function Header() {
             label="REST API 地址"
             value={customApiUrl}
             onChange={(e) => setCustomApiUrlState(e.target.value)}
-            placeholder="例如: http://localhost:3000"
+            placeholder="例如: http://example.com:3000（可省略 http://）"
             size="md"
           />
           <Input
             label="WebSocket / 信令地址（留空则跟随 API 地址）"
             value={customSocketUrl}
             onChange={(e) => setCustomSocketUrlState(e.target.value)}
-            placeholder="例如: http://localhost:3000"
+            placeholder="例如: http://example.com:3000（可省略 http://）"
             size="md"
           />
           <Input
             label="HTTP-FLV 拉流基础地址（留空则按页面协议自动推断）"
             value={customFlvBaseUrl}
             onChange={(e) => setCustomFlvBaseUrlState(e.target.value)}
-            placeholder="例如: http://localhost:3335 或 /live"
+            placeholder="例如: http://example.com:3335 或 /live"
             size="md"
           />
           <Input

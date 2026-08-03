@@ -2,7 +2,7 @@
  * 推流模式（OBS RTMP + HTTP-FLV）API 层
  */
 
-import { apiFetch, getFlvBaseUrl, getRtmpPort } from '@/lib/api'
+import { apiFetch, getFlvBaseUrl, getRtmpHost, getRtmpPort } from '@/lib/api'
 
 /**
  * 构建拉流地址。
@@ -23,12 +23,11 @@ export function buildFlvUrl(streamKey: string): string {
 
 /**
  * 构建推流地址（仅用于显示）。
+ * 主机名从自定义后端地址提取（getRtmpHost），未自定义时回退到当前页面 hostname。
  * 端口来自 RTMP_PORT（支持用户自定义或环境变量 VITE_RTMP_PORT，默认 3334）。
- * 主机名来自 window.location.hostname。
  */
 export function getRtmpPushUrl(): string {
-  const host = window.location.hostname
-  return `rtmp://${host}:${getRtmpPort()}/live`
+  return `rtmp://${getRtmpHost()}:${getRtmpPort()}/live`
 }
 
 /**

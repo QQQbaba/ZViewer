@@ -62,6 +62,8 @@ export interface UseVoiceChatResult {
   micVolume: number
   /** 设置本地麦克风输入音量 */
   setMicVolume: (value: number) => void
+  /** 每个成员的实时音量电平 0~1（key 为 socketId，本地为 'self'） */
+  audioLevels: Map<string, number>
 }
 
 interface SignalPayload<T> {
@@ -92,6 +94,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
   const [bitrate, setBitrateState] = useState<VoiceBitrate>(
     DEFAULT_VOICE_BITRATE
   )
+  const [audioLevels, setAudioLevels] = useState<Map<string, number>>(new Map())
 
   const localStreamRef = useRef<MediaStream | null>(null)
   const processedStreamRef = useRef<MediaStream | null>(null)
@@ -111,6 +114,12 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
   const micVolumeRef = useRef(micVolume)
   const audioContextRef = useRef<AudioContext | null>(null)
   const gainNodeRef = useRef<GainNode | null>(null)
+
+  // 音量电平分析相关 refs
+  const analyserContextRef = useRef<AudioContext | null>(null)
+  const localAnalyserRef = useRef<AnalyserNode | null>(null)
+  const remoteAnalysersRef = useRef<Map<string, AnalyserNode>>(new Map())
+  const levelRafRef = useRef<number | null>(null)
 
   useEffect(() => {
     globalVolumeRef.current = globalVolume
@@ -132,6 +141,113 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
     roomIdRef.current = roomId
     usernameRef.current = username
   }, [socket, roomId, username])
+
+  // ==================== 音量电平检测 ====================
+
+  /**
+   * 为本地麦克风创建 AnalyserNode 用于电平检测。
+   * 使用独立的 AudioContext（非增益链路的 context），避免反馈。
+   */
+  const setupLocalAnalyser = useCallback(() => {
+    const stream = localStreamRef.current
+    if (!stream) return
+    try {
+      if (!analyserContextRef.current) {
+        analyserContextRef.current = new AudioContext()
+      }
+      const ctx = analyserContextRef.current
+      const source = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.6
+      source.connect(analyser)
+      localAnalyserRef.current = analyser
+    } catch (err) {
+      console.warn('[voice] setup local analyser error:', err)
+    }
+  }, [])
+
+  /**
+   * 为远端音频流创建 AnalyserNode。
+   */
+  const setupRemoteAnalyser = useCallback((socketId: string, stream: MediaStream) => {
+    try {
+      if (!analyserContextRef.current) {
+        analyserContextRef.current = new AudioContext()
+      }
+      const ctx = analyserContextRef.current
+      // 如果已存在则先清理
+      const existing = remoteAnalysersRef.current.get(socketId)
+      if (existing) {
+        existing.disconnect()
+      }
+      const source = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.6
+      source.connect(analyser)
+      remoteAnalysersRef.current.set(socketId, analyser)
+    } catch (err) {
+      console.warn('[voice] setup remote analyser error:', err)
+    }
+  }, [])
+
+  /**
+   * 从 AnalyserNode 读取音量电平 (0~1)。
+   */
+  const getLevelFromAnalyser = useCallback((analyser: AnalyserNode): number => {
+    const data = new Uint8Array(analyser.frequencyBinCount)
+    analyser.getByteTimeDomainData(data)
+    let sum = 0
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128
+      sum += v * v
+    }
+    const rms = Math.sqrt(sum / data.length)
+    // 映射到 0~1，乘以增益因子使可视化更明显
+    return Math.min(1, rms * 2.5)
+  }, [])
+
+  /**
+   * 音量电平检测循环（requestAnimationFrame）。
+   */
+  const startLevelDetection = useCallback(() => {
+    if (levelRafRef.current) return
+
+    const tick = () => {
+      const levels = new Map<string, number>()
+
+      // 本地电平
+      if (localAnalyserRef.current && micVolumeRef.current > 0) {
+        const level = getLevelFromAnalyser(localAnalyserRef.current)
+        levels.set('self', micEnabledRef.current ? level : 0)
+      }
+
+      // 远端电平
+      remoteAnalysersRef.current.forEach((analyser, socketId) => {
+        levels.set(socketId, getLevelFromAnalyser(analyser))
+      })
+
+      setAudioLevels(levels)
+      levelRafRef.current = requestAnimationFrame(tick)
+    }
+
+    levelRafRef.current = requestAnimationFrame(tick)
+  }, [getLevelFromAnalyser])
+
+  const stopLevelDetection = useCallback(() => {
+    if (levelRafRef.current) {
+      cancelAnimationFrame(levelRafRef.current)
+      levelRafRef.current = null
+    }
+    setAudioLevels(new Map())
+  }, [])
+
+  // micEnabled 的 ref 供电平检测循环读取
+  const micEnabledRef = useRef(true)
+  useEffect(() => {
+    micEnabledRef.current = micEnabled
+  }, [micEnabled])
 
   const applyAudioVolume = useCallback((socketId: string) => {
     const audioEl = remoteAudioElementsRef.current.get(socketId)
@@ -160,6 +276,13 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       audioEl.srcObject = null
       audioEl.remove()
       remoteAudioElementsRef.current.delete(socketId)
+    }
+
+    // 清理远端 analyser
+    const analyser = remoteAnalysersRef.current.get(socketId)
+    if (analyser) {
+      analyser.disconnect()
+      remoteAnalysersRef.current.delete(socketId)
     }
   }, [])
 
@@ -196,6 +319,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       cleanupPeerConnection(socketId)
     })
     stopMonitor()
+    stopLevelDetection()
     localStreamRef.current?.getTracks().forEach((track) => track.stop())
     localStreamRef.current = null
     processedStreamRef.current = null
@@ -206,6 +330,17 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
     }
     audioContextRef.current = null
     gainNodeRef.current = null
+
+    // 清理 analyser context
+    localAnalyserRef.current = null
+    remoteAnalysersRef.current.clear()
+    try {
+      analyserContextRef.current?.close()
+    } catch {
+      // ignore
+    }
+    analyserContextRef.current = null
+
     setMembers([])
     setJoined(false)
     setJoining(false)
@@ -213,7 +348,8 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
     setMonitorEnabled(false)
     setMicVolumeState(1)
     setPeerLatencies(new Map())
-  }, [cleanupPeerConnection, stopMonitor])
+    setAudioLevels(new Map())
+  }, [cleanupPeerConnection, stopMonitor, stopLevelDetection])
 
   /**
    * 将当前码率应用到指定 PeerConnection 的 audio sender。
@@ -291,6 +427,9 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
           audioEl.srcObject = remoteStream
         }
         applyAudioVolume(targetSocketId)
+
+        // 为远端流创建 analyser 用于音量电平检测
+        setupRemoteAnalyser(targetSocketId, remoteStream)
       }
 
       pc.onconnectionstatechange = () => {
@@ -307,7 +446,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
 
       return pc
     },
-    [cleanupPeerConnection, applyAudioVolume, applyBitrateToConnection]
+    [cleanupPeerConnection, applyAudioVolume, applyBitrateToConnection, setupRemoteAnalyser]
   )
 
   const createAndSendOffer = useCallback(
@@ -342,10 +481,15 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       if (!pc || !currentSocket) return
 
       try {
-        if (pc.signalingState !== 'stable') {
+        // 处理 glare：如果本地已发 offer（have-local-offer），先回滚再接受远端 offer
+        if (pc.signalingState === 'have-local-offer') {
+          console.log('[voice] glare detected, rolling back local offer for', payload.from)
+          await pc.setLocalDescription({ type: 'rollback' })
+        } else if (pc.signalingState !== 'stable') {
           console.log('[voice] skip offer in state:', pc.signalingState)
           return
         }
+
         await pc.setRemoteDescription(new RTCSessionDescription(payload.data))
 
         const pending = pendingIceCandidatesRef.current.get(payload.from) ?? []
@@ -520,6 +664,10 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       }
       setMembers(initialMembers)
 
+      // 设置本地音量分析器并启动电平检测
+      setupLocalAnalyser()
+      startLevelDetection()
+
       // 向所有已在房间语音中的成员发送 offer
       for (const memberId of response.members) {
         void createAndSendOffer(memberId)
@@ -531,7 +679,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       localStreamRef.current = null
       setJoining(false)
     }
-  }, [joined, joining, micEnabled, username, createAndSendOffer])
+  }, [joined, joining, micEnabled, username, createAndSendOffer, setupLocalAnalyser, startLevelDetection])
 
   const leave = useCallback(() => {
     const currentSocket = socketRef.current
@@ -745,5 +893,6 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
     setMicVolume,
     bitrate,
     setBitrate,
+    audioLevels,
   }
 }

@@ -114,7 +114,7 @@ export const useThemeStore = create<ThemeState>()(
       radius: DEFAULT_RADIUS_PRESET,
       glassStrength: 0.6,
       glassBlur: 12,
-      reducedMotion: true,
+      reducedMotion: false,
       backgroundImage: null,
       backgroundBlur: 0,
       backgroundOpacity: 1,
