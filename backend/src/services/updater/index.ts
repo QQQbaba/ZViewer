@@ -157,17 +157,17 @@ interface GithubRelease {
  *    - 如果本地是开发版本（0.0.0-dev.xxx），正式版总是"有更新"
  *
  * 2. 预发布版（prerelease，tag: latest）：
- *    - 如果本地是正式版 → 有更新（预发布版包含最新的正式版之后的改动）
- *      但不主动提示，仅在无正式版更新时展示
- *    - 如果本地也是开发版本 → 比较 git SHA，不同则有更新
+ *    - 仅当 includePrerelease=true 时才考虑
  *    - tag_name 为 `latest`，无法做语义化比较
  *
  * 整体逻辑：
- * - 优先检查正式版是否有更新
- * - 如果正式版无更新，再检查预发布版
+ * - includePrerelease=false：只看正式版，忽略所有预发布版
+ * - includePrerelease=true：优先正式版，无正式版更新时再看预发布版
  * - 本地版本 0.0.0（无法确定）→ 总是提示有更新
  */
-export async function getUpdateInfo(): Promise<UpdateInfo> {
+export async function getUpdateInfo(
+  includePrerelease = false,
+): Promise<UpdateInfo> {
   const currentVersion = getLocalVersion();
   const assetName = getPlatformAssetName();
 
@@ -183,7 +183,10 @@ export async function getUpdateInfo(): Promise<UpdateInfo> {
   // 优先找最新正式版
   const stableRelease = releases.find((r) => !r.prerelease);
   // 找最新的 prerelease（通常是 main 分支推送的 latest tag）
-  const prerelease = releases.find((r) => r.prerelease);
+  // 仅在 includePrerelease=true 时才考虑预发布版
+  const prerelease = includePrerelease
+    ? releases.find((r) => r.prerelease)
+    : undefined;
 
   let release: GithubRelease;
   let hasUpdate: boolean;
@@ -208,30 +211,31 @@ export async function getUpdateInfo(): Promise<UpdateInfo> {
         release = stableRelease;
         hasUpdate = true;
       } else if (prerelease) {
-        // 正式版不比本地新，但有预发布版 → 检查预发布版
-        // 预发布版的 tag_name 是 `latest`，无法做版本比较
-        // 如果本地是正式版本，预发布版可能包含更多改动 → 提示有更新
+        // 正式版不比本地新，但有预发布版且用户允许 → 检查预发布版
         release = prerelease;
         hasUpdate = true;
       } else {
-        // 无预发布版，已是最新
+        // 无预发布版或用户未开启 → 已是最新
         release = stableRelease;
         hasUpdate = false;
       }
     }
-  } else {
-    // 没有正式版 Release，只有预发布版
-    release = prerelease || releases[0];
+  } else if (prerelease) {
+    // 没有正式版 Release，但有预发布版（仅 includePrerelease=true 时到达）
+    release = prerelease;
 
     if (isDevVersion(currentVersion)) {
-      // 本地也是开发版本 → 比较版本号
-      // 预发布版的 tag_name 是 `latest`，无法直接做语义化比较
-      // 开发版本号格式 0.0.0-dev.<sha> 与 `latest` 不兼容，保守提示有更新
+      // 本地也是开发版本 → 保守提示有更新
       hasUpdate = true;
     } else {
       // 本地是正式版，远程只有预发布版 → 提示有更新
       hasUpdate = true;
     }
+  } else {
+    // 没有正式版，也没有预发布版（或未开启预发布）
+    // 使用第一个 release 作为信息来源，但不提示有更新
+    release = releases[0];
+    hasUpdate = false;
   }
 
   const remoteVersion = release.tag_name;
@@ -606,11 +610,13 @@ async function applyUpdateFromArchive(
 /**
  * 从 GitHub Releases 下载最新构建产物并应用更新。
  */
-export async function applyUpdate(): Promise<{
+export async function applyUpdate(
+  includePrerelease = false,
+): Promise<{
   success: boolean;
   message: string;
 }> {
-  const info = await getUpdateInfo();
+  const info = await getUpdateInfo(includePrerelease);
   if (!info.downloadUrl) {
     throw new Error('未找到可用的下载地址');
   }

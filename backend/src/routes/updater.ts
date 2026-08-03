@@ -25,11 +25,12 @@ router.use(authenticateToken, rootOnly);
 router.get(
   '/check',
   async (
-    _req: AuthenticatedRequest,
+    req: AuthenticatedRequest,
     res: import('express').Response,
   ): Promise<void> => {
     try {
-      const info = await getUpdateInfo();
+      const includePrerelease = req.query.includePrerelease === 'true';
+      const info = await getUpdateInfo(includePrerelease);
       res.json({ success: true, info });
     } catch (err) {
       console.error('update check error:', err);
@@ -45,11 +46,12 @@ router.get(
 router.post(
   '/apply',
   async (
-    _req: AuthenticatedRequest,
+    req: AuthenticatedRequest,
     res: import('express').Response,
   ): Promise<void> => {
     try {
-      const result = await applyUpdate();
+      const includePrerelease = req.query.includePrerelease === 'true';
+      const result = await applyUpdate(includePrerelease);
       res.json(result);
     } catch (err) {
       console.error('update apply error:', err);
