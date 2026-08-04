@@ -57,6 +57,7 @@ import {
 import {
   resolveOpenList,
   buildOpenListProxyUrl,
+  buildOpenListDirectUrl,
 } from '@/modules/openlist/openlistApi'
 import OpenListBrowser from '@/modules/openlist/OpenListBrowser'
 import { resolveWebDAV, buildWebDAVProxyUrl } from '@/modules/webdav/webdavApi'
@@ -151,6 +152,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
     path: '',
   })
   const [webdavDirectLink, setWebdavDirectLink] = useState(false)
+  const [openlistDirectLink, setOpenlistDirectLink] = useState(false)
   const [ftp, setFtp] = useState<FTPParams>({
     serverUrl: '',
     path: '',
@@ -511,6 +513,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         serverUrl: mount.serverUrl || '',
         path: normalizeMountPath(mount.path || ''),
       })
+      setOpenlistDirectLink(mount.directLink)
     }
   }
 
@@ -567,19 +570,36 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
             })
             added++
           } else if (sourceType === 'openlist') {
-            const resolved = await resolveOpenList(mountId, normalizedPath)
-            const title = resolved.title || extractTitleFromUrl(normalizedPath)
-            const movieUrl = buildOpenListProxyUrl(mountId, normalizedPath)
-            await addMovie(roomId, {
-              url: movieUrl,
-              title,
-              source: 'openlist',
-              format: resolved.format,
-              duration: resolved.duration,
-              serverUrl: openlist.serverUrl.trim() || undefined,
-              path: normalizedPath,
-              directLink: false,
-            })
+            if (openlistDirectLink) {
+              const movieUrl = buildOpenListDirectUrl(
+                openlist.serverUrl.trim(),
+                normalizedPath
+              )
+              const title = extractTitleFromUrl(normalizedPath)
+              await addMovie(roomId, {
+                url: movieUrl,
+                title,
+                source: 'openlist',
+                serverUrl: openlist.serverUrl.trim() || undefined,
+                path: normalizedPath,
+                directLink: true,
+              })
+            } else {
+              const resolved = await resolveOpenList(mountId, normalizedPath)
+              const title =
+                resolved.title || extractTitleFromUrl(normalizedPath)
+              const movieUrl = buildOpenListProxyUrl(mountId, normalizedPath)
+              await addMovie(roomId, {
+                url: movieUrl,
+                title,
+                source: 'openlist',
+                format: resolved.format,
+                duration: resolved.duration,
+                serverUrl: openlist.serverUrl.trim() || undefined,
+                path: normalizedPath,
+                directLink: false,
+              })
+            }
             added++
           }
         }
@@ -603,6 +623,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
       ftp.username,
       ftp.password,
       openlist.serverUrl,
+      openlistDirectLink,
       addMovie,
     ]
   )
@@ -613,6 +634,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
     setSelectedMountId('')
     setWebdav({ serverUrl: '', path: '' })
     setWebdavDirectLink(false)
+    setOpenlistDirectLink(false)
     setFtp({ serverUrl: '', path: '', port: 21, username: '', password: '' })
     setOpenlist({ serverUrl: '', path: '' })
     setServerFilePath('')
@@ -809,24 +831,42 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           return
         }
         const mountId = Number(selectedMountId)
-        if (!mountId) {
-          message.warning('请选择已保存的 OpenList 挂载')
-          return
+        let title: string
+        let movieUrl: string
+        let format: MediaFormat = 'mp4'
+        let duration: number | undefined
+
+        if (openlistDirectLink) {
+          if (!openlist.serverUrl.trim()) {
+            message.warning('请填写服务器地址')
+            return
+          }
+          movieUrl = buildOpenListDirectUrl(
+            openlist.serverUrl.trim(),
+            openlist.path.trim()
+          )
+          title = extractTitleFromUrl(openlist.path.trim())
+        } else {
+          if (!mountId) {
+            message.warning('请选择已保存的 OpenList 挂载')
+            return
+          }
+          setResolveProgress('正在解析 OpenList 文件...')
+          const resolved = await resolveOpenList(mountId, openlist.path.trim())
+          title = resolved.title || extractTitleFromUrl(openlist.path.trim())
+          movieUrl = buildOpenListProxyUrl(mountId, openlist.path.trim())
+          format = resolved.format
+          duration = resolved.duration
         }
-        setResolveProgress('正在解析 OpenList 文件...')
-        const resolved = await resolveOpenList(mountId, openlist.path.trim())
-        const title =
-          resolved.title || extractTitleFromUrl(openlist.path.trim())
-        const movieUrl = buildOpenListProxyUrl(mountId, openlist.path.trim())
         await addMovie(roomId, {
           url: movieUrl,
           title,
           source: 'openlist',
-          format: resolved.format,
-          duration: resolved.duration,
+          format,
+          duration,
           serverUrl: openlist.serverUrl.trim() || undefined,
           path: openlist.path.trim(),
-          directLink: false,
+          directLink: openlistDirectLink,
         })
         resetForm()
         message.success('影片已添加')
@@ -1148,7 +1188,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
             onChange={(e) =>
               setOpenlist((prev) => ({ ...prev, serverUrl: e.target.value }))
             }
-            placeholder="OpenList 服务器地址（仅手动填写时需要，已选挂载自动填充）"
+            placeholder="OpenList 服务器地址（直链模式必填，已选挂载自动填充）"
           />
           <Input
             size="sm"
@@ -1167,8 +1207,14 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
               }
             }}
           />
-          {/* OpenList 始终使用服务器转发模式：WebDAV 路径不是可播放直链，
-              直连会被浏览器 ORB 策略阻止，必须通过后端代理处理认证与 CORS */}
+          <Dropdown
+            value={openlistDirectLink ? 'direct' : 'proxy'}
+            options={[
+              { value: 'proxy', label: '服务器转发' },
+              { value: 'direct', label: '直链直连' },
+            ]}
+            onChange={(value) => setOpenlistDirectLink(value === 'direct')}
+          />
         </Space>
       )
     }
