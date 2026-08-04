@@ -103,7 +103,7 @@ router.post('/mounts/test', async (req: AuthenticatedRequest, res: Response): Pr
 // 2.1 挂载 CRUD - POST /mounts
 router.post('/mounts', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { name, serverUrl, path, username, password } = req.body ?? {};
+    const { name, serverUrl, path, username, password, directLink } = req.body ?? {};
 
     if (typeof name !== 'string' || !name.trim()) {
       res.status(400).json({ success: false, message: '挂载名称不能为空' });
@@ -141,6 +141,7 @@ router.post('/mounts', async (req: AuthenticatedRequest, res: Response): Promise
       path: params.path,
       username: params.username || null,
       password: params.password || null,
+      directLink: directLink === true,
       userId: req.user!.userId,
     } as UserMount);
     await repo.save(mount);
@@ -175,7 +176,7 @@ router.put('/mounts/:id', async (req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
-    const { name, serverUrl, path, username, password } = req.body ?? {};
+    const { name, serverUrl, path, username, password, directLink } = req.body ?? {};
 
     if (typeof name !== 'string' || !name.trim()) {
       res.status(400).json({ success: false, message: '挂载名称不能为空' });
@@ -212,6 +213,7 @@ router.put('/mounts/:id', async (req: AuthenticatedRequest, res: Response): Prom
     if (typeof password === 'string') {
       mount.password = password || null;
     }
+    mount.directLink = directLink === true;
     await repo.save(mount);
 
     res.json({

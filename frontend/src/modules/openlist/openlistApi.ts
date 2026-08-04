@@ -158,3 +158,16 @@ export async function resolveOpenList(
 export function buildOpenListProxyUrl(mountId: number, path: string): string {
   return buildProxyUrl('openlist', { mountId, path })
 }
+
+/**
+ * 构建 OpenList 直链下载 URL
+ * OpenList/AList 的 WebDAV 端点为 /dav，下载端点为 /d
+ * 将 /dav 后缀替换为 /d，若无 /dav 后缀则直接拼接
+ */
+export function buildOpenListDirectUrl(serverUrl: string, path: string): string {
+  const url = serverUrl.trim()
+  if (url.endsWith('/dav')) {
+    return `${url.slice(0, -4)}/d${path}`
+  }
+  return `${url}${path}`
+}
