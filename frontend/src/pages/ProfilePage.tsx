@@ -487,7 +487,7 @@ export default function ProfilePage() {
             ) : bilibiliUser ? (
               <div className="space-y-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
                   <Avatar
                     size="md"
                     src={buildBilibiliImageProxyUrl(bilibiliUser.avatar)}
