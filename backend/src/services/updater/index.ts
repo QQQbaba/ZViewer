@@ -10,25 +10,36 @@ const REPO_NAME = 'ZViewer';
 
 /** CDN 加速配置，由调用方从 SystemSettings 读取后传入 */
 interface CdnConfig {
-  apiCdnDomain?: string;
-  releaseCdnDomain?: string;
-  mainCdnDomain?: string;
+  /** CDN 代理地址（含协议前缀），如 https://gh-proxy.com */
+  proxyUrl: string;
 }
 
 /**
- * 将 URL 的 host 替换为 CDN 域名（仅当 host 匹配 originalHost 时）。
+ * 将 GitHub 相关 URL 应用 CDN 代理前缀。
+ *
+ * gh-proxy.com 等代理的使用方式是在原始 URL 前加上代理地址：
+ *   https://api.github.com/repos/...  →  https://gh-proxy.com/https://api.github.com/repos/...
+ *   https://github.com/.../releases/download/...  →  https://gh-proxy.com/https://github.com/.../releases/download/...
  *
  * @param url 原始 URL
- * @param originalHost 需要替换的源站 host（如 api.github.com、objects.githubusercontent.com）
- * @param cdnDomain CDN 加速域名（不含协议，如 api.github.cdn.zero251.xyz）
- * @returns 替换后的 URL（host 不匹配时返回原 URL）
+ * @param proxyUrl CDN 代理地址（如 https://gh-proxy.com）
+ * @returns 加速后的 URL（非 GitHub URL 或已加前缀时返回原 URL）
  */
-function applyCdnToUrl(url: string, originalHost: string, cdnDomain: string): string {
+function applyCdnToUrl(url: string, proxyUrl: string): string {
+  if (!proxyUrl) return url;
+  const prefix = proxyUrl.replace(/\/+$/, '');
+  // 已有代理前缀则不重复添加
+  if (url.startsWith(prefix + '/')) return url;
   try {
     const parsed = new URL(url);
-    if (parsed.hostname === originalHost) {
-      parsed.hostname = cdnDomain.trim();
-      return parsed.toString();
+    const githubHosts = [
+      'api.github.com',
+      'github.com',
+      'objects.githubusercontent.com',
+      'raw.githubusercontent.com',
+    ];
+    if (githubHosts.includes(parsed.hostname)) {
+      return `${prefix}/${url}`;
     }
     return url;
   } catch {
@@ -70,7 +81,7 @@ function getPlatformAssetName(): string {
 }
 
 /**
- * HTTPS GET JSON — 直接请求 GitHub API，不再经过 CDN 代理。
+ * HTTPS GET JSON — 请求 GitHub API，支持 CDN 代理加速。
  */
 function httpsGetJson<T>(
   url: string,
@@ -93,7 +104,12 @@ function httpsGetJson<T>(
           res.statusCode < 400 &&
           res.headers.location
         ) {
-          httpsGetJson<T>(res.headers.location, cdnConfig).then(resolve).catch(reject);
+          // 重定向跟随：对重定向 URL 也应用 CDN 代理
+          let redirectUrl = res.headers.location;
+          if (cdnConfig?.proxyUrl) {
+            redirectUrl = applyCdnToUrl(redirectUrl, cdnConfig.proxyUrl);
+          }
+          httpsGetJson<T>(redirectUrl, cdnConfig).then(resolve).catch(reject);
           return;
         }
         if (res.statusCode && res.statusCode >= 400) {
@@ -206,18 +222,14 @@ export async function getUpdateInfo(
   // 读取 CDN 加速配置
   const settings = await getSystemSettings();
   const cdnConfig: CdnConfig | undefined = settings.cdnAccelerate
-    ? {
-        apiCdnDomain: settings.apiCdnDomain || undefined,
-        releaseCdnDomain: settings.releaseCdnDomain || undefined,
-        mainCdnDomain: settings.mainCdnDomain || undefined,
-      }
+    ? { proxyUrl: settings.cdnProxyUrl || 'https://gh-proxy.com' }
     : undefined;
 
-  // 替换 api.github.com 为 CDN 域名（更新检测加速）
+  // 对 GitHub API URL 应用 CDN 代理（更新检测加速）
   let apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=10`;
-  if (cdnConfig?.apiCdnDomain) {
-    apiUrl = applyCdnToUrl(apiUrl, 'api.github.com', cdnConfig.apiCdnDomain);
-    console.log(`[updater] CDN 检测加速: ${cdnConfig.apiCdnDomain}`);
+  if (cdnConfig?.proxyUrl) {
+    apiUrl = applyCdnToUrl(apiUrl, cdnConfig.proxyUrl);
+    console.log(`[updater] CDN 加速: ${cdnConfig.proxyUrl}`);
   }
 
   // 获取 releases 列表（包含正式版和预发布版）
@@ -334,18 +346,10 @@ function downloadFile(
         // 关闭当前文件流，重定向后重新下载（保留进度回调）
         file.close();
         fs.unlinkSync(dest);
-        // CDN 替换：将 objects.githubusercontent.com 替换为 release CDN 域名
+        // CDN 代理：对重定向 URL 也应用代理前缀（统一处理所有 GitHub 域名）
         let redirectUrl = res.headers.location;
-        if (cdnConfig?.releaseCdnDomain) {
-          const before = redirectUrl;
-          redirectUrl = applyCdnToUrl(
-            redirectUrl,
-            'objects.githubusercontent.com',
-            cdnConfig.releaseCdnDomain,
-          );
-          if (redirectUrl !== before) {
-            console.log(`[updater] CDN 下载加速: ${cdnConfig.releaseCdnDomain}`);
-          }
+        if (cdnConfig?.proxyUrl) {
+          redirectUrl = applyCdnToUrl(redirectUrl, cdnConfig.proxyUrl);
         }
         downloadFile(redirectUrl, dest, onProgress, cdnConfig)
           .then(resolve)
@@ -781,22 +785,17 @@ export async function applyUpdate(
   // 读取 CDN 配置（getUpdateInfo 已读取一次，这里再读一次确保最新）
   const settings = await getSystemSettings();
   const cdnConfig: CdnConfig | undefined = settings.cdnAccelerate
-    ? {
-        apiCdnDomain: settings.apiCdnDomain || undefined,
-        releaseCdnDomain: settings.releaseCdnDomain || undefined,
-        mainCdnDomain: settings.mainCdnDomain || undefined,
-      }
+    ? { proxyUrl: settings.cdnProxyUrl || 'https://gh-proxy.com' }
     : undefined;
 
-  // 若配置了 main CDN 域名，将 downloadUrl 的 github.com 替换为 CDN 域名
-  // 这样 Release 下载第一步（请求 github.com 获取 302）也走 CDN 加速
+  // 对 downloadUrl 应用 CDN 代理前缀（覆盖 github.com 等所有 GitHub 域名）
   let downloadUrl = info.downloadUrl;
-  if (cdnConfig?.mainCdnDomain) {
-    downloadUrl = applyCdnToUrl(downloadUrl, 'github.com', cdnConfig.mainCdnDomain);
-    console.log(`[updater] CDN 主站加速: ${cdnConfig.mainCdnDomain}`);
+  if (cdnConfig?.proxyUrl) {
+    downloadUrl = applyCdnToUrl(downloadUrl, cdnConfig.proxyUrl);
+    console.log(`[updater] CDN 加速: ${cdnConfig.proxyUrl}`);
   }
 
-  // downloadFile 在 302 重定向跟随时会替换 objects.githubusercontent.com 为 release CDN 域名
+  // downloadFile 在 302 重定向跟随时也会对重定向 URL 应用 CDN 代理前缀
   return applyUpdateFromArchive(downloadUrl, info.assetName, onStage, cdnConfig);
 }
 

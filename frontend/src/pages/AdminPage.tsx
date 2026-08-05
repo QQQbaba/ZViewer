@@ -108,9 +108,7 @@ interface AdminSettings {
   betaFeaturesEnabled: boolean
   dashDisabled: boolean
   cdnAccelerate: boolean
-  apiCdnDomain: string
-  releaseCdnDomain: string
-  mainCdnDomain: string
+  cdnProxyUrl: string
   dataSourceConfig?: {
     aniSubsSubscriptions?: string[]
     kazumiRules?: string[]
@@ -141,9 +139,7 @@ export default function AdminPage() {
     betaFeaturesEnabled: false,
     dashDisabled: false,
     cdnAccelerate: false,
-    apiCdnDomain: '',
-    releaseCdnDomain: '',
-    mainCdnDomain: '',
+    cdnProxyUrl: 'https://gh-proxy.com',
   })
   const [loading, setLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -764,9 +760,7 @@ export default function AdminPage() {
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
           dashDisabled: settings.dashDisabled,
           cdnAccelerate: settings.cdnAccelerate,
-          apiCdnDomain: settings.apiCdnDomain,
-          releaseCdnDomain: settings.releaseCdnDomain,
-          mainCdnDomain: settings.mainCdnDomain,
+          cdnProxyUrl: settings.cdnProxyUrl,
           dataSourceConfig: settings.dataSourceConfig,
         }),
       })
@@ -1516,7 +1510,7 @@ export default function AdminPage() {
                           type="secondary"
                           className="block text-xs mt-0.5"
                         >
-                          开启后，更新检测和 Release 下载将走 CDN 加速域名
+                          开启后，更新检测和 Release 下载将走 CDN 代理加速
                         </Text>
                       </div>
                       <Switch
@@ -1533,56 +1527,26 @@ export default function AdminPage() {
                       <div className="space-y-3">
                         <div>
                           <Text className="mb-1.5 block text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
-                            更新检测加速域名（源站 api.github.com）
+                            CDN 代理地址
                           </Text>
                           <Input
-                            value={settings.apiCdnDomain}
+                            value={settings.cdnProxyUrl}
                             onChange={(e) =>
                               setSettings((prev) => ({
                                 ...prev,
-                                apiCdnDomain: e.target.value.trim(),
+                                cdnProxyUrl: e.target.value.trim(),
                               }))
                             }
-                            placeholder="api.github.cdn.zero251.xyz"
+                            placeholder="https://gh-proxy.com"
                           />
-                        </div>
-                        <div>
-                          <Text className="mb-1.5 block text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
-                            Release 下载加速域名（源站 objects.githubusercontent.com）
+                          <Text
+                            type="secondary"
+                            className="block text-xs mt-1.5"
+                          >
+                            使用 GitHub 代理前缀方式加速，默认
+                            https://gh-proxy.com，可替换为自建代理。
                           </Text>
-                          <Input
-                            value={settings.releaseCdnDomain}
-                            onChange={(e) =>
-                              setSettings((prev) => ({
-                                ...prev,
-                                releaseCdnDomain: e.target.value.trim(),
-                              }))
-                            }
-                            placeholder="release.github.cdn.zero251.xyz"
-                          />
                         </div>
-                        <div>
-                          <Text className="mb-1.5 block text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
-                            GitHub 主站加速域名（源站 github.com）
-                          </Text>
-                          <Input
-                            value={settings.mainCdnDomain}
-                            onChange={(e) =>
-                              setSettings((prev) => ({
-                                ...prev,
-                                mainCdnDomain: e.target.value.trim(),
-                              }))
-                            }
-                            placeholder="main.github.cdn.zero251.xyz"
-                          />
-                        </div>
-                        <Text
-                          type="secondary"
-                          className="block text-xs"
-                        >
-                          仅填写域名，不需要 https://
-                          前缀。三个域名可独立配置。
-                        </Text>
                       </div>
                     )}
                   </div>

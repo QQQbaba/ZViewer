@@ -408,9 +408,7 @@ router.get(
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
           dashDisabled: settings.dashDisabled,
           cdnAccelerate: settings.cdnAccelerate,
-          apiCdnDomain: settings.apiCdnDomain,
-          releaseCdnDomain: settings.releaseCdnDomain,
-          mainCdnDomain: settings.mainCdnDomain,
+          cdnProxyUrl: settings.cdnProxyUrl,
         },
       });
     } catch (err) {
@@ -428,7 +426,7 @@ router.put(
     res: import('express').Response,
   ): Promise<void> => {
     try {
-      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled, dashDisabled, cdnAccelerate, apiCdnDomain, releaseCdnDomain, mainCdnDomain } = req.body;
+      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled, dashDisabled, cdnAccelerate, cdnProxyUrl } = req.body;
 
       if (typeof autoDeleteInactiveRooms !== 'boolean') {
         res.status(400).json({
@@ -494,24 +492,10 @@ router.put(
         });
         return;
       }
-      if (apiCdnDomain !== undefined && typeof apiCdnDomain !== 'string') {
+      if (cdnProxyUrl !== undefined && typeof cdnProxyUrl !== 'string') {
         res.status(400).json({
           success: false,
-          message: 'apiCdnDomain 必须是字符串',
-        });
-        return;
-      }
-      if (releaseCdnDomain !== undefined && typeof releaseCdnDomain !== 'string') {
-        res.status(400).json({
-          success: false,
-          message: 'releaseCdnDomain 必须是字符串',
-        });
-        return;
-      }
-      if (mainCdnDomain !== undefined && typeof mainCdnDomain !== 'string') {
-        res.status(400).json({
-          success: false,
-          message: 'mainCdnDomain 必须是字符串',
+          message: 'cdnProxyUrl 必须是字符串',
         });
         return;
       }
@@ -540,14 +524,8 @@ router.put(
       if (cdnAccelerate !== undefined) {
         settings.cdnAccelerate = cdnAccelerate;
       }
-      if (apiCdnDomain !== undefined) {
-        settings.apiCdnDomain = apiCdnDomain.trim();
-      }
-      if (releaseCdnDomain !== undefined) {
-        settings.releaseCdnDomain = releaseCdnDomain.trim();
-      }
-      if (mainCdnDomain !== undefined) {
-        settings.mainCdnDomain = mainCdnDomain.trim();
+      if (cdnProxyUrl !== undefined) {
+        settings.cdnProxyUrl = cdnProxyUrl.trim();
       }
       await settingsRepo.save(settings);
 
@@ -562,9 +540,7 @@ router.put(
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
           dashDisabled: settings.dashDisabled,
           cdnAccelerate: settings.cdnAccelerate,
-          apiCdnDomain: settings.apiCdnDomain,
-          releaseCdnDomain: settings.releaseCdnDomain,
-          mainCdnDomain: settings.mainCdnDomain,
+          cdnProxyUrl: settings.cdnProxyUrl,
         },
       });
     } catch (err) {

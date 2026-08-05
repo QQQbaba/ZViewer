@@ -18,9 +18,7 @@ const DEFAULT_SETTINGS: Partial<SystemSettings> = {
   betaFeaturesEnabled: false,
   dashDisabled: false,
   cdnAccelerate: false,
-  apiCdnDomain: '',
-  releaseCdnDomain: '',
-  mainCdnDomain: '',
+  cdnProxyUrl: 'https://gh-proxy.com',
 };
 
 /**
