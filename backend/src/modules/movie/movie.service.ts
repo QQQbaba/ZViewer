@@ -180,6 +180,19 @@ export class MovieService {
     });
 
     await repo.save(movie);
+
+    // 代理模式下，用新生成的 movieId 重写 url 为基于影片 ID 的 stream URL，
+    // 这样房间内任何成员（含观众）都能访问该影片流，不依赖 userId 查询挂载表。
+    // 直链模式下 url 已是真实下载 URL（OpenList 由后端 /direct-url 接口获取，
+    // WebDAV 由后端 /direct-url 接口拼接），无需重写。
+    const sourceType = typeof data.source === 'string' ? data.source : '';
+    const isProxyMode = data.directLink !== true && (sourceType === 'webdav' || sourceType === 'openlist');
+    if (isProxyMode && movie.id) {
+      const streamUrl = `/api/${sourceType}/stream?movieId=${movie.id}`;
+      await repo.update({ id: movie.id }, { url: streamUrl });
+      movie.url = streamUrl;
+    }
+
     return this.serializeMovie(movie);
   }
 
