@@ -57,7 +57,12 @@ function getParentPath(path?: string): string | undefined {
 }
 
 function getEntryName(path: string): string {
-  return path.replace(/\/$/, '').split('/').pop() || path
+  const raw = path.replace(/\/$/, '').split('/').pop() || path
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }
 
 export default function MountBrowserBase<T extends DirectoryEntry>({
@@ -349,11 +354,11 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
 
             <div className="grid h-[420px] grid-cols-2 gap-4 overflow-hidden rounded-2xl border border-[var(--md-sys-color-outline-variant)] backdrop-blur-sm">
               {/* 左侧：上级目录 */}
-              <div className="flex flex-col border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/60">
-                <div className="border-b border-[var(--md-sys-color-outline-variant)] px-4 py-3 text-sm font-semibold uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
+              <div className="flex min-h-0 flex-col border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/60">
+                <div className="shrink-0 border-b border-[var(--md-sys-color-outline-variant)] px-4 py-3 text-sm font-semibold uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
                   上级目录
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 zen-scroll">
+                <div className="zen-scroll min-h-0 flex-1 overflow-y-auto p-3">
                   {currentPath ? (
                     parentEntries.length > 0 ? (
                       parentEntries.map((entry) =>
@@ -375,11 +380,11 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
               </div>
 
               {/* 右侧：当前目录 */}
-              <div className="flex flex-col bg-[var(--md-sys-color-surface)]/80">
-                <div className="border-b border-[var(--md-sys-color-outline-variant)] px-4 py-3 text-sm font-semibold uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
+              <div className="flex min-h-0 flex-col bg-[var(--md-sys-color-surface)]/80">
+                <div className="shrink-0 border-b border-[var(--md-sys-color-outline-variant)] px-4 py-3 text-sm font-semibold uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
                   {currentPath ? getEntryName(currentPath) : '根目录'}
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 zen-scroll">
+                <div className="zen-scroll min-h-0 flex-1 overflow-y-auto p-3">
                   {entries.length > 0 ? (
                     entries.map((entry) => renderEntry(entry, 'right'))
                   ) : (
