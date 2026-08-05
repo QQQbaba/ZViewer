@@ -17,6 +17,10 @@ const DEFAULT_SETTINGS: Partial<SystemSettings> = {
   roomCreationMode: 'admin-only',
   betaFeaturesEnabled: false,
   dashDisabled: false,
+  cdnAccelerate: false,
+  apiCdnDomain: '',
+  releaseCdnDomain: '',
+  mainCdnDomain: '',
 };
 
 /**

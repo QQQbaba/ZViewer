@@ -43,6 +43,35 @@ export class SystemSettings {
   @Column({ type: 'boolean', default: false })
   dashDisabled!: boolean;
 
+  /**
+   * 更新 CDN 加速开关。
+   * - true：更新检测和下载走 CDN 加速域名
+   * - false：直连 GitHub
+   */
+  @Column({ type: 'boolean', default: false })
+  cdnAccelerate!: boolean;
+
+  /**
+   * GitHub API 加速域名（不含协议前缀），如 api.github.cdn.zero251.xyz。
+   * 仅在 cdnAccelerate 为 true 时生效，替换 api.github.com。
+   */
+  @Column({ type: 'text', default: '' })
+  apiCdnDomain!: string;
+
+  /**
+   * GitHub Release 下载加速域名（不含协议前缀），如 release.github.cdn.zero251.xyz。
+   * 仅在 cdnAccelerate 为 true 时生效，替换 objects.githubusercontent.com。
+   */
+  @Column({ type: 'text', default: '' })
+  releaseCdnDomain!: string;
+
+  /**
+   * GitHub 主站加速域名（不含协议前缀），如 main.github.cdn.zero251.xyz。
+   * 仅在 cdnAccelerate 为 true 时生效，替换 github.com（Release 下载第一步）。
+   */
+  @Column({ type: 'text', default: '' })
+  mainCdnDomain!: string;
+
   @CreateDateColumn()
   createdAt!: Date;
 

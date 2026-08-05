@@ -407,6 +407,10 @@ router.get(
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
           dashDisabled: settings.dashDisabled,
+          cdnAccelerate: settings.cdnAccelerate,
+          apiCdnDomain: settings.apiCdnDomain,
+          releaseCdnDomain: settings.releaseCdnDomain,
+          mainCdnDomain: settings.mainCdnDomain,
         },
       });
     } catch (err) {
@@ -424,7 +428,7 @@ router.put(
     res: import('express').Response,
   ): Promise<void> => {
     try {
-      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled, dashDisabled } = req.body;
+      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled, dashDisabled, cdnAccelerate, apiCdnDomain, releaseCdnDomain, mainCdnDomain } = req.body;
 
       if (typeof autoDeleteInactiveRooms !== 'boolean') {
         res.status(400).json({
@@ -483,6 +487,34 @@ router.put(
         });
         return;
       }
+      if (cdnAccelerate !== undefined && typeof cdnAccelerate !== 'boolean') {
+        res.status(400).json({
+          success: false,
+          message: 'cdnAccelerate 必须是布尔值',
+        });
+        return;
+      }
+      if (apiCdnDomain !== undefined && typeof apiCdnDomain !== 'string') {
+        res.status(400).json({
+          success: false,
+          message: 'apiCdnDomain 必须是字符串',
+        });
+        return;
+      }
+      if (releaseCdnDomain !== undefined && typeof releaseCdnDomain !== 'string') {
+        res.status(400).json({
+          success: false,
+          message: 'releaseCdnDomain 必须是字符串',
+        });
+        return;
+      }
+      if (mainCdnDomain !== undefined && typeof mainCdnDomain !== 'string') {
+        res.status(400).json({
+          success: false,
+          message: 'mainCdnDomain 必须是字符串',
+        });
+        return;
+      }
       const settingsRepo = AppDataSource.getRepository(SystemSettings);
       const settings = await getSystemSettings();
       settings.autoDeleteInactiveRooms = autoDeleteInactiveRooms;
@@ -505,6 +537,18 @@ router.put(
       if (dashDisabled !== undefined) {
         settings.dashDisabled = dashDisabled;
       }
+      if (cdnAccelerate !== undefined) {
+        settings.cdnAccelerate = cdnAccelerate;
+      }
+      if (apiCdnDomain !== undefined) {
+        settings.apiCdnDomain = apiCdnDomain.trim();
+      }
+      if (releaseCdnDomain !== undefined) {
+        settings.releaseCdnDomain = releaseCdnDomain.trim();
+      }
+      if (mainCdnDomain !== undefined) {
+        settings.mainCdnDomain = mainCdnDomain.trim();
+      }
       await settingsRepo.save(settings);
 
       res.json({
@@ -517,6 +561,10 @@ router.put(
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
           dashDisabled: settings.dashDisabled,
+          cdnAccelerate: settings.cdnAccelerate,
+          apiCdnDomain: settings.apiCdnDomain,
+          releaseCdnDomain: settings.releaseCdnDomain,
+          mainCdnDomain: settings.mainCdnDomain,
         },
       });
     } catch (err) {
