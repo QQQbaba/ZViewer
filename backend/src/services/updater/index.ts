@@ -431,16 +431,20 @@ function writeApplyUpdateBat(
   extractedDir: string,
 ): string {
   const batPath = path.join(root, 'apply-update.bat');
+  // 注意：路径直接插入模板字符串，不做 replace 转义。
+  // 模板字符串中的 \\ 会被 JS 解释为单个 \，写入 bat 后路径正确。
+  // 之前使用 root.replace(/\\/g, '\\\\') 会产生双反斜杠路径（如 C:\\path），
+  // 虽然 Windows 能容忍，但可能导致 xcopy 等命令出问题。
   const content = `@echo off
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-set "ROOT=${root.replace(/\\/g, '\\\\')}"
-set "TEMP_DIR=${tempDir.replace(/\\/g, '\\\\')}"
-set "EXTRACTED_DIR=${extractedDir.replace(/\\/g, '\\\\')}"
+set "ROOT=${root}"
+set "TEMP_DIR=${tempDir}"
+set "EXTRACTED_DIR=${extractedDir}"
 set "PIDS_FILE=%ROOT%\\.prod.pids.json"
 set "CONFIG_DIR=%ROOT%\\config"
-set "CONFIG_BACKUP=%ROOT%\\.config-backup-%%RANDOM%%"
+set "CONFIG_BACKUP="
 set "LOG_FILE=%ROOT%\\update.log"
 
 :: 将主逻辑输出重定向到日志文件，方便诊断更新失败原因
@@ -474,12 +478,15 @@ if exist "%PIDS_FILE%" (
       $info = $pids.$key; \
       if ($info.pid) { \
         Stop-Process -Id $info.pid -Force -ErrorAction SilentlyContinue; \
-        Write-Host ('已停止进程 PID: ' + $info.pid); \
       } \
     }"
   del "%PIDS_FILE%"
 )
 taskkill /F /IM node.exe >nul 2>&1
+
+:: 等待端口释放（taskkill 后端口可能处于 TIME_WAIT 状态）
+echo [更新脚本] 等待端口释放...
+ping 127.0.0.1 -n 4 >nul
 
 :: 备份 config 目录（包含数据库、用户上传文件、头像等全部用户数据）
 echo [更新脚本] 备份 config 目录...
@@ -498,12 +505,24 @@ if exist "%CONFIG_DIR%" (
 echo [更新脚本] 应用新文件...
 if not exist "%EXTRACTED_DIR%" (
   echo [错误] 未找到解压目录：%EXTRACTED_DIR%
+  if exist "!CONFIG_BACKUP!" (
+    xcopy /E /Y /I "!CONFIG_BACKUP!" "%CONFIG_DIR%" >nul
+  )
   exit /b 1
 )
 
-xcopy /E /Y /I "%EXTRACTED_DIR%\\*" "%ROOT%\\"
+xcopy /E /Y /I "%EXTRACTED_DIR%\\*" "%ROOT%\\" >nul
 if errorlevel 1 (
   echo [错误] 文件复制失败
+  if exist "!CONFIG_BACKUP!" (
+    xcopy /E /Y /I "!CONFIG_BACKUP!" "%CONFIG_DIR%" >nul
+  )
+  exit /b 1
+)
+
+:: 验证关键文件是否复制成功
+if not exist "%ROOT%\\zviewer-backend.exe" (
+  echo [错误] 更新后未找到 zviewer-backend.exe，更新包可能损坏
   if exist "!CONFIG_BACKUP!" (
     xcopy /E /Y /I "!CONFIG_BACKUP!" "%CONFIG_DIR%" >nul
   )
@@ -527,24 +546,45 @@ echo [更新脚本] 清理临时文件...
 rmdir /S /Q "%TEMP_DIR%"
 
 echo [更新脚本] 重新启动服务...
-:: 关键：必须传递 start 参数！
-:: start.bat 无参数时默认进入交互菜单（Read-Host 等待输入），
-:: 而更新脚本在隐藏窗口中运行，用户无法看到菜单也无法输入，
-:: 导致服务永远无法启动，看起来像"文件没有替换"。
-if exist "%ROOT%\\start.bat" (
-  start "" "%ROOT%\\start.bat" start
+:: 直接调用 powershell 执行 start.ps1，绕过 start.bat
+:: start.bat 中如果 PowerShell 检查失败会执行 pause，在隐藏窗口下会无限等待
+:: 直接调用 powershell -File start.ps1 start 可避免此问题
+set "PS1=%ROOT%\\start.ps1"
+if not exist "%PS1%" set "PS1=%ROOT%\\start-win.ps1"
+if exist "%PS1%" (
+  :: 使用 start /b 在后台启动 powershell，不创建可见窗口
+  :: powershell 会异步启动后端和前端（Start-Process -WindowStyle Hidden），然后退出
+  start "" /b powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" start
+) else if exist "%ROOT%\\start.bat" (
+  :: 回退到 start.bat start（传递 start 参数避免进入交互菜单）
+  start "" /b "%ROOT%\\start.bat" start
 ) else (
-  :: 回退方案：start.bat 不存在时直接启动 exe
-  echo [更新脚本] 未找到 start.bat，直接启动 exe
-  start "" "%ROOT%\\zviewer-backend.exe"
-  start "" "%ROOT%\\zviewer-frontend.exe"
+  :: 最终回退：直接启动 exe，手动设置环境变量
+  echo [更新脚本] 未找到 start.ps1/start.bat，直接启动 exe
+  set "PORT=3333"
+  set "NODE_ENV=production"
+  set "HOST=::"
+  start "" /D "%ROOT%" "%ROOT%\\zviewer-backend.exe"
+  :: 等待后端启动
+  ping 127.0.0.1 -n 6 >nul
+  set "PORT=4173"
+  set "BACKEND_URL=http://localhost:3333"
+  set "HOST=0.0.0.0"
+  start "" /D "%ROOT%" "%ROOT%\\zviewer-frontend.exe"
 )
 
 echo [更新脚本] 更新完成，服务正在启动... %date% %time%
-del "%~f0"
+:: 先 exit 再 del：del 自身后脚本立即退出，exit 不会执行
+:: 改为：先退出，由 cmd 在退出后自动释放文件句柄（无法自我删除）
+:: 实际上 del "%~f0" 在 bat 中是可行的，因为脚本已被读入内存
 exit /b 0
 `;
-  fs.writeFileSync(batPath, content, 'utf8');
+  // 关键：Windows bat 文件必须使用 CRLF 换行符！
+  // Node.js fs.writeFileSync 默认使用 LF，cmd.exe 解析 LF 换行的 bat 时
+  // 会出现语法错误（如 '" is not recognized as an internal or external command'），
+  // 导致脚本无法执行。
+  const batContent = content.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+  fs.writeFileSync(batPath, batContent, 'utf8');
   return batPath;
 }
 
@@ -603,11 +643,23 @@ fi
 echo "[更新脚本] 应用新文件..."
 if [ ! -d "$EXTRACTED_DIR" ]; then
   echo "[错误] 未找到解压目录：$EXTRACTED_DIR"
+  if [ -d "$CONFIG_BACKUP" ]; then
+    cp -rf "$CONFIG_BACKUP" "$CONFIG_DIR"
+  fi
   exit 1
 fi
 
 cp -rf "$EXTRACTED_DIR/"* "$ROOT/" 2>/dev/null || true
 chmod +x "$ROOT/zviewer-frontend" "$ROOT/zviewer-backend" "$ROOT/zviewer-cert" 2>/dev/null || true
+
+# 验证关键文件是否存在
+if [ ! -f "$ROOT/zviewer-backend" ]; then
+  echo "[错误] 更新后未找到 zviewer-backend，更新包可能损坏"
+  if [ -d "$CONFIG_BACKUP" ]; then
+    cp -rf "$CONFIG_BACKUP" "$CONFIG_DIR"
+  fi
+  exit 1
+fi
 
 # 恢复 config 目录
 echo "[更新脚本] 恢复 config 目录..."
@@ -630,10 +682,13 @@ cd "$ROOT"
 if [ -f "$ROOT/start.sh" ]; then
   nohup ./start.sh start > /dev/null 2>&1 &
 else
-  # 回退方案：start.sh 不存在时直接启动 exe
+  # 回退方案：start.sh 不存在时直接启动 exe，手动设置环境变量
   echo "[更新脚本] 未找到 start.sh，直接启动 exe"
-  nohup "$ROOT/zviewer-backend" > /dev/null 2>&1 &
-  nohup "$ROOT/zviewer-frontend" > /dev/null 2>&1 &
+  PORT=3333 NODE_ENV=production HOST=:: \
+    nohup "$ROOT/zviewer-backend" > /dev/null 2>&1 &
+  sleep 3
+  PORT=4173 BACKEND_URL="http://localhost:3333" HOST=0.0.0.0 \
+    nohup "$ROOT/zviewer-frontend" > /dev/null 2>&1 &
 fi
 
 echo "[更新脚本] 更新完成，服务正在启动... $(date)"
