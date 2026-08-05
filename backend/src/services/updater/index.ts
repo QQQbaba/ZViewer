@@ -262,9 +262,18 @@ export async function getUpdateInfo(
 }
 
 /**
- * 流式下载文件，支持重定向跟随。
+ * 流式下载文件，支持重定向跟随与进度回调。
+ *
+ * @param url       下载地址
+ * @param dest      目标文件路径
+ * @param onProgress 进度回调（每收到一段数据触发一次），参数为已接收字节数和总字节数
+ *                   总字节数可能为 0（服务器未返回 content-length）
  */
-function downloadFile(url: string, dest: string): Promise<void> {
+function downloadFile(
+  url: string,
+  dest: string,
+  onProgress?: (received: number, total: number) => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(dest);
     const req = https.get(url, { timeout: 300_000 }, (res) => {
@@ -274,16 +283,25 @@ function downloadFile(url: string, dest: string): Promise<void> {
         res.statusCode < 400 &&
         res.headers.location
       ) {
-        // 关闭当前文件流，重定向后重新下载
+        // 关闭当前文件流，重定向后重新下载（保留进度回调）
         file.close();
         fs.unlinkSync(dest);
-        downloadFile(res.headers.location, dest).then(resolve).catch(reject);
+        downloadFile(res.headers.location, dest, onProgress)
+          .then(resolve)
+          .catch(reject);
         return;
       }
       if (res.statusCode && res.statusCode >= 400) {
         reject(new Error(`下载失败 HTTP ${res.statusCode}: ${url}`));
         return;
       }
+      // 从响应头读取总大小（可能不存在）
+      const total = Number(res.headers['content-length'] || 0);
+      let received = 0;
+      res.on('data', (chunk: Buffer) => {
+        received += chunk.length;
+        if (onProgress) onProgress(received, total);
+      });
       res.pipe(file);
       file.on('finish', () => {
         file.close(() => resolve());
@@ -511,17 +529,30 @@ exit 0
 }
 
 /**
+ * 更新过程阶段事件，供 SSE 流式接口推送进度。
+ */
+export type UpdateStageEvent =
+  | { stage: 'downloading'; received: number; total: number }
+  | { stage: 'extracting' }
+  | { stage: 'starting' }
+  | { stage: 'done'; message: string }
+  | { stage: 'error'; message: string };
+
+/**
  * 应用更新（从已下载或已上传的压缩包）。
  *
  * 流程：
- * 1. 将压缩包保存到临时目录
+ * 1. 将压缩包保存到临时目录（若为 URL 则流式下载，支持进度回调）
  * 2. 解压
  * 3. 生成更新脚本（bat/sh）
  * 4. detached 启动更新脚本，后台替换文件并重启
+ *
+ * @param onStage 阶段事件回调，用于推送下载/解压/启动进度
  */
 async function applyUpdateFromArchive(
   archiveData: Buffer | string,
   archiveFilename: string,
+  onStage?: (event: UpdateStageEvent) => void,
 ): Promise<{ success: boolean; message: string }> {
   const root = projectRoot();
   const tempDir = path.join(root, '.update-temp');
@@ -536,13 +567,16 @@ async function applyUpdateFromArchive(
   try {
     // 写入压缩包
     if (typeof archiveData === 'string') {
-      // archiveData 是 URL，需要下载
-      await downloadFile(archiveData, archivePath);
+      // archiveData 是 URL，需要下载（带进度）
+      await downloadFile(archiveData, archivePath, (received, total) => {
+        if (onStage) onStage({ stage: 'downloading', received, total });
+      });
     } else {
       fs.writeFileSync(archivePath, archiveData);
     }
 
     // 解压
+    if (onStage) onStage({ stage: 'extracting' });
     await extractArchive(archivePath, tempDir);
 
     // 找到解压后的产物目录
@@ -570,6 +604,7 @@ async function applyUpdateFromArchive(
     }
 
     // 生成并启动更新脚本
+    if (onStage) onStage({ stage: 'starting' });
     const isWindows = os.platform() === 'win32';
     const scriptPath = isWindows
       ? writeApplyUpdateBat(root, tempDir, extractedDir)
@@ -590,9 +625,11 @@ async function applyUpdateFromArchive(
       }).unref();
     }
 
+    const successMessage = '更新已触发，后台将自动替换文件并重启服务';
+    if (onStage) onStage({ stage: 'done', message: successMessage });
     return {
       success: true,
-      message: '更新已触发，后台将自动替换文件并重启服务',
+      message: successMessage,
     };
   } catch (err) {
     // 清理临时文件
@@ -603,15 +640,21 @@ async function applyUpdateFromArchive(
     } catch {
       // ignore cleanup error
     }
+    const errMsg = err instanceof Error ? err.message : '应用更新失败';
+    if (onStage) onStage({ stage: 'error', message: errMsg });
     throw err;
   }
 }
 
 /**
  * 从 GitHub Releases 下载最新构建产物并应用更新。
+ *
+ * @param includePrerelease 是否包含预发布版本
+ * @param onStage 阶段事件回调，用于推送下载/解压/启动进度
  */
 export async function applyUpdate(
   includePrerelease = false,
+  onStage?: (event: UpdateStageEvent) => void,
 ): Promise<{
   success: boolean;
   message: string;
@@ -620,7 +663,7 @@ export async function applyUpdate(
   if (!info.downloadUrl) {
     throw new Error('未找到可用的下载地址');
   }
-  return applyUpdateFromArchive(info.downloadUrl, info.assetName);
+  return applyUpdateFromArchive(info.downloadUrl, info.assetName, onStage);
 }
 
 /**
@@ -628,10 +671,12 @@ export async function applyUpdate(
  *
  * @param fileData 压缩包文件的 Buffer 数据
  * @param filename 原始文件名（用于判断压缩格式）
+ * @param onStage 阶段事件回调（上传场景无下载阶段，仅推送解压/启动/完成）
  */
 export async function applyUpdateFromFile(
   fileData: Buffer,
   filename: string,
+  onStage?: (event: UpdateStageEvent) => void,
 ): Promise<{ success: boolean; message: string }> {
   // 验证文件类型
   const lowerName = filename.toLowerCase();
@@ -644,5 +689,5 @@ export async function applyUpdateFromFile(
     ? 'uploaded-update.tar.gz'
     : 'uploaded-update.zip';
 
-  return applyUpdateFromArchive(fileData, archiveName);
+  return applyUpdateFromArchive(fileData, archiveName, onStage);
 }
