@@ -7,6 +7,7 @@
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../data-source';
 import { UserMount } from '../entities/UserMount';
+import { Movie } from '../entities/Movie';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import {
   statWebDAVFile,
@@ -20,6 +21,7 @@ import {
   OpenListError,
   normalizeOpenListServerUrl,
   mountToOpenListParams,
+  fetchOpenListDirectUrl,
 } from '../services/openlist';
 import { detectMediaFormat, getContentType } from '../services/mediaFormat';
 import { resolveUserMount, pipeRangeStream } from '../services/proxy';
@@ -422,6 +424,143 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
         message: extractErrorMessage(err, '代理 OpenList 媒体失败'),
         code: extractErrorCode(err),
       });
+    } else {
+      res.destroy();
+    }
+  }
+});
+
+// 2.6 获取直链 - GET /direct-url?mountId=&path=
+// 房主添加影片时调用：后端通过 OpenList API（/api/auth/login + /api/fs/get）
+// 获取带签名的真实下载直链，前端可直接用该 URL 播放。
+router.get('/direct-url', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const mountIdRaw = req.query.mountId;
+    const pathRaw = req.query.path;
+    if (mountIdRaw === undefined || pathRaw === undefined) {
+      res.status(400).json({ success: false, message: '缺少 mountId 或 path 参数' });
+      return;
+    }
+    const mountId = Number(mountIdRaw);
+    if (Number.isNaN(mountId)) {
+      res.status(400).json({ success: false, message: 'mountId 不正确' });
+      return;
+    }
+    const targetPath = typeof pathRaw === 'string' ? pathRaw.trim() : '';
+    if (!targetPath) {
+      res.status(400).json({ success: false, message: 'path 不能为空' });
+      return;
+    }
+
+    const repo = userMountRepository();
+    const mount = await repo.findOneBy({
+      id: mountId,
+      userId: req.user!.userId,
+      type: 'openlist',
+    });
+    if (!mount) {
+      res.status(404).json({ success: false, message: '挂载不存在或无权限' });
+      return;
+    }
+    if (!mount.serverUrl) {
+      res.status(400).json({ success: false, message: '该挂载未配置服务器地址' });
+      return;
+    }
+
+    try {
+      const directUrl = await fetchOpenListDirectUrl(
+        mount.serverUrl,
+        mount.username || undefined,
+        mount.password || undefined,
+        targetPath,
+      );
+      res.json({ success: true, directUrl });
+    } catch (err) {
+      const code = err instanceof OpenListError ? err.code : 'UNREACHABLE';
+      const status = code === 'AUTH_FAILED' ? 401 : code === 'NOT_FOUND' ? 404 : 400;
+      res.status(status).json({
+        success: false,
+        message: err instanceof Error ? err.message : '获取 OpenList 直链失败',
+        code,
+      });
+    }
+  } catch (err) {
+    console.error('[openlist] direct-url error:', err);
+    res.status(500).json({ success: false, message: '获取 OpenList 直链失败' });
+  }
+});
+
+// 2.7 基于影片 ID 的流代理 - GET /stream?movieId=
+// 与 /proxy 的区别：/stream 不依赖 userId 查挂载，而是直接从 Movie 表读取凭证，
+// 这样房间内任何成员（含观众）都能通过 movieId 访问影片流。
+router.get('/stream', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const movieIdRaw = req.query.movieId;
+    if (movieIdRaw === undefined) {
+      res.status(400).json({ success: false, message: '缺少 movieId 参数' });
+      return;
+    }
+    const movieId = Number(movieIdRaw);
+    if (Number.isNaN(movieId)) {
+      res.status(400).json({ success: false, message: 'movieId 不正确' });
+      return;
+    }
+
+    const movie = await AppDataSource.getRepository(Movie).findOneBy({ id: movieId });
+    if (!movie) {
+      res.status(404).json({ success: false, message: '影片不存在' });
+      return;
+    }
+    if (!movie.serverUrl || !movie.path) {
+      res.status(400).json({ success: false, message: '该影片未挂载服务器信息' });
+      return;
+    }
+
+    const params: WebDAVConnectionParams = {
+      serverUrl: normalizeOpenListServerUrl(movie.serverUrl),
+      path: movie.path,
+      username: movie.username || undefined,
+      password: movie.password || undefined,
+    };
+
+    const rangeHeader = req.headers.range;
+
+    let stream: import('node:stream').Readable;
+    let fileSize: number;
+    let start: number;
+    let end: number;
+    try {
+      const result = await createWebDAVReadStreamWithRange(params, rangeHeader);
+      stream = result.stream;
+      fileSize = result.fileSize;
+      start = result.start;
+      end = result.end;
+    } catch (err) {
+      const code = extractErrorCode(err);
+      const status = code === 'AUTH_FAILED' ? 401 : code === 'NOT_FOUND' ? 404 : 400;
+      res.status(status).json({
+        success: false,
+        message: extractErrorMessage(err, '打开 OpenList 流失败'),
+        code,
+      });
+      return;
+    }
+
+    pipeRangeStream(res, {
+      stream,
+      contentType: getContentType(detectMediaFormat(movie.path)),
+      fileSize,
+      start,
+      end,
+      ranged: !!rangeHeader,
+      logTag: 'openlist-stream',
+      errorMessage: 'OpenList 影片流错误',
+      errorCode: 'UNREACHABLE',
+    });
+  } catch (err) {
+    console.error('[openlist] stream error:', err);
+    if (!res.headersSent) {
+      res.status(502).json({ success: false, message: '代理 OpenList 影片失败' });
     } else {
       res.destroy();
     }

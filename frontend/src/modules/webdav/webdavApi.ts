@@ -151,3 +151,32 @@ export async function resolveWebDAV(
 export function buildWebDAVProxyUrl(mountId: number, path: string): string {
   return buildProxyUrl('webdav', { mountId, path })
 }
+
+/**
+ * 调用后端 /api/webdav/direct-url 接口获取直链 URL。
+ *
+ * 后端使用挂载的账号密码：
+ * - 对 WebDAV：协议不支持生成真实直链，仅返回 serverUrl+path 拼接（浏览器可能无法直接播放）
+ * - 调用方仅房主添加影片时使用
+ *
+ * 返回可直接作为 movie.url 保存的字符串。
+ */
+export async function fetchWebDAVDirectUrl(
+  mountId: number,
+  path: string
+): Promise<string> {
+  const query = new URLSearchParams({
+    mountId: String(mountId),
+    path,
+  }).toString()
+  const res = await apiFetch(`/api/webdav/direct-url?${query}`)
+  const data = (await res.json()) as {
+    success: boolean
+    message?: string
+    directUrl?: string
+  }
+  if (!res.ok || !data.success || !data.directUrl) {
+    throw new Error(data.message || '获取 WebDAV 直链失败')
+  }
+  return data.directUrl
+}

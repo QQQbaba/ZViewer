@@ -191,6 +191,26 @@ export function createWebDAVReadStream(
   return connection.get(normalizePath(params.path)) as Readable;
 }
 
+/**
+ * 构造 WebDAV 文件直链。
+ *
+ * 注意：WebDAV 协议本身不支持生成带签名的下载直链，所有访问都需要 BasicAuth。
+ * 该函数仅返回 `serverUrl + path` 拼接结果，浏览器 `<video>` 直接播放时
+ * 通常会因为缺少 Authorization 头而无法加载（卡死）。
+ *
+ * 用户选择"直链模式"时若使用 WebDAV 挂载，应知晓此限制：
+ * 仅当 WebDAV 服务器本身允许匿名访问或已通过其他方式（如 Basic URL）放行时才能播放。
+ *
+ * 该函数的存在是为了与 OpenList 直链模式保持接口一致，由后端统一返回"直链 URL"。
+ */
+export function buildWebDAVDirectUrl(
+  serverUrl: string,
+  path: string,
+): string {
+  const normalizedUrl = normalizeServerUrl(serverUrl);
+  return `${normalizedUrl}${normalizePath(path)}`;
+}
+
 export interface WebDAVDirectoryEntry {
   name: string;
   path: string;

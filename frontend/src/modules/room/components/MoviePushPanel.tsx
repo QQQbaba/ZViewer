@@ -57,10 +57,14 @@ import {
 import {
   resolveOpenList,
   buildOpenListProxyUrl,
-  buildOpenListDirectUrl,
+  fetchOpenListDirectUrl,
 } from '@/modules/openlist/openlistApi'
 import OpenListBrowser from '@/modules/openlist/OpenListBrowser'
-import { resolveWebDAV, buildWebDAVProxyUrl } from '@/modules/webdav/webdavApi'
+import {
+  resolveWebDAV,
+  buildWebDAVProxyUrl,
+  fetchWebDAVDirectUrl,
+} from '@/modules/webdav/webdavApi'
 import MountBrowser from '@/modules/mounts/MountBrowser'
 import WebDAVBrowser from '@/modules/webdav/WebDAVBrowser'
 import { resolveFTP as resolveFTPNew } from '@/modules/ftp/ftpApi'
@@ -541,19 +545,33 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         for (const path of paths) {
           const normalizedPath = normalizeMountPath(path)
           if (sourceType === 'webdav') {
-            const resolved = await resolveWebDAV(mountId, normalizedPath)
-            const title = resolved.title || extractTitleFromUrl(normalizedPath)
-            const movieUrl = buildWebDAVProxyUrl(mountId, normalizedPath)
-            await addMovie(roomId, {
-              url: movieUrl,
-              title,
-              source: 'webdav',
-              format: resolved.format,
-              duration: resolved.duration,
-              serverUrl: webdav.serverUrl.trim() || undefined,
-              path: normalizedPath,
-              directLink: webdavDirectLink,
-            })
+            if (webdavDirectLink) {
+              // 直链模式：后端通过挂载凭证获取直链 URL（WebDAV 协议不支持获取真实直链，仅拼接）
+              const movieUrl = await fetchWebDAVDirectUrl(mountId, normalizedPath)
+              const title = extractTitleFromUrl(normalizedPath)
+              await addMovie(roomId, {
+                url: movieUrl,
+                title,
+                source: 'webdav',
+                serverUrl: webdav.serverUrl.trim() || undefined,
+                path: normalizedPath,
+                directLink: true,
+              })
+            } else {
+              // 代理模式：后端会自动用 movieId 构造 stream URL
+              const resolved = await resolveWebDAV(mountId, normalizedPath)
+              const title = resolved.title || extractTitleFromUrl(normalizedPath)
+              await addMovie(roomId, {
+                url: buildWebDAVProxyUrl(mountId, normalizedPath),
+                title,
+                source: 'webdav',
+                format: resolved.format,
+                duration: resolved.duration,
+                serverUrl: webdav.serverUrl.trim() || undefined,
+                path: normalizedPath,
+                directLink: false,
+              })
+            }
             added++
           } else if (sourceType === 'ftp') {
             const resolved = await resolveFTPNew(mountId, normalizedPath)
@@ -571,10 +589,8 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
             added++
           } else if (sourceType === 'openlist') {
             if (openlistDirectLink) {
-              const movieUrl = buildOpenListDirectUrl(
-                openlist.serverUrl.trim(),
-                normalizedPath
-              )
+              // 直链模式：后端通过 OpenList API 获取带签名的真实下载直链
+              const movieUrl = await fetchOpenListDirectUrl(mountId, normalizedPath)
               const title = extractTitleFromUrl(normalizedPath)
               await addMovie(roomId, {
                 url: movieUrl,
@@ -585,12 +601,12 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
                 directLink: true,
               })
             } else {
+              // 代理模式：后端会自动用 movieId 构造 stream URL
               const resolved = await resolveOpenList(mountId, normalizedPath)
               const title =
                 resolved.title || extractTitleFromUrl(normalizedPath)
-              const movieUrl = buildOpenListProxyUrl(mountId, normalizedPath)
               await addMovie(roomId, {
-                url: movieUrl,
+                url: buildOpenListProxyUrl(mountId, normalizedPath),
                 title,
                 source: 'openlist',
                 format: resolved.format,
@@ -747,24 +763,23 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           message.warning('请填写文件路径')
           return
         }
+        const mountId = Number(selectedMountId)
+        if (!mountId) {
+          message.warning('请选择已保存的 WebDAV 挂载')
+          return
+        }
         let title: string
         let movieUrl: string
         let format: MediaFormat = 'mp4'
         let duration: number | undefined
 
         if (webdavDirectLink) {
-          if (!webdav.serverUrl.trim()) {
-            message.warning('请填写服务器地址')
-            return
-          }
-          movieUrl = `${webdav.serverUrl.trim()}${webdav.path.trim()}`
+          // 直链模式：后端通过挂载凭证获取直链 URL（WebDAV 协议不支持获取真实直链，仅拼接）
+          setResolveProgress('正在获取 WebDAV 直链...')
+          movieUrl = await fetchWebDAVDirectUrl(mountId, webdav.path.trim())
           title = extractTitleFromUrl(webdav.path.trim())
         } else {
-          const mountId = Number(selectedMountId)
-          if (!mountId) {
-            message.warning('请选择已保存的 WebDAV 挂载')
-            return
-          }
+          // 代理模式：后端会自动用 movieId 构造 stream URL
           setResolveProgress('正在解析 WebDAV 文件...')
           const resolved = await resolveWebDAV(mountId, webdav.path.trim())
           title = resolved.title || extractTitleFromUrl(webdav.path.trim())
@@ -831,26 +846,22 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           return
         }
         const mountId = Number(selectedMountId)
+        if (!mountId) {
+          message.warning('请选择已保存的 OpenList 挂载')
+          return
+        }
         let title: string
         let movieUrl: string
         let format: MediaFormat = 'mp4'
         let duration: number | undefined
 
         if (openlistDirectLink) {
-          if (!openlist.serverUrl.trim()) {
-            message.warning('请填写服务器地址')
-            return
-          }
-          movieUrl = buildOpenListDirectUrl(
-            openlist.serverUrl.trim(),
-            openlist.path.trim()
-          )
+          // 直链模式：后端通过 OpenList API 获取带签名的真实下载直链
+          setResolveProgress('正在获取 OpenList 直链...')
+          movieUrl = await fetchOpenListDirectUrl(mountId, openlist.path.trim())
           title = extractTitleFromUrl(openlist.path.trim())
         } else {
-          if (!mountId) {
-            message.warning('请选择已保存的 OpenList 挂载')
-            return
-          }
+          // 代理模式：后端会自动用 movieId 构造 stream URL
           setResolveProgress('正在解析 OpenList 文件...')
           const resolved = await resolveOpenList(mountId, openlist.path.trim())
           title = resolved.title || extractTitleFromUrl(openlist.path.trim())

@@ -160,14 +160,30 @@ export function buildOpenListProxyUrl(mountId: number, path: string): string {
 }
 
 /**
- * 构建 OpenList 直链下载 URL
- * OpenList/AList 的 WebDAV 端点为 /dav，下载端点为 /d
- * 将 /dav 后缀替换为 /d，若无 /dav 后缀则直接拼接
+ * 调用后端 /api/openlist/direct-url 接口获取直链 URL。
+ *
+ * 后端使用挂载的账号密码：
+ * - 调用 OpenList 的 /api/auth/login 获取 token
+ * - 调用 /api/fs/get 获取 raw_url（带签名的真实下载直链）
+ *
+ * 返回可直接作为 movie.url 保存的字符串，浏览器 <video> 可直接播放。
  */
-export function buildOpenListDirectUrl(serverUrl: string, path: string): string {
-  const url = serverUrl.trim()
-  if (url.endsWith('/dav')) {
-    return `${url.slice(0, -4)}/d${path}`
+export async function fetchOpenListDirectUrl(
+  mountId: number,
+  path: string
+): Promise<string> {
+  const query = new URLSearchParams({
+    mountId: String(mountId),
+    path,
+  }).toString()
+  const res = await apiFetch(`/api/openlist/direct-url?${query}`)
+  const data = (await res.json()) as {
+    success: boolean
+    message?: string
+    directUrl?: string
   }
-  return `${url}${path}`
+  if (!res.ok || !data.success || !data.directUrl) {
+    throw new Error(data.message || '获取 OpenList 直链失败')
+  }
+  return data.directUrl
 }
