@@ -48,6 +48,23 @@ export function Modal({
     }
   }, [open])
 
+  // Modal 打开期间锁定 body 滚动，避免滚轮穿透到底层页面
+  useEffect(() => {
+    if (!visible) return
+    const prevOverflow = document.body.style.overflow
+    const prevPaddingRight = document.body.style.paddingRight
+    document.body.style.overflow = 'hidden'
+    // 补偿滚动条消失后的宽度跳变
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`
+    }
+    return () => {
+      document.body.style.overflow = prevOverflow
+      document.body.style.paddingRight = prevPaddingRight
+    }
+  }, [visible])
+
   useEffect(() => {
     if (!visible) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -63,6 +80,8 @@ export function Modal({
     <div
       className="fixed inset-0 flex items-center justify-center p-4"
       style={{ zIndex: 999, transform: 'translateZ(0)' }}
+      // 阻止滚轮事件冒泡到 document，防止触发底层页面滚动
+      onWheel={(e) => e.stopPropagation()}
     >
       <div
         className={cn(

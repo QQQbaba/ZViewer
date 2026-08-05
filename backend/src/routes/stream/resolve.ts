@@ -20,6 +20,7 @@ import {
   type ResolvePageInfo,
 } from '../../services/bilibili/resolver';
 import { getUserCookie } from './helpers';
+import { getSystemSettings } from '../../services/system-settings';
 
 const router = Router();
 
@@ -108,8 +109,15 @@ router.get('/resolve-bilibili', async (req: AuthenticatedRequest, res) => {
       ? req.query.codec.trim()
       : undefined;
 
-  const preferMp4 = req.query.preferMp4 === 'true' || req.query.preferMp4 === '1';
-  const forceDash = req.query.forceDash === 'true' || req.query.forceDash === '1';
+  const preferMp4Param = req.query.preferMp4 === 'true' || req.query.preferMp4 === '1';
+  const forceDashParam = req.query.forceDash === 'true' || req.query.forceDash === '1';
+
+  // 服务器端 DASH 禁用：强制 preferMp4 并禁止 forceDash
+  // 注意：仅影响服务器端解析，不影响 CLI 代理的 DASH 模式（CLI 走独立路由 /api/cli/resolve）
+  const settings = await getSystemSettings();
+  const dashDisabled = settings.dashDisabled;
+  const preferMp4 = dashDisabled || preferMp4Param;
+  const forceDash = !dashDisabled && forceDashParam;
 
   // page 参数：指定播放分集（P），从 1 开始
   // 多 P 视频每个分集有独立的 cid，必须用对应 cid 请求 playurl 才能获取正确的播放地址

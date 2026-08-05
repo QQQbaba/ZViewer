@@ -11,6 +11,8 @@ export interface SystemSettings {
   /** 房间创建权限模式：admin-only=仅管理员，all-users=所有登录用户（不含 guest） */
   roomCreationMode: RoomCreationMode
   betaFeaturesEnabled: boolean
+  /** 禁用服务器端 DASH 模式，强制 MP4（仅服务器端，不影响 CLI） */
+  dashDisabled: boolean
   dataSourceConfig?: Record<string, unknown> | null
 }
 
@@ -36,6 +38,7 @@ const DEFAULT_SETTINGS: SystemSettings = {
   registrationMode: 'approval',
   roomCreationMode: 'admin-only',
   betaFeaturesEnabled: false,
+  dashDisabled: false,
   dataSourceConfig: null,
 }
 

@@ -94,7 +94,7 @@ export interface ViewerJoinedPayload {
 
 /** `viewer-left` 事件 payload：观众离开房间通知 */
 export interface ViewerLeftPayload {
-  socketId: string
+  viewerSocketId: string
 }
 
 /**

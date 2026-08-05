@@ -271,6 +271,7 @@ router.get(
           registrationMode: settings.registrationMode,
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
+          dashDisabled: settings.dashDisabled,
         },
       });
     } catch (err) {

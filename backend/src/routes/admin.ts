@@ -406,6 +406,7 @@ router.get(
           registrationMode: settings.registrationMode,
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
+          dashDisabled: settings.dashDisabled,
         },
       });
     } catch (err) {
@@ -423,7 +424,7 @@ router.put(
     res: import('express').Response,
   ): Promise<void> => {
     try {
-      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled } = req.body;
+      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled, dashDisabled } = req.body;
 
       if (typeof autoDeleteInactiveRooms !== 'boolean') {
         res.status(400).json({
@@ -475,6 +476,13 @@ router.put(
         });
         return;
       }
+      if (dashDisabled !== undefined && typeof dashDisabled !== 'boolean') {
+        res.status(400).json({
+          success: false,
+          message: 'dashDisabled 必须是布尔值',
+        });
+        return;
+      }
       const settingsRepo = AppDataSource.getRepository(SystemSettings);
       const settings = await getSystemSettings();
       settings.autoDeleteInactiveRooms = autoDeleteInactiveRooms;
@@ -494,6 +502,9 @@ router.put(
       if (betaFeaturesEnabled !== undefined) {
         settings.betaFeaturesEnabled = betaFeaturesEnabled;
       }
+      if (dashDisabled !== undefined) {
+        settings.dashDisabled = dashDisabled;
+      }
       await settingsRepo.save(settings);
 
       res.json({
@@ -505,6 +516,7 @@ router.put(
           registrationMode: settings.registrationMode,
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
+          dashDisabled: settings.dashDisabled,
         },
       });
     } catch (err) {

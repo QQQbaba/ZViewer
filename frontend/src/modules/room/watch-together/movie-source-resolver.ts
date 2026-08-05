@@ -15,6 +15,7 @@ import { resolveBilibiliWithOptions } from '@/modules/bilibili/bilibiliApi'
 import { extractBvid, resolveBilibiliViaCli } from '@/modules/bilibili/cliApi'
 import { useCliAgentStore } from '@/store/cliAgentStore'
 import { getBilibiliParseOptions } from '@/modules/bilibili/parseOptions'
+import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import type { QualityOption } from './resolveSource'
 
 /** 房主刷新恢复时由后端返回的最近一次播放状态（源相关子集） */
@@ -103,12 +104,19 @@ export function getActiveCliProxyUrl(): string | null {
  * 当用户启用 CLI 高画质代理后，强制走 DASH 代理路径，不再降级到 MP4；
  * 即使本地 CLI 暂时未连接，也保持 DASH 请求，由调用方提示连接代理，
  * 避免用户开启 CLI 后因网络问题被自动切回 MP4。
+ *
+ * 当服务器端 DASH 被禁用（dashDisabled）且 CLI 未启用时，强制 MP4。
  */
 export function getEffectivePreferMp4(movieId: number): boolean {
   const { preferMp4, cliEnabled } = getBilibiliParseOptions(movieId)
   if (cliEnabled) {
-    // CLI 已启用：强制使用 DASH，不再降级 MP4
+    // CLI 已启用：强制使用 DASH，不受 dashDisabled 影响
     return false
+  }
+  // CLI 未启用：检查服务器端是否禁用了 DASH
+  const { dashDisabled } = useSystemSettingsStore.getState()
+  if (dashDisabled) {
+    return true
   }
   return preferMp4
 }

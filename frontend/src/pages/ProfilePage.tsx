@@ -487,48 +487,48 @@ export default function ProfilePage() {
             ) : bilibiliUser ? (
               <div className="space-y-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <Avatar
-                    size="md"
-                    src={buildBilibiliImageProxyUrl(bilibiliUser.avatar)}
-                    alt={bilibiliUser.name}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-base font-medium text-[var(--md-sys-color-on-surface)]">
-                        {bilibiliUser.name}
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <Avatar
+                      size="md"
+                      src={buildBilibiliImageProxyUrl(bilibiliUser.avatar)}
+                      alt={bilibiliUser.name}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p className="min-w-0 truncate text-base font-medium text-[var(--md-sys-color-on-surface)]">
+                          {bilibiliUser.name}
+                        </p>
+                        {bilibiliUser.vipStatus === 1 ? (
+                          <Tag
+                            color="warning"
+                            className="shrink-0 px-1.5 py-0 text-[10px]"
+                          >
+                            <Crown className="mr-0.5 h-3 w-3" />
+                            大会员
+                          </Tag>
+                        ) : (
+                          <Tag
+                            color="default"
+                            className="shrink-0 px-1.5 py-0 text-[10px]"
+                          >
+                            普通账号
+                          </Tag>
+                        )}
+                      </div>
+                      <p className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                        已绑定 B站 账号
                       </p>
-                      {bilibiliUser.vipStatus === 1 ? (
-                        <Tag
-                          color="warning"
-                          className="shrink-0 px-1.5 py-0 text-[10px]"
-                        >
-                          <Crown className="mr-0.5 h-3 w-3" />
-                          大会员
-                        </Tag>
-                      ) : (
-                        <Tag
-                          color="default"
-                          className="shrink-0 px-1.5 py-0 text-[10px]"
-                        >
-                          普通账号
-                        </Tag>
-                      )}
                     </div>
-                    <p className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                      已绑定 B站 账号
-                    </p>
                   </div>
-                </div>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  icon={<LogOut className="h-4 w-4" />}
-                  onClick={handleLogoutBilibili}
-                  className="shrink-0"
-                >
-                  退出 B站 登录
-                </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    icon={<LogOut className="h-4 w-4" />}
+                    onClick={handleLogoutBilibili}
+                    className="shrink-0"
+                  >
+                    退出 B站 登录
+                  </Button>
                 </div>
               </div>
             ) : (

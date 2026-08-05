@@ -34,6 +34,15 @@ export class SystemSettings {
   @Column({ type: 'boolean', default: false })
   betaFeaturesEnabled!: boolean;
 
+  /**
+   * 禁用服务器端 DASH 流模式。
+   * - true：服务器端 B站 解析强制使用 MP4 模式（preferMp4），不再返回 DASH 流
+   * - false：正常 DASH/MP4 自动选择
+   * 注意：仅影响服务器端解析，不影响 CLI 代理的 DASH 模式
+   */
+  @Column({ type: 'boolean', default: false })
+  dashDisabled!: boolean;
+
   @CreateDateColumn()
   createdAt!: Date;
 

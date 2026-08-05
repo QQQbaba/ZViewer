@@ -782,14 +782,11 @@ export function RoomInfoPanel({
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
                     style={{
-                      background:
-                        'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-tertiary) 18%, transparent))',
+                      backgroundColor: 'var(--md-sys-color-primary-container)',
+                      color: 'var(--md-sys-color-on-primary-container)',
                     }}
                   >
-                    <Lock
-                      className="h-4 w-4"
-                      style={{ color: 'var(--md-sys-color-primary)' }}
-                    />
+                    <Lock className="h-4 w-4" />
                   </div>
                   <div className="flex min-w-0 flex-col">
                     <Text className="text-sm font-medium">房间密码</Text>
@@ -821,14 +818,11 @@ export function RoomInfoPanel({
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
                     style={{
-                      background:
-                        'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-tertiary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-secondary) 18%, transparent))',
+                      backgroundColor: 'var(--md-sys-color-tertiary-container)',
+                      color: 'var(--md-sys-color-on-tertiary-container)',
                     }}
                   >
-                    <Users
-                      className="h-4 w-4"
-                      style={{ color: 'var(--md-sys-color-tertiary)' }}
-                    />
+                    <Users className="h-4 w-4" />
                   </div>
                   <div className="flex min-w-0 flex-col">
                     <Text className="text-sm font-medium">观众上限</Text>
@@ -913,14 +907,11 @@ export function RoomInfoPanel({
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
                     style={{
-                      background:
-                        'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-tertiary) 18%, transparent))',
+                      backgroundColor: 'var(--md-sys-color-primary-container)',
+                      color: 'var(--md-sys-color-on-primary-container)',
                     }}
                   >
-                    <Crown
-                      className="h-4 w-4"
-                      style={{ color: 'var(--md-sys-color-primary)' }}
-                    />
+                    <Crown className="h-4 w-4" />
                   </div>
                   <div className="flex min-w-0 flex-col">
                     <Text className="text-sm font-medium">房主（分享端）</Text>
@@ -947,14 +938,11 @@ export function RoomInfoPanel({
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
                     style={{
-                      background:
-                        'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-tertiary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-secondary) 18%, transparent))',
+                      backgroundColor: 'var(--md-sys-color-tertiary-container)',
+                      color: 'var(--md-sys-color-on-tertiary-container)',
                     }}
                   >
-                    <UserCheck
-                      className="h-4 w-4"
-                      style={{ color: 'var(--md-sys-color-tertiary)' }}
-                    />
+                    <UserCheck className="h-4 w-4" />
                   </div>
                   <div className="flex min-w-0 flex-col">
                     <Text className="text-sm font-medium">观众</Text>
@@ -980,14 +968,11 @@ export function RoomInfoPanel({
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
                     style={{
-                      background:
-                        'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-error) 22%, transparent), color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent))',
+                      backgroundColor: 'var(--md-sys-color-error-container)',
+                      color: 'var(--md-sys-color-on-error-container)',
                     }}
                   >
-                    <Shield
-                      className="h-4 w-4"
-                      style={{ color: 'var(--md-sys-color-error)' }}
-                    />
+                    <Shield className="h-4 w-4" />
                   </div>
                   <div className="flex min-w-0 flex-col">
                     <Text className="text-sm font-medium">角色权限层级</Text>
