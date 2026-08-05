@@ -437,15 +437,30 @@ set "EXTRACTED_DIR=${extractedDir.replace(/\\/g, '\\\\')}"
 set "PIDS_FILE=%ROOT%\\.prod.pids.json"
 set "CONFIG_DIR=%ROOT%\\config"
 set "CONFIG_BACKUP=%ROOT%\\.config-backup-%%RANDOM%%"
+set "LOG_FILE=%ROOT%\\update.log"
+
+:: 将主逻辑输出重定向到日志文件，方便诊断更新失败原因
+call :do_update >> "%LOG_FILE%" 2>&1
+exit /b
+
+:do_update
+echo.
+echo ========================================
+echo [更新脚本] 开始执行 %date% %time%
+echo ========================================
 
 echo [更新脚本] 等待后端返回响应...
-timeout /t 3 /nobreak >nul
+:: 使用 ping 替代 timeout：timeout 在非交互式/隐藏窗口下会报错
+ping 127.0.0.1 -n 4 >nul
 
 echo [更新脚本] 停止现有服务...
 :: 停止单文件版本进程
-taskkill /F /IM zviewer-frontend.exe /T >nul 2>&1
-taskkill /F /IM zviewer-backend.exe /T >nul 2>&1
-taskkill /F /IM zviewer-cert.exe /T >nul 2>&1
+:: 注意：不使用 /T 参数。/T 会杀掉整个进程树，包括执行本脚本的 cmd.exe
+:: （cmd.exe 是 node.exe 的子进程），导致脚本在 taskkill 后中断。
+:: 去掉 /T 后只杀指定名称的进程本身，cmd.exe 不受影响，脚本继续执行。
+taskkill /F /IM zviewer-frontend.exe >nul 2>&1
+taskkill /F /IM zviewer-backend.exe >nul 2>&1
+taskkill /F /IM zviewer-cert.exe >nul 2>&1
 
 :: 停止 Node.js 开发模式进程
 if exist "%PIDS_FILE%" (
@@ -460,7 +475,7 @@ if exist "%PIDS_FILE%" (
     }"
   del "%PIDS_FILE%"
 )
-taskkill /F /IM node.exe /T >nul 2>&1
+taskkill /F /IM node.exe >nul 2>&1
 
 :: 备份 config 目录（包含数据库、用户上传文件、头像等全部用户数据）
 echo [更新脚本] 备份 config 目录...
@@ -470,7 +485,6 @@ if exist "%CONFIG_DIR%" (
   xcopy /E /Y /I "%CONFIG_DIR%" "!CONFIG_BACKUP!" >nul
   if errorlevel 1 (
     echo [错误] config 目录备份失败
-    pause
     exit /b 1
   )
   echo [更新脚本] 已备份 config 到 !BACKUP_NAME!
@@ -480,7 +494,6 @@ if exist "%CONFIG_DIR%" (
 echo [更新脚本] 应用新文件...
 if not exist "%EXTRACTED_DIR%" (
   echo [错误] 未找到解压目录：%EXTRACTED_DIR%
-  pause
   exit /b 1
 )
 
@@ -490,7 +503,6 @@ if errorlevel 1 (
   if exist "!CONFIG_BACKUP!" (
     xcopy /E /Y /I "!CONFIG_BACKUP!" "%CONFIG_DIR%" >nul
   )
-  pause
   exit /b 1
 )
 
@@ -511,11 +523,22 @@ echo [更新脚本] 清理临时文件...
 rmdir /S /Q "%TEMP_DIR%"
 
 echo [更新脚本] 重新启动服务...
-start "" "%ROOT%\\start.bat"
+:: 关键：必须传递 start 参数！
+:: start.bat 无参数时默认进入交互菜单（Read-Host 等待输入），
+:: 而更新脚本在隐藏窗口中运行，用户无法看到菜单也无法输入，
+:: 导致服务永远无法启动，看起来像"文件没有替换"。
+if exist "%ROOT%\\start.bat" (
+  start "" "%ROOT%\\start.bat" start
+) else (
+  :: 回退方案：start.bat 不存在时直接启动 exe
+  echo [更新脚本] 未找到 start.bat，直接启动 exe
+  start "" "%ROOT%\\zviewer-backend.exe"
+  start "" "%ROOT%\\zviewer-frontend.exe"
+)
 
-echo [更新脚本] 更新完成，服务正在启动...
+echo [更新脚本] 更新完成，服务正在启动... %date% %time%
 del "%~f0"
-exit
+exit /b 0
 `;
   fs.writeFileSync(batPath, content, 'utf8');
   return batPath;
@@ -538,14 +561,32 @@ TEMP_DIR="${tempDir}"
 EXTRACTED_DIR="${extractedDir}"
 CONFIG_DIR="$ROOT/config"
 CONFIG_BACKUP="$ROOT/.config-backup-$$"
+SELF_PID=$$
+LOG_FILE="$ROOT/update.log"
+
+# 将输出重定向到日志文件，方便诊断更新失败原因
+exec >> "$LOG_FILE" 2>&1
+
+echo ""
+echo "========================================"
+echo "[更新脚本] 开始执行 $(date)"
+echo "========================================"
 
 echo "[更新脚本] 等待后端返回响应..."
 sleep 3
 
 echo "[更新脚本] 停止现有服务..."
-pkill -f "zviewer-frontend" 2>/dev/null || true
-pkill -f "zviewer-backend" 2>/dev/null || true
-pkill -f "zviewer-cert" 2>/dev/null || true
+# 使用 pgrep + 排除自身 PID，避免 pkill -f 匹配到执行本脚本的 bash 进程
+# （当部署路径包含 "zviewer-backend" 时，bash 命令行会匹配 pkill 模式）
+for pid in $(pgrep -f "zviewer-frontend" 2>/dev/null); do
+  [ "$pid" != "$SELF_PID" ] && kill -9 "$pid" 2>/dev/null || true
+done
+for pid in $(pgrep -f "zviewer-backend" 2>/dev/null); do
+  [ "$pid" != "$SELF_PID" ] && kill -9 "$pid" 2>/dev/null || true
+done
+for pid in $(pgrep -f "zviewer-cert" 2>/dev/null); do
+  [ "$pid" != "$SELF_PID" ] && kill -9 "$pid" 2>/dev/null || true
+done
 
 # 备份 config 目录
 echo "[更新脚本] 备份 config 目录..."
@@ -577,10 +618,21 @@ echo "[更新脚本] 清理临时文件..."
 rm -rf "$TEMP_DIR"
 
 echo "[更新脚本] 重新启动服务..."
+# 关键：必须传递 start 参数！
+# start.sh 无参数时默认进入交互菜单（read 等待输入），
+# 而更新脚本在后台运行，用户无法看到菜单也无法输入，
+# 导致服务永远无法启动，看起来像"文件没有替换"。
 cd "$ROOT"
-nohup ./start.sh > /dev/null 2>&1 &
+if [ -f "$ROOT/start.sh" ]; then
+  nohup ./start.sh start > /dev/null 2>&1 &
+else
+  # 回退方案：start.sh 不存在时直接启动 exe
+  echo "[更新脚本] 未找到 start.sh，直接启动 exe"
+  nohup "$ROOT/zviewer-backend" > /dev/null 2>&1 &
+  nohup "$ROOT/zviewer-frontend" > /dev/null 2>&1 &
+fi
 
-echo "[更新脚本] 更新完成，服务正在启动..."
+echo "[更新脚本] 更新完成，服务正在启动... $(date)"
 rm -f "$0"
 exit 0
 `;
