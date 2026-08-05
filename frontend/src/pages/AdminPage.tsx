@@ -68,6 +68,34 @@ interface UpdateInfo {
   assetSize: number
 }
 
+/** 更新进度状态：由 SSE 流式接口推送 */
+interface UpdateProgress {
+  /** 当前阶段 */
+  stage: 'downloading' | 'extracting' | 'starting' | 'done' | 'error'
+  /** 下载已接收字节数（仅 downloading 阶段） */
+  received: number
+  /** 下载总字节数（仅 downloading 阶段，可能为 0） */
+  total: number
+  /** 完成或错误消息 */
+  message: string
+}
+
+/** SSE 事件结构，与后端 UpdateStageEvent 对齐 */
+interface UpdateStageEventPayload {
+  stage: 'downloading' | 'extracting' | 'starting' | 'done' | 'error'
+  received?: number
+  total?: number
+  message?: string
+}
+
+/** 将字节数格式化为人类可读的文件大小 */
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 B'
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
 type RegistrationMode = 'open' | 'approval' | 'closed'
 type RoomCreationMode = 'admin-only' | 'all-users'
 
@@ -129,6 +157,10 @@ export default function AdminPage() {
   const [updateLoading, setUpdateLoading] = useState(false)
   const [applyLoading, setApplyLoading] = useState(false)
   const [uploadLoading, setUploadLoading] = useState(false)
+  // 更新进度：应用更新时由 SSE 流式接口实时推送
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(
+    null
+  )
   const [includePrerelease, setIncludePrerelease] = useState(
     () => localStorage.getItem('update-include-prerelease') === 'true'
   )
@@ -255,28 +287,113 @@ export default function AdminPage() {
 
   const handleApplyUpdate = async () => {
     setApplyLoading(true)
+    setUpdateProgress({
+      stage: 'downloading',
+      received: 0,
+      total: 0,
+      message: '',
+    })
     try {
+      // 使用 SSE 流式接口，实时推送下载/解压/启动进度
       const res = await apiFetch(
-        `/api/system/update/apply?includePrerelease=${includePrerelease}`,
+        `/api/system/update/apply-stream?includePrerelease=${includePrerelease}`,
         {
           method: 'POST',
           headers: authHeaders,
         }
       )
-      const data = (await res.json()) as {
-        success: boolean
-        message?: string
+
+      if (!res.ok || !res.body) {
+        // 非流式错误响应（如 401/403/500）
+        const errData = (await res.json().catch(() => ({}))) as {
+          message?: string
+        }
+        message.error(errData.message ?? '更新失败')
+        setUpdateProgress(null)
+        return
       }
-      if (data.success) {
-        message.success(data.message ?? '更新已触发')
+
+      // 读取 SSE 流：按 `\n\n` 分割事件，每条事件 `data: <json>`
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let lastStage: UpdateProgress['stage'] | null = null
+      let doneMessage = ''
+      let errorMessage = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const events = buffer.split('\n\n')
+        buffer = events.pop() ?? ''
+        for (const evt of events) {
+          const line = evt.trim()
+          if (!line.startsWith('data: ')) continue
+          const jsonStr = line.slice(6).trim()
+          if (!jsonStr) continue
+          try {
+            const data = JSON.parse(jsonStr) as UpdateStageEventPayload
+            if (data.stage === 'downloading') {
+              setUpdateProgress({
+                stage: 'downloading',
+                received: data.received ?? 0,
+                total: data.total ?? 0,
+                message: '',
+              })
+            } else if (data.stage === 'extracting') {
+              setUpdateProgress({
+                stage: 'extracting',
+                received: 0,
+                total: 0,
+                message: '正在解压更新包…',
+              })
+            } else if (data.stage === 'starting') {
+              setUpdateProgress({
+                stage: 'starting',
+                received: 0,
+                total: 0,
+                message: '正在启动更新脚本…',
+              })
+            } else if (data.stage === 'done') {
+              doneMessage = data.message ?? '更新已触发'
+              setUpdateProgress({
+                stage: 'done',
+                received: 0,
+                total: 0,
+                message: doneMessage,
+              })
+            } else if (data.stage === 'error') {
+              errorMessage = data.message ?? '更新失败'
+              setUpdateProgress({
+                stage: 'error',
+                received: 0,
+                total: 0,
+                message: errorMessage,
+              })
+            }
+            lastStage = data.stage
+          } catch {
+            // 忽略解析错误
+          }
+        }
+      }
+
+      if (lastStage === 'done') {
+        message.success(doneMessage || '更新已触发')
+      } else if (lastStage === 'error') {
+        message.error(errorMessage || '更新失败')
       } else {
-        message.error(data.message ?? '更新失败')
+        // 流意外中断，未收到 done/error
+        message.error('更新中断，请重试')
       }
     } catch (err) {
       console.error('[AdminPage] apply update error:', err)
       message.error('更新失败')
     } finally {
       setApplyLoading(false)
+      // 保留进度状态显示最终结果，3 秒后清除
+      setTimeout(() => setUpdateProgress(null), 3000)
     }
   }
 
@@ -295,72 +412,163 @@ export default function AdminPage() {
     }
 
     setUploadLoading(true)
+    setUpdateProgress({
+      stage: 'downloading',
+      received: 0,
+      total: file.size,
+      message: '正在上传更新包…',
+    })
+
     try {
+      // 使用 XHR 上传：可跟踪上传进度，响应体为 SSE 流
       const apiUrl = getApiUrl()
-      const res = await fetch(
-        `${apiUrl}/api/system/update/upload?filename=${encodeURIComponent(file.name)}`,
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': lowerName.endsWith('.tar.gz')
-              ? 'application/gzip'
-              : 'application/zip',
-          },
-          body: file,
+      const uploadUrl = `${apiUrl}/api/system/update/upload-stream?filename=${encodeURIComponent(file.name)}`
+
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', uploadUrl)
+        xhr.withCredentials = true
+        xhr.responseType = 'text'
+        xhr.setRequestHeader(
+          'Content-Type',
+          lowerName.endsWith('.tar.gz')
+            ? 'application/gzip'
+            : 'application/zip'
+        )
+
+        // 上传进度跟踪
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setUpdateProgress({
+              stage: 'downloading',
+              received: e.loaded,
+              total: e.total,
+              message: '正在上传更新包…',
+            })
+          }
         }
-      )
-      // 401/403 处理：尝试 refresh
-      if (res.status === 401 || res.status === 403) {
-        const refreshRes = await fetch(`${apiUrl}/api/auth/refresh`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-        })
-        if (refreshRes.ok) {
-          // 重试上传
-          const retryRes = await fetch(
-            `${apiUrl}/api/system/update/upload?filename=${encodeURIComponent(file.name)}`,
-            {
-              method: 'POST',
-              credentials: 'include',
-              headers: {
-                'Content-Type': lowerName.endsWith('.tar.gz')
-                  ? 'application/gzip'
-                  : 'application/zip',
-              },
-              body: file,
+
+        // 上传完成 → 开始接收 SSE 响应流
+        // xhr.onprogress 在响应数据到达时触发，可读取增量 responseText
+        let lastProcessedLen = 0
+        let buffer = ''
+        let lastStage: UpdateProgress['stage'] | null = null
+        let doneMessage = ''
+        let errorMessage = ''
+
+        const processSSEChunk = () => {
+          const fullText = xhr.responseText || ''
+          const chunk = fullText.slice(lastProcessedLen)
+          lastProcessedLen = fullText.length
+          buffer += chunk
+          const events = buffer.split('\n\n')
+          buffer = events.pop() ?? ''
+          for (const evt of events) {
+            const line = evt.trim()
+            if (!line.startsWith('data: ')) continue
+            const jsonStr = line.slice(6).trim()
+            if (!jsonStr) continue
+            try {
+              const data = JSON.parse(jsonStr) as UpdateStageEventPayload
+              if (data.stage === 'extracting') {
+                setUpdateProgress({
+                  stage: 'extracting',
+                  received: 0,
+                  total: 0,
+                  message: '正在解压更新包…',
+                })
+              } else if (data.stage === 'starting') {
+                setUpdateProgress({
+                  stage: 'starting',
+                  received: 0,
+                  total: 0,
+                  message: '正在启动更新脚本…',
+                })
+              } else if (data.stage === 'done') {
+                doneMessage = data.message ?? '更新已触发'
+                setUpdateProgress({
+                  stage: 'done',
+                  received: 0,
+                  total: 0,
+                  message: doneMessage,
+                })
+              } else if (data.stage === 'error') {
+                errorMessage = data.message ?? '更新失败'
+                setUpdateProgress({
+                  stage: 'error',
+                  received: 0,
+                  total: 0,
+                  message: errorMessage,
+                })
+              }
+              lastStage = data.stage
+            } catch {
+              // 忽略解析错误
             }
-          )
-          const retryData = (await retryRes.json()) as {
-            success: boolean
-            message?: string
           }
-          if (retryData.success) {
-            message.success(retryData.message ?? '更新已触发')
+        }
+
+        xhr.onprogress = processSSEChunk
+
+        xhr.onload = () => {
+          // 处理流中剩余数据
+          processSSEChunk()
+          if (xhr.status >= 200 && xhr.status < 300) {
+            if (lastStage === 'done') {
+              message.success(doneMessage || '更新已触发')
+            } else if (lastStage === 'error') {
+              message.error(errorMessage || '上传更新失败')
+            } else if (lastStage === null) {
+              // 未收到 SSE 事件，可能是普通 JSON 响应（错误场景）
+              try {
+                const data = JSON.parse(xhr.responseText) as {
+                  success?: boolean
+                  message?: string
+                }
+                if (data.success) {
+                  message.success(data.message ?? '更新已触发')
+                } else {
+                  message.error(data.message ?? '上传更新失败')
+                }
+              } catch {
+                message.error('上传更新失败')
+              }
+            }
+            resolve()
+          } else if (xhr.status === 401 || xhr.status === 403) {
+            message.error('登录已过期，请重新登录后再试')
+            reject(new Error('auth expired'))
           } else {
-            message.error(retryData.message ?? '上传更新失败')
+            // 非 SSE 错误响应
+            try {
+              const data = JSON.parse(xhr.responseText) as {
+                message?: string
+              }
+              message.error(data.message ?? '上传更新失败')
+            } catch {
+              message.error('上传更新失败')
+            }
+            reject(new Error(`HTTP ${xhr.status}`))
           }
-        } else {
-          message.error('登录已过期，请重新登录后再试')
         }
-      } else {
-        const data = (await res.json()) as {
-          success: boolean
-          message?: string
+
+        xhr.onerror = () => {
+          message.error('网络错误，上传更新失败')
+          reject(new Error('network error'))
         }
-        if (data.success) {
-          message.success(data.message ?? '更新已触发')
-        } else {
-          message.error(data.message ?? '上传更新失败')
-        }
-      }
+
+        xhr.send(file)
+      })
     } catch (err) {
       console.error('[AdminPage] upload update error:', err)
-      message.error('上传更新失败')
+      if (err instanceof Error && err.message !== 'network error' && err.message !== 'auth expired' && !err.message.startsWith('HTTP')) {
+        message.error('上传更新失败')
+      }
     } finally {
       setUploadLoading(false)
       event.target.value = ''
+      // 保留进度状态显示最终结果，3 秒后清除
+      setTimeout(() => setUpdateProgress(null), 3000)
     }
   }
 
@@ -1284,6 +1492,66 @@ export default function AdminPage() {
                       }}
                     />
                   </div>
+                  {/* 更新进度条：下载/上传/解压/启动各阶段实时显示 */}
+                  {updateProgress && (
+                    <div className="mb-3 rounded-[var(--md-sys-radius-small)] bg-[var(--md-sys-color-surface-container-high)] p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <Text className="text-xs font-medium text-[var(--md-sys-color-on-surface-variant)]">
+                          {updateProgress.stage === 'downloading' &&
+                            (updateProgress.message || '正在下载更新包…')}
+                          {updateProgress.stage === 'extracting' &&
+                            '正在解压更新包…'}
+                          {updateProgress.stage === 'starting' &&
+                            '正在启动更新脚本…'}
+                          {updateProgress.stage === 'done' &&
+                            (updateProgress.message || '更新已触发')}
+                          {updateProgress.stage === 'error' &&
+                            (updateProgress.message || '更新失败')}
+                        </Text>
+                        {updateProgress.stage === 'downloading' &&
+                          updateProgress.total > 0 && (
+                            <Text className="shrink-0 text-[10px] font-mono text-[var(--md-sys-color-on-surface-variant)]">
+                              {formatBytes(updateProgress.received)} /{' '}
+                              {formatBytes(updateProgress.total)}
+                            </Text>
+                          )}
+                      </div>
+                      {/* 进度条 */}
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container-lowest)]">
+                        {updateProgress.stage === 'downloading' ? (
+                          updateProgress.total > 0 ? (
+                            <div
+                              className="h-full rounded-full bg-[var(--md-sys-color-primary)] transition-all duration-150"
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  (updateProgress.received /
+                                    updateProgress.total) *
+                                    100
+                                )}%`,
+                              }}
+                            />
+                          ) : (
+                            // 总大小未知时显示不确定进度动画
+                            <div className="zen-indeterminate-bar h-full w-1/3 rounded-full bg-[var(--md-sys-color-primary)]" />
+                          )
+                        ) : (
+                          <div
+                            className={cn(
+                              'h-full rounded-full transition-all duration-300',
+                              updateProgress.stage === 'done' &&
+                                'w-full bg-[var(--md-sys-color-primary)]',
+                              updateProgress.stage === 'error' &&
+                                'w-full bg-[var(--md-sys-color-error)]',
+                              (updateProgress.stage === 'extracting' ||
+                                updateProgress.stage === 'starting') &&
+                                'w-1/2 bg-[var(--md-sys-color-primary)] zen-indeterminate-bar'
+                            )}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {updateLoading ? (
                     <div className="py-4">
                       <Spinner tip="检查更新中..." size={24} />

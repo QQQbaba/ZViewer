@@ -26,6 +26,19 @@
   background-color: var(--md-sys-color-outline);
 }
 
+/* 不确定进度条动画：用于下载总大小未知或解压/启动阶段 */
+@keyframes zen-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+.zen-indeterminate-bar {
+  animation: zen-indeterminate 1.2s ease-in-out infinite;
+}
+
 /* 影片列表滚动区：窄滚动条 + scrollbar-gutter 预留空间，
    避免 B站解析设置展开后滚动条占用内容宽度导致视频卡片收缩。
    注意：Chrome 121+ (Electron 39) 在 Windows 经典滚动条模式下
