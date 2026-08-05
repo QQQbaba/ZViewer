@@ -30,8 +30,8 @@ export function useViewerList(): UseViewerListReturn {
       })
     }
     const handleViewerLeft = (payload: ViewerLeftPayload) => {
-      if (!payload?.socketId) return
-      useRoomStore.getState().removeViewer(payload.socketId)
+      if (!payload?.viewerSocketId) return
+      useRoomStore.getState().removeViewer(payload.viewerSocketId)
     }
 
     socket.on(SOCKET_EVENT.VIEWER_JOINED, handleViewerJoined)

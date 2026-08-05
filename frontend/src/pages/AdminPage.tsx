@@ -77,6 +77,7 @@ interface AdminSettings {
   registrationMode: RegistrationMode
   roomCreationMode: RoomCreationMode
   betaFeaturesEnabled: boolean
+  dashDisabled: boolean
   dataSourceConfig?: {
     aniSubsSubscriptions?: string[]
     kazumiRules?: string[]
@@ -105,6 +106,7 @@ export default function AdminPage() {
     registrationMode: 'approval',
     roomCreationMode: 'admin-only',
     betaFeaturesEnabled: false,
+    dashDisabled: false,
   })
   const [loading, setLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -543,6 +545,7 @@ export default function AdminPage() {
           registrationMode: settings.registrationMode,
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
+          dashDisabled: settings.dashDisabled,
           dataSourceConfig: settings.dataSourceConfig,
         }),
       })
@@ -1238,6 +1241,26 @@ export default function AdminPage() {
                     </div>
                   </>
                 )}
+
+                <Title level={5} className="mb-4 mt-6">
+                  服务器 DASH 流
+                </Title>
+                <div className="mb-6">
+                  <Switch
+                    label="禁用服务器端 DASH 模式"
+                    checked={settings.dashDisabled}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        dashDisabled: e.target.checked,
+                      }))
+                    }
+                  />
+                  <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                    开启后，服务器端 B站 解析将强制使用 MP4 模式，不再返回 DASH
+                    流。仅影响服务器端解析，不影响 CLI 代理的 DASH 模式。
+                  </p>
+                </div>
 
                 <Title level={5} className="mb-4 mt-6">
                   版本更新

@@ -98,6 +98,27 @@ function detectBilibiliCdnProvider(url: string): string {
   return '未知'
 }
 
+/**
+ * 推断当前播放模式。
+ * - CLI 代理 DASH：sourceUrl 包含 127.0.0.1 CLI 代理地址且 format 为 dash
+ * - 服务器 DASH：format 为 dash 但非 CLI 代理
+ * - MP4：format 为 mp4
+ * - 自定义源/其他：不显示
+ */
+function detectPlayMode(
+  sourceType: VideoStatsMenuProps['sourceType'],
+  format: VideoStatsMenuProps['format'],
+  sourceUrl?: string
+): string | null {
+  if (sourceType !== 'bilibili') return null
+  if (format === 'mp4') return 'MP4'
+  if (format === 'dash') {
+    const isCli = !!sourceUrl && sourceUrl.includes('127.0.0.1')
+    return isCli ? 'DASH (CLI)' : 'DASH'
+  }
+  return null
+}
+
 function formatMs(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return '-'
   return `${value.toFixed(1)} ms`
@@ -470,9 +491,12 @@ export function VideoStatsMenu({
       '视频统计信息',
       `来源: ${stats.sourceLabel}`,
       `URL: ${stats.url || '-'}`,
-      `编码: ${stats.codec}`,
-      `分辨率: ${stats.resolution}`,
     ]
+    const playMode = detectPlayMode(sourceType, format, sourceUrl)
+    if (playMode) {
+      lines.push(`播放模式: ${playMode}`)
+    }
+    lines.push(`编码: ${stats.codec}`, `分辨率: ${stats.resolution}`)
     if (sourceType === 'bilibili' && format !== 'mp4') {
       lines.push(`清晰度: ${stats.quality}`)
     }
@@ -596,6 +620,10 @@ export function VideoStatsMenu({
       </div>
 
       <div className="flex flex-col gap-1.5 text-xs">
+        {(() => {
+          const mode = detectPlayMode(sourceType, format, sourceUrl)
+          return mode ? <StatsRow label="播放模式" value={mode} /> : null
+        })()}
         <StatsRow label="编码" value={displayStats.codec} />
         <StatsRow label="分辨率" value={displayStats.resolution} />
         {sourceType === 'bilibili' && format !== 'mp4' && (

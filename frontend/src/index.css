@@ -3,6 +3,11 @@
 @tailwind utilities;
 
 /* 控制卡片内容区统一滚动条样式：细轨道、圆角 thumb、悬停增强 */
+/* overscroll-behavior: contain 防止滚动到边界时事件冒泡到父级滚动容器 */
+.zen-scroll {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
 .zen-scroll::-webkit-scrollbar {
   width: 4px;
 }

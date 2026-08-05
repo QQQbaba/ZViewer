@@ -32,6 +32,7 @@ import {
 import { useCliAgent } from '@/hooks/useCliAgent'
 import { getApiUrl } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 
 export interface BilibiliParseSettingsProps {
   /** 影片 ID，配置按此 key 独立存储 */
@@ -63,7 +64,10 @@ export function BilibiliParseSettings({
     (state) => state.watchTogether.bufferMode
   )
   const cliUnavailable = cliEnabled && !cliAgent.available
-  const effectivePreferMp4 = getEffectivePreferMp4(movieId)
+  const dashDisabled = useSystemSettingsStore((s) => s.dashDisabled)
+  // 服务器端 DASH 禁用时，CLI 未启用的影片强制 MP4 且不可切换
+  const dashLocked = dashDisabled && !cliEnabled
+  const effectivePreferMp4 = dashLocked || getEffectivePreferMp4(movieId)
   const displayPreferMp4 = effectivePreferMp4
 
   const viewerDisplayBufferMode =
@@ -83,7 +87,7 @@ export function BilibiliParseSettings({
 
   const handlePreferMp4Change = useCallback(
     (next: boolean) => {
-      if (!isHost) return
+      if (!isHost || dashLocked) return
       setBilibiliParseOptions(movieId, {
         preferMp4: next,
         bufferMode: next ? false : undefined,
@@ -93,7 +97,7 @@ export function BilibiliParseSettings({
         triggerReloadBilibili()
       }
     },
-    [movieId, isHost, isCurrentMovie, triggerReloadBilibili]
+    [movieId, isHost, isCurrentMovie, triggerReloadBilibili, dashLocked]
   )
 
   const handleBufferModeChange = useCallback(
@@ -283,20 +287,22 @@ export function BilibiliParseSettings({
               handlePreferMp4Change,
               'DASH 高清',
               'MP4 流畅',
-              !isHost || cliEnabled
+              !isHost || cliEnabled || dashLocked
             )}
             <div
               className="mt-1 text-[10px] leading-snug"
               style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
             >
               {' '}
-              {cliEnabled
-                ? cliAgent.available
-                  ? 'CLI 代理已启用，当前使用本地 DASH 高画质解析（不再自动降级 MP4）'
-                  : '已启用 CLI 但未连接本地代理，请先启动本地 zcontrol-cli 以播放 DASH 高画质'
-                : displayPreferMp4
-                  ? 'MP4 直链，seek 流畅，清晰度通常 480P/720P'
-                  : 'DASH 分离流，支持 1080P/4K，seek 需缓冲'}
+              {dashLocked
+                ? '服务器已禁用 DASH 模式，当前强制 MP4 播放'
+                : cliEnabled
+                  ? cliAgent.available
+                    ? 'CLI 代理已启用，当前使用本地 DASH 高画质解析（不再自动降级 MP4）'
+                    : '已启用 CLI 但未连接本地代理，请先启动本地 zcontrol-cli 以播放 DASH 高画质'
+                  : displayPreferMp4
+                    ? 'MP4 直链，seek 流畅，清晰度通常 480P/720P'
+                    : 'DASH 分离流，支持 1080P/4K，seek 需缓冲'}
             </div>
           </div>
 

@@ -88,18 +88,15 @@ export function ReturnToRoomButton() {
         }}
         title="回到房间"
       >
-        {/* 图标容器：135° 渐变背景（与其他卡片头部一致） */}
+        {/* 图标容器：Material 3 container 纯色背景 */}
         <span
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
           style={{
-            background:
-              'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-tertiary) 18%, transparent))',
+            backgroundColor: 'var(--md-sys-color-primary-container)',
+            color: 'var(--md-sys-color-on-primary-container)',
           }}
         >
-          <DoorOpen
-            className="h-4 w-4"
-            style={{ color: 'var(--md-sys-color-primary)' }}
-          />
+          <DoorOpen className="h-4 w-4" />
         </span>
 
         <div className="flex flex-col items-start">
