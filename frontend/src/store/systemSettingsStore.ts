@@ -13,6 +13,14 @@ export interface SystemSettings {
   betaFeaturesEnabled: boolean
   /** 禁用服务器端 DASH 模式，强制 MP4（仅服务器端，不影响 CLI） */
   dashDisabled: boolean
+  /** 更新 CDN 加速开关：true 时更新检测和下载走 CDN 加速域名 */
+  cdnAccelerate: boolean
+  /** GitHub API 加速域名（如 api.github.cdn.zero251.xyz），替换 api.github.com */
+  apiCdnDomain: string
+  /** GitHub Release 下载加速域名（如 release.github.cdn.zero251.xyz），替换 objects.githubusercontent.com */
+  releaseCdnDomain: string
+  /** GitHub 主站加速域名（如 main.github.cdn.zero251.xyz），替换 github.com（Release 下载第一步） */
+  mainCdnDomain: string
   dataSourceConfig?: Record<string, unknown> | null
 }
 
@@ -39,6 +47,10 @@ const DEFAULT_SETTINGS: SystemSettings = {
   roomCreationMode: 'admin-only',
   betaFeaturesEnabled: false,
   dashDisabled: false,
+  cdnAccelerate: false,
+  apiCdnDomain: '',
+  releaseCdnDomain: '',
+  mainCdnDomain: '',
   dataSourceConfig: null,
 }
 

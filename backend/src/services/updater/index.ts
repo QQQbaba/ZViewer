@@ -3,9 +3,38 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 import os from 'os';
+import { getSystemSettings } from '../system-settings';
 
 const REPO_OWNER = 'Zero-wyc';
 const REPO_NAME = 'ZViewer';
+
+/** CDN 加速配置，由调用方从 SystemSettings 读取后传入 */
+interface CdnConfig {
+  apiCdnDomain?: string;
+  releaseCdnDomain?: string;
+  mainCdnDomain?: string;
+}
+
+/**
+ * 将 URL 的 host 替换为 CDN 域名（仅当 host 匹配 originalHost 时）。
+ *
+ * @param url 原始 URL
+ * @param originalHost 需要替换的源站 host（如 api.github.com、objects.githubusercontent.com）
+ * @param cdnDomain CDN 加速域名（不含协议，如 api.github.cdn.zero251.xyz）
+ * @returns 替换后的 URL（host 不匹配时返回原 URL）
+ */
+function applyCdnToUrl(url: string, originalHost: string, cdnDomain: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === originalHost) {
+      parsed.hostname = cdnDomain.trim();
+      return parsed.toString();
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
 
 export interface UpdateInfo {
   currentVersion: string;
@@ -43,7 +72,10 @@ function getPlatformAssetName(): string {
 /**
  * HTTPS GET JSON — 直接请求 GitHub API，不再经过 CDN 代理。
  */
-function httpsGetJson<T>(url: string): Promise<T> {
+function httpsGetJson<T>(
+  url: string,
+  cdnConfig?: CdnConfig,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
@@ -61,7 +93,7 @@ function httpsGetJson<T>(url: string): Promise<T> {
           res.statusCode < 400 &&
           res.headers.location
         ) {
-          httpsGetJson<T>(res.headers.location).then(resolve).catch(reject);
+          httpsGetJson<T>(res.headers.location, cdnConfig).then(resolve).catch(reject);
           return;
         }
         if (res.statusCode && res.statusCode >= 400) {
@@ -171,10 +203,25 @@ export async function getUpdateInfo(
   const currentVersion = getLocalVersion();
   const assetName = getPlatformAssetName();
 
+  // 读取 CDN 加速配置
+  const settings = await getSystemSettings();
+  const cdnConfig: CdnConfig | undefined = settings.cdnAccelerate
+    ? {
+        apiCdnDomain: settings.apiCdnDomain || undefined,
+        releaseCdnDomain: settings.releaseCdnDomain || undefined,
+        mainCdnDomain: settings.mainCdnDomain || undefined,
+      }
+    : undefined;
+
+  // 替换 api.github.com 为 CDN 域名（更新检测加速）
+  let apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=10`;
+  if (cdnConfig?.apiCdnDomain) {
+    apiUrl = applyCdnToUrl(apiUrl, 'api.github.com', cdnConfig.apiCdnDomain);
+    console.log(`[updater] CDN 检测加速: ${cdnConfig.apiCdnDomain}`);
+  }
+
   // 获取 releases 列表（包含正式版和预发布版）
-  const releases = await httpsGetJson<GithubRelease[]>(
-    `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=10`,
-  );
+  const releases = await httpsGetJson<GithubRelease[]>(apiUrl, cdnConfig);
 
   if (!releases || releases.length === 0) {
     throw new Error('未找到任何发布版本');
@@ -273,6 +320,7 @@ function downloadFile(
   url: string,
   dest: string,
   onProgress?: (received: number, total: number) => void,
+  cdnConfig?: CdnConfig,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(dest);
@@ -286,7 +334,20 @@ function downloadFile(
         // 关闭当前文件流，重定向后重新下载（保留进度回调）
         file.close();
         fs.unlinkSync(dest);
-        downloadFile(res.headers.location, dest, onProgress)
+        // CDN 替换：将 objects.githubusercontent.com 替换为 release CDN 域名
+        let redirectUrl = res.headers.location;
+        if (cdnConfig?.releaseCdnDomain) {
+          const before = redirectUrl;
+          redirectUrl = applyCdnToUrl(
+            redirectUrl,
+            'objects.githubusercontent.com',
+            cdnConfig.releaseCdnDomain,
+          );
+          if (redirectUrl !== before) {
+            console.log(`[updater] CDN 下载加速: ${cdnConfig.releaseCdnDomain}`);
+          }
+        }
+        downloadFile(redirectUrl, dest, onProgress, cdnConfig)
           .then(resolve)
           .catch(reject);
         return;
@@ -553,6 +614,7 @@ async function applyUpdateFromArchive(
   archiveData: Buffer | string,
   archiveFilename: string,
   onStage?: (event: UpdateStageEvent) => void,
+  cdnConfig?: CdnConfig,
 ): Promise<{ success: boolean; message: string }> {
   const root = projectRoot();
   const tempDir = path.join(root, '.update-temp');
@@ -567,10 +629,10 @@ async function applyUpdateFromArchive(
   try {
     // 写入压缩包
     if (typeof archiveData === 'string') {
-      // archiveData 是 URL，需要下载（带进度）
+      // archiveData 是 URL，需要下载（带进度），透传 CDN 配置
       await downloadFile(archiveData, archivePath, (received, total) => {
         if (onStage) onStage({ stage: 'downloading', received, total });
-      });
+      }, cdnConfig);
     } else {
       fs.writeFileSync(archivePath, archiveData);
     }
@@ -663,7 +725,27 @@ export async function applyUpdate(
   if (!info.downloadUrl) {
     throw new Error('未找到可用的下载地址');
   }
-  return applyUpdateFromArchive(info.downloadUrl, info.assetName, onStage);
+
+  // 读取 CDN 配置（getUpdateInfo 已读取一次，这里再读一次确保最新）
+  const settings = await getSystemSettings();
+  const cdnConfig: CdnConfig | undefined = settings.cdnAccelerate
+    ? {
+        apiCdnDomain: settings.apiCdnDomain || undefined,
+        releaseCdnDomain: settings.releaseCdnDomain || undefined,
+        mainCdnDomain: settings.mainCdnDomain || undefined,
+      }
+    : undefined;
+
+  // 若配置了 main CDN 域名，将 downloadUrl 的 github.com 替换为 CDN 域名
+  // 这样 Release 下载第一步（请求 github.com 获取 302）也走 CDN 加速
+  let downloadUrl = info.downloadUrl;
+  if (cdnConfig?.mainCdnDomain) {
+    downloadUrl = applyCdnToUrl(downloadUrl, 'github.com', cdnConfig.mainCdnDomain);
+    console.log(`[updater] CDN 主站加速: ${cdnConfig.mainCdnDomain}`);
+  }
+
+  // downloadFile 在 302 重定向跟随时会替换 objects.githubusercontent.com 为 release CDN 域名
+  return applyUpdateFromArchive(downloadUrl, info.assetName, onStage, cdnConfig);
 }
 
 /**

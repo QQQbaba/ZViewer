@@ -25,6 +25,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { ConfirmModal } from '@/components/ui/Modal'
 import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/Switch'
+import { Input } from '@/components/ui/Input'
 import { InputNumber } from '@/components/ui/InputNumber'
 import { Select } from '@/components/ui/Select'
 import { AniSubsGithubBrowser } from '@/modules/admin/components/AniSubsGithubBrowser'
@@ -106,6 +107,10 @@ interface AdminSettings {
   roomCreationMode: RoomCreationMode
   betaFeaturesEnabled: boolean
   dashDisabled: boolean
+  cdnAccelerate: boolean
+  apiCdnDomain: string
+  releaseCdnDomain: string
+  mainCdnDomain: string
   dataSourceConfig?: {
     aniSubsSubscriptions?: string[]
     kazumiRules?: string[]
@@ -135,6 +140,10 @@ export default function AdminPage() {
     roomCreationMode: 'admin-only',
     betaFeaturesEnabled: false,
     dashDisabled: false,
+    cdnAccelerate: false,
+    apiCdnDomain: '',
+    releaseCdnDomain: '',
+    mainCdnDomain: '',
   })
   const [loading, setLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -754,6 +763,10 @@ export default function AdminPage() {
           roomCreationMode: settings.roomCreationMode,
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
           dashDisabled: settings.dashDisabled,
+          cdnAccelerate: settings.cdnAccelerate,
+          apiCdnDomain: settings.apiCdnDomain,
+          releaseCdnDomain: settings.releaseCdnDomain,
+          mainCdnDomain: settings.mainCdnDomain,
           dataSourceConfig: settings.dataSourceConfig,
         }),
       })
@@ -1491,6 +1504,87 @@ export default function AdminPage() {
                         )
                       }}
                     />
+                  </div>
+                  {/* CDN 加速配置 */}
+                  <div className="pb-3 mb-3 border-b border-[var(--md-sys-color-outline-variant)]">
+                    <div className="flex items-center justify-between pb-3">
+                      <div className="flex-1 min-w-0 pr-3">
+                        <Text className="text-sm font-medium">
+                          更新 CDN 加速
+                        </Text>
+                        <Text
+                          type="secondary"
+                          className="block text-xs mt-0.5"
+                        >
+                          开启后，更新检测和 Release 下载将走 CDN 加速域名
+                        </Text>
+                      </div>
+                      <Switch
+                        checked={settings.cdnAccelerate}
+                        onChange={(e) =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            cdnAccelerate: e.target.checked,
+                          }))
+                        }
+                      />
+                    </div>
+                    {settings.cdnAccelerate && (
+                      <div className="space-y-3">
+                        <div>
+                          <Text className="mb-1.5 block text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
+                            更新检测加速域名（源站 api.github.com）
+                          </Text>
+                          <Input
+                            value={settings.apiCdnDomain}
+                            onChange={(e) =>
+                              setSettings((prev) => ({
+                                ...prev,
+                                apiCdnDomain: e.target.value.trim(),
+                              }))
+                            }
+                            placeholder="api.github.cdn.zero251.xyz"
+                          />
+                        </div>
+                        <div>
+                          <Text className="mb-1.5 block text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
+                            Release 下载加速域名（源站 objects.githubusercontent.com）
+                          </Text>
+                          <Input
+                            value={settings.releaseCdnDomain}
+                            onChange={(e) =>
+                              setSettings((prev) => ({
+                                ...prev,
+                                releaseCdnDomain: e.target.value.trim(),
+                              }))
+                            }
+                            placeholder="release.github.cdn.zero251.xyz"
+                          />
+                        </div>
+                        <div>
+                          <Text className="mb-1.5 block text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
+                            GitHub 主站加速域名（源站 github.com）
+                          </Text>
+                          <Input
+                            value={settings.mainCdnDomain}
+                            onChange={(e) =>
+                              setSettings((prev) => ({
+                                ...prev,
+                                mainCdnDomain: e.target.value.trim(),
+                              }))
+                            }
+                            placeholder="main.github.cdn.zero251.xyz"
+                          />
+                        </div>
+                        <Text
+                          type="secondary"
+                          className="block text-xs"
+                        >
+                          仅填写域名，不需要 https://
+                          前缀。三个域名可独立配置。
+                        </Text>
+                      </div>
+                    )}
                   </div>
                   {/* 更新进度条：下载/上传/解压/启动各阶段实时显示 */}
                   {updateProgress && (
