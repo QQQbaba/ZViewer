@@ -749,20 +749,25 @@ export default function AdminPage() {
   const handleSaveSettings = async () => {
     setSavingSettings(true)
     try {
+      // 仅在 dataSourceConfig 有值时传递，避免 null 覆盖已有配置；
+      // dataSourceConfig 的编辑入口在"数据源设置"卡片，不在权限管理页面。
+      const payload: Record<string, unknown> = {
+        autoDeleteInactiveRooms: settings.autoDeleteInactiveRooms,
+        autoDeleteAfterHours: settings.autoDeleteAfterHours,
+        registrationMode: settings.registrationMode,
+        roomCreationMode: settings.roomCreationMode,
+        betaFeaturesEnabled: settings.betaFeaturesEnabled,
+        dashDisabled: settings.dashDisabled,
+        cdnAccelerate: settings.cdnAccelerate,
+        cdnProxyUrl: settings.cdnProxyUrl,
+      }
+      if (settings.dataSourceConfig) {
+        payload.dataSourceConfig = settings.dataSourceConfig
+      }
       const res = await apiFetch('/api/admin/settings', {
         method: 'PUT',
         headers: authHeaders,
-        body: JSON.stringify({
-          autoDeleteInactiveRooms: settings.autoDeleteInactiveRooms,
-          autoDeleteAfterHours: settings.autoDeleteAfterHours,
-          registrationMode: settings.registrationMode,
-          roomCreationMode: settings.roomCreationMode,
-          betaFeaturesEnabled: settings.betaFeaturesEnabled,
-          dashDisabled: settings.dashDisabled,
-          cdnAccelerate: settings.cdnAccelerate,
-          cdnProxyUrl: settings.cdnProxyUrl,
-          dataSourceConfig: settings.dataSourceConfig,
-        }),
+        body: JSON.stringify(payload),
       })
       const data = (await res.json()) as {
         success: boolean

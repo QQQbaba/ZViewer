@@ -447,11 +447,12 @@ router.put(
       }
       if (
         dataSourceConfig !== undefined &&
-        (typeof dataSourceConfig !== 'object' || dataSourceConfig === null || Array.isArray(dataSourceConfig))
+        dataSourceConfig !== null &&
+        (typeof dataSourceConfig !== 'object' || Array.isArray(dataSourceConfig))
       ) {
         res.status(400).json({
           success: false,
-          message: 'dataSourceConfig 必须是对象',
+          message: 'dataSourceConfig 必须是对象或 null',
         });
         return;
       }
