@@ -160,7 +160,7 @@ export function DanmakuSearchModal({
     try {
       const items = await fetchDanmaku(source, episode)
       const label = `${selectedResult.title} · ${episode.title}`
-      addTrack(trackId, label, source, items, 0)
+      await addTrack(trackId, label, source, items, 0)
       message.success(`已添加 ${label} 弹幕轨道（共 ${items.length} 条）`)
       onClose()
     } catch (err) {

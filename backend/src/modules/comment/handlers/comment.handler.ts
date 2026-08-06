@@ -20,6 +20,7 @@ import type { SocketEventHandler, AckCallback } from '../../socket';
 import { safeAck } from '../../socket';
 import { roomPermissionService } from '../../room/room-permission.service';
 import { commentService } from '../comment.service';
+import { danmakuMetaService } from '../danmaku-meta.service';
 
 /** 批注笔画类型 */
 export interface AnnotationStroke {
@@ -136,11 +137,11 @@ export class CommentHandler implements SocketEventHandler {
       },
     );
 
-    // 发送弹幕：不持久化，仅广播
+    // 发送弹幕：持久化实时弹幕记录 + 广播 danmaku 事件
     socket.on(
       'send-danmaku',
       async (
-        payload: { roomId: string; content: string },
+        payload: { roomId: string; content: string; videoTime?: number },
         callback?: AckCallback,
       ) => {
         try {
@@ -161,8 +162,27 @@ export class CommentHandler implements SocketEventHandler {
           }
 
           const username = await this.getUsername(socket);
+          const danmakuId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+          // 持久化到 RoomDanmakuMeta.realtimeLog，并广播 danmaku-meta-updated
+          // 失败不影响弹幕上屏，仅记录日志
+          try {
+            await danmakuMetaService.appendRealtime(payload.roomId, {
+              id: danmakuId,
+              content,
+              sender: username,
+              time:
+                typeof payload.videoTime === 'number' && Number.isFinite(payload.videoTime)
+                  ? payload.videoTime
+                  : undefined,
+            });
+            await danmakuMetaService.broadcast(io, payload.roomId);
+          } catch (err) {
+            console.error('[send-danmaku] persist realtime log failed:', err);
+          }
+
           io.to(payload.roomId).emit('danmaku', {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            id: danmakuId,
             text: content,
             sender: username,
           });

@@ -1031,7 +1031,11 @@ export function WatchTogetherCore({
         }
       )
       // 广播弹幕事件（其他客户端通过 'danmaku' 事件上屏）
-      socket.emit('send-danmaku', { roomId, content: trimmed })
+      socket.emit('send-danmaku', {
+        roomId,
+        content: trimmed,
+        videoTime: videoRef.current?.currentTime ?? 0,
+      })
     },
     [socket, roomId, videoRef, addRealtime]
   )
