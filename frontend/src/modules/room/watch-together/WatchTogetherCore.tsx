@@ -728,6 +728,15 @@ export function WatchTogetherCore({
     const handlePauseResponse = (data: { accept: boolean }) => {
       setPausePending(false)
       if (data?.accept) {
+        // 房主同意暂停：主动暂停 video，确保 isPlaying 状态正确。
+        // 房主端 video 可能已经处于暂停状态（如重复申请暂停），
+        // 此时 video.pause() 不触发 'pause' 事件，handlePause 不执行，
+        // sendControl('pause') 不发送，观众端 isPlaying 不会更新，
+        // 导致按钮始终显示"申请暂停"而非"申请继续播放"。
+        const video = videoRef.current
+        if (video && !video.paused) {
+          video.pause()
+        }
         // 自动通过模式下申请时已提示“已暂停”，此处不再重复提示
         if (!autoApproveRef.current) {
           addPlayerNotice('房主已同意暂停', 'success')
@@ -739,6 +748,16 @@ export function WatchTogetherCore({
     const handlePlayResponse = (data: { accept: boolean }) => {
       setPlayPending(false)
       if (data?.accept) {
+        // 房主同意播放：主动播放 video，确保 isPlaying 状态正确。
+        // 房主端 video.play() 可能被浏览器自动播放策略拒绝，
+        // 'play' 事件不触发，sendControl('play') 不发送，
+        // 观众端 isPlaying 不会更新，导致按钮始终显示"申请继续播放"。
+        const video = videoRef.current
+        if (video && video.paused) {
+          void video.play().catch(() => {
+            /* 浏览器自动播放策略可能拒绝，忽略 */
+          })
+        }
         // 自动通过模式下申请时已提示“继续播放”，此处不再重复提示
         if (!autoApproveRef.current) {
           addPlayerNotice('房主已同意继续播放', 'success')
