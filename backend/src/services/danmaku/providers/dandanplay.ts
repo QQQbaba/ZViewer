@@ -23,10 +23,14 @@ const UNIFIED_MODE_BOTTOM = 2;
  * 弹弹play 开放平台凭证。
  * 2026-06-25 起配额管理机制正式上线，所有接口均需签名认证。
  * 凭证通过 DevCenter（https://devcenter.dandanplay.net）申请。
- * 未配置时 provider 将在调用时抛出明确错误，引导用户补齐配置。
+ *
+ * 凭证已内置在 dandanplay-credentials.ts 中（AES-256-CBC 加密存储），
+ * 不再从环境变量读取。如需更换凭证，请修改 dandanplay-credentials.ts。
  */
-const DANDANPLAY_APP_ID = process.env.DANDANPLAY_APP_ID || '';
-const DANDANPLAY_APP_SECRET = process.env.DANDANPLAY_APP_SECRET || '';
+import {
+  DANDANPLAY_APP_ID,
+  DANDANPLAY_APP_SECRET,
+} from './dandanplay-credentials';
 
 interface DandanplaySearchResult {
   animeId: number;
@@ -105,9 +109,9 @@ function buildSignature(
 function assertCredentialsConfigured(stage: string): void {
   if (!DANDANPLAY_APP_ID || !DANDANPLAY_APP_SECRET) {
     throw new Error(
-      `弹弹play${stage}失败：未配置开放平台凭证。` +
+      `弹弹play${stage}失败：开放平台凭证未正确加载。` +
         '请在弹弹play DevCenter (https://devcenter.dandanplay.net) 申请 AppId 和 AppSecret，' +
-        '并通过环境变量 DANDANPLAY_APP_ID / DANDANPLAY_APP_SECRET 配置。'
+        '并更新 dandanplay-credentials.ts 中的密文。'
     );
   }
 }
@@ -162,7 +166,7 @@ async function dandanFetch<T>(
     }
     throw new Error(
       `弹弹play 认证失败 [HTTP ${res.status}]：` +
-        (detail || '请检查 DANDANPLAY_APP_ID / DANDANPLAY_APP_SECRET 是否正确') +
+        (detail || '请检查 dandanplay-credentials.ts 中的凭证密文是否正确') +
         `（path=${path}）`
     );
   }
