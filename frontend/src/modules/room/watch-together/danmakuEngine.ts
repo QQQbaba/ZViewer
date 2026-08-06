@@ -130,7 +130,13 @@ export class DanmakuEngineAdapter {
   }
 
   private getEffectiveFontSize(itemSize?: number): number {
-    let size = itemSize ?? this.baseFontSize
+    // 用户设置的 baseFontSize 作为基准（默认 25px）。
+    // B站弹幕条目自带 size（如 18/25/36），按 item.size/25 比例缩放，
+    // 保留弹幕间相对大小差异的同时让用户字号设置生效。
+    // 实时弹幕无 itemSize，直接使用 baseFontSize。
+    const BASE_REFERENCE = 25
+    const itemRatio = itemSize ? itemSize / BASE_REFERENCE : 1
+    let size = this.baseFontSize * itemRatio
     if (this.scaleWithScreen && this.containerWidth > 0) {
       const ratio = Math.min(1.5, Math.max(0.5, this.containerWidth / 1920))
       size *= ratio
