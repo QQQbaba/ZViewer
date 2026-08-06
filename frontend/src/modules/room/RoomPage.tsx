@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useRoomStore } from '@/store/roomStore'
 import { useAuthStore } from '@/store/authStore'
+import { useDanmakuStore } from '@/store/danmakuStore'
 import { setClientLoggerRoomId } from '@/lib/clientLogger'
 import { useSocket } from '@/hooks/useSocket'
 import { VoiceChatPanel } from '@/modules/voice-chat'
@@ -56,6 +57,11 @@ function RoomPage() {
   const setActiveRoomId = useRoomStore((state) => state.setActiveRoomId)
   const setRoomSettings = useRoomStore((state) => state.setRoomSettings)
   const resetRoomStore = useRoomStore((state) => state.reset)
+  const setDanmakuRoomId = useDanmakuStore((state) => state.setRoomId)
+  const loadDanmakuTracks = useDanmakuStore((state) => state.loadTracks)
+  const setDanmakuTracks = useDanmakuStore((state) => state.setTracks)
+  const loadDanmakuMeta = useDanmakuStore((state) => state.loadMeta)
+  const setDanmakuMeta = useDanmakuStore((state) => state.setMeta)
 
   // 房主刷新/重连恢复时由后端返回的最近一次播放状态
   const [recoveredPlayback, setRecoveredPlayback] = useState<{
@@ -90,11 +96,19 @@ function RoomPage() {
   useEffect(() => {
     if (prevRoomIdRef.current !== roomId) {
       resetRoomStore()
+      setDanmakuRoomId(roomId ?? null)
+      setDanmakuTracks([])
+      // 重置弹幕辅助数据，避免上个房间的屏蔽词/已删除/实时弹幕记录残留
+      setDanmakuMeta({
+        blockKeywords: [],
+        deletedLog: [],
+        realtimeLog: [],
+      })
       setHostRegistered(false)
       setRecoveredPlayback(null)
       prevRoomIdRef.current = roomId
     }
-  }, [roomId, resetRoomStore])
+  }, [roomId, resetRoomStore, setDanmakuRoomId, setDanmakuTracks, setDanmakuMeta])
   const { socket } = useSocket()
   const username = useAuthStore((state) => state.user?.username)
   const [hostPeerConnection, setHostPeerConnection] =
@@ -109,8 +123,18 @@ function RoomPage() {
       setRoomId(roomId)
       setActiveRoomId(roomId)
       setClientLoggerRoomId(roomId)
+      setDanmakuRoomId(roomId)
+      void loadDanmakuTracks(roomId)
+      void loadDanmakuMeta(roomId)
     }
-  }, [roomId, setRoomId, setActiveRoomId])
+  }, [
+    roomId,
+    setRoomId,
+    setActiveRoomId,
+    setDanmakuRoomId,
+    loadDanmakuTracks,
+    loadDanmakuMeta,
+  ])
 
   // 组件卸载或 roomId 变化时清除日志上报中的房间标记
   useEffect(() => {
@@ -118,6 +142,44 @@ function RoomPage() {
       setClientLoggerRoomId(null)
     }
   }, [])
+
+  // 监听后端广播的弹幕轨道同步事件（房主/观众均需要）
+  useEffect(() => {
+    if (!roomId || !socket) return
+
+    const handleDanmakuTracksUpdated = (data: {
+      roomId: string
+      tracks: Parameters<typeof setDanmakuTracks>[0]
+    }) => {
+      if (data.roomId === roomId) {
+        setDanmakuTracks(data.tracks)
+      }
+    }
+
+    socket.on('danmaku-tracks-updated', handleDanmakuTracksUpdated)
+    return () => {
+      socket.off('danmaku-tracks-updated', handleDanmakuTracksUpdated)
+    }
+  }, [roomId, socket, setDanmakuTracks])
+
+  // 监听后端广播的弹幕辅助数据同步事件（屏蔽词/已删除/实时弹幕记录）
+  useEffect(() => {
+    if (!roomId || !socket) return
+
+    const handleDanmakuMetaUpdated = (data: {
+      roomId: string
+      meta: Parameters<typeof setDanmakuMeta>[0]
+    }) => {
+      if (data.roomId === roomId) {
+        setDanmakuMeta(data.meta)
+      }
+    }
+
+    socket.on('danmaku-meta-updated', handleDanmakuMetaUpdated)
+    return () => {
+      socket.off('danmaku-meta-updated', handleDanmakuMetaUpdated)
+    }
+  }, [roomId, socket, setDanmakuMeta])
 
   // 房主刷新或重连后，重新声明房主身份以恢复 sharer 会话
   useEffect(() => {

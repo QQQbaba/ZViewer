@@ -9,6 +9,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { message } from '@/components/ui/message'
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle'
 import { useAuthStore } from '@/store/authStore'
+import { useRoomStore } from '@/store/roomStore'
 import { cn } from '@/lib/utils'
 import type { Socket } from 'socket.io-client'
 import { DanmakuTrackCard } from '@/modules/room/watch-together/DanmakuTrackCard'
@@ -63,6 +64,11 @@ export function CommentPanel({
   commentsOnly = false,
 }: CommentPanelProps) {
   const currentUser = useAuthStore((state) => state.user)
+  // 读取 watch-together 模式下的当前播放进度，用于 send-danmaku 持久化实时弹幕记录
+  // screen-share 模式下 currentTime 始终为 0，无影响
+  const videoCurrentTime = useRoomStore(
+    (state) => state.watchTogether.currentTime
+  )
   const [comments, setComments] = useState<CommentItem[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -152,7 +158,7 @@ export function CommentPanel({
         if (asDanmaku) {
           socket.emit(
             'send-danmaku',
-            { roomId, content },
+            { roomId, content, videoTime: videoCurrentTime },
             (danmakuResponse: SendCommentResponse) => {
               setSending(false)
               if (danmakuResponse.success) {

@@ -13,6 +13,20 @@ import type { DanmakuSource } from '@/modules/danmaku/types'
 
 const BV_REGEX = /^BV[0-9A-Za-z]{10}$/
 
+const MAX_OFFSET_SECONDS = 60 // Slider 范围为 ±60s
+
+function formatOffset(offset: number): string {
+  const sign = offset > 0 ? '+' : offset < 0 ? '-' : ''
+  const abs = Math.round(Math.abs(offset))
+  const minutes = Math.floor(abs / 60)
+  const seconds = abs - minutes * 60
+  const secStr = String(seconds).padStart(2, '0')
+  if (minutes === 0) {
+    return `${sign}${seconds}s`
+  }
+  return `${sign}${minutes}m${secStr}s`
+}
+
 const SOURCE_LABELS: Record<DanmakuSource, string> = {
   'bilibili-video': 'B站视频',
   'bilibili-bangumi': 'B站番剧',
@@ -66,7 +80,7 @@ export function DanmakuTrackCard() {
           return
         }
         const items = await fetchDanmaku('bilibili-video', episode)
-        addTrack(trackId, episode.title, 'bilibili-video', items, 0)
+        await addTrack(trackId, episode.title, 'bilibili-video', items, 0)
         message.success(
           `已添加 ${episode.title} 弹幕轨道（共 ${items.length} 条）`
         )
@@ -195,7 +209,7 @@ export function DanmakuTrackCard() {
                     size="sm"
                     className="h-5 w-5 shrink-0 p-0 text-[var(--md-sys-color-on-surface-variant)]"
                     title={track.hidden ? '显示该轨道弹幕' : '隐藏该轨道弹幕'}
-                    onClick={() => toggleTrackHidden(track.trackId)}
+                    onClick={() => void toggleTrackHidden(track.trackId)}
                     icon={
                       track.hidden ? (
                         <EyeOff className="h-3 w-3" />
@@ -209,20 +223,101 @@ export function DanmakuTrackCard() {
                       variant="ghost"
                       size="sm"
                       className="h-5 w-5 shrink-0 p-0 text-[var(--md-sys-color-error)]"
-                      onClick={() => removeTrack(track.trackId)}
+                      onClick={() => void removeTrack(track.trackId)}
                       icon={<Trash2 className="h-3 w-3" />}
                     />
                   )}
                 </div>
               </div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-1">
+                  <Text className="text-[10px] tabular-nums">
+                    {formatOffset(track.offset)}
+                  </Text>
+                  <Text className="text-[9px] text-[var(--md-sys-color-primary)]">
+                    当前
+                  </Text>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Input
+                    type="number"
+                    size="sm"
+                    step={1}
+                    min={-999}
+                    max={999}
+                    value={String(Math.trunc(track.offset / 60))}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      if (value === '' || value === '-') return
+                      const minutes = Number(value)
+                      if (Number.isNaN(minutes)) return
+                      const seconds = Math.round(track.offset - Math.trunc(track.offset / 60) * 60)
+                      const clampedMinutes = Math.min(999, Math.max(-999, minutes))
+                      void updateTrackOffset(track.trackId, clampedMinutes * 60 + seconds)
+                    }}
+                    onBlur={(e) => {
+                      const value = e.target.value
+                      if (value === '' || value === '-') {
+                        const seconds = Math.round(track.offset - Math.trunc(track.offset / 60) * 60)
+                        void updateTrackOffset(track.trackId, seconds)
+                      }
+                    }}
+                    className="h-6 w-[88px] px-1 text-right text-[11px] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <Text type="secondary" className="text-[10px]">
+                    m
+                  </Text>
+                  <Input
+                    type="number"
+                    size="sm"
+                    step={1}
+                    min={-60}
+                    max={60}
+                    value={String(Math.round(track.offset - Math.trunc(track.offset / 60) * 60))}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      if (value === '' || value === '-') return
+                      const seconds = Number(value)
+                      if (Number.isNaN(seconds)) return
+                      const minutes = Math.trunc(track.offset / 60)
+                      void updateTrackOffset(track.trackId, minutes * 60 + seconds)
+                    }}
+                    onBlur={(e) => {
+                      const value = e.target.value
+                      const minutes = Math.trunc(track.offset / 60)
+                      if (value === '' || value === '-') {
+                        void updateTrackOffset(track.trackId, minutes * 60)
+                        return
+                      }
+                      let seconds = Number(value)
+                      if (Number.isNaN(seconds)) return
+                      // 将秒数规范化到 [-59, 59]，并向分钟进位
+                      let normalizedMinutes = minutes
+                      if (seconds >= 60) {
+                        normalizedMinutes += Math.floor(seconds / 60)
+                        seconds = seconds % 60
+                      } else if (seconds <= -60) {
+                        normalizedMinutes += Math.ceil(seconds / 60)
+                        seconds = seconds % 60
+                      }
+                      normalizedMinutes = Math.min(999, Math.max(-999, normalizedMinutes))
+                      void updateTrackOffset(track.trackId, normalizedMinutes * 60 + seconds)
+                    }}
+                    className="h-6 w-[72px] px-1 text-right text-[11px] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <Text type="secondary" className="text-[10px]">
+                    s
+                  </Text>
+                </div>
+              </div>
               <Slider
                 size="sm"
                 value={track.offset}
-                min={-60}
-                max={60}
-                step={0.5}
-                valueFormatter={(v) => `${v > 0 ? '+' : ''}${v}s`}
-                onChange={(v) => updateTrackOffset(track.trackId, v)}
+                min={-MAX_OFFSET_SECONDS}
+                max={MAX_OFFSET_SECONDS}
+                step={1}
+                valueFormatter={(v) => formatOffset(v)}
+                onChange={(v) => void updateTrackOffset(track.trackId, v)}
               />
               <Text type="secondary" className="text-[10px]">
                 共 {track.items.length} 条弹幕

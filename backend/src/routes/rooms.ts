@@ -4,16 +4,22 @@ import { AppDataSource } from '../data-source';
 import { Movie } from '../entities/Movie';
 import { Room } from '../entities/Room';
 import { Session } from '../entities/Session';
+import { DanmakuTrack } from '../entities/DanmakuTrack';
 import { IsNull } from 'typeorm';
 import {
   authenticateToken,
   AuthenticatedRequest,
 } from '../middleware/auth';
 import { roomStateService } from '../modules/room/room-state.service';
+import {
+  danmakuMetaService,
+  serializeDanmakuMeta,
+} from '../modules/comment/danmaku-meta.service';
 
 const movieRepository = () => AppDataSource.getRepository(Movie);
 const roomRepository = () => AppDataSource.getRepository(Room);
 const sessionRepository = () => AppDataSource.getRepository(Session);
+const danmakuTrackRepository = () => AppDataSource.getRepository(DanmakuTrack);
 
 interface QualityOption {
   id: number;
@@ -97,6 +103,59 @@ function serializeMovie(movie: Movie): MovieDto {
     createdAt: movie.createdAt.toISOString(),
     updatedAt: movie.updatedAt.toISOString(),
   };
+}
+
+/** 弹幕轨道 DTO（与前端 DanmakuTrack 对齐） */
+interface DanmakuTrackDto {
+  trackId: string;
+  label: string;
+  source: string;
+  items: unknown[];
+  offset: number;
+  hidden: boolean;
+}
+
+function serializeDanmakuTrack(track: DanmakuTrack): DanmakuTrackDto {
+  let items: unknown[] = [];
+  try {
+    items = JSON.parse(track.items);
+    if (!Array.isArray(items)) items = [];
+  } catch {
+    items = [];
+  }
+  return {
+    trackId: track.trackId,
+    label: track.label,
+    source: track.source,
+    items,
+    offset: track.offset,
+    hidden: track.hidden,
+  };
+}
+
+async function broadcastDanmakuTracks(
+  io: SocketIOServer,
+  roomId: string,
+): Promise<void> {
+  const tracks = await danmakuTrackRepository().find({ where: { roomId } });
+  io.to(roomId).emit('danmaku-tracks-updated', {
+    roomId,
+    tracks: tracks.map(serializeDanmakuTrack),
+  });
+}
+
+/** 弹幕辅助数据 DTO（与前端 danmakuStore 对齐） */
+interface DanmakuMetaDto {
+  blockKeywords: string[];
+  deletedLog: unknown[];
+  realtimeLog: unknown[];
+}
+
+async function broadcastDanmakuMeta(
+  io: SocketIOServer,
+  roomId: string,
+): Promise<void> {
+  await danmakuMetaService.broadcast(io, roomId);
 }
 
 async function broadcastMovieList(
@@ -551,6 +610,290 @@ export function createRoomsRouter(io: SocketIOServer): Router {
       } catch (err) {
         console.error('delete movie error:', err);
         res.status(500).json({ success: false, message: '删除影片失败' });
+      }
+    },
+  );
+
+  // GET /api/rooms/:roomId/danmaku-tracks - 获取弹幕轨道列表
+  router.get(
+    '/:roomId/danmaku-tracks',
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const roomId = req.params.roomId as string;
+        const tracks = await danmakuTrackRepository().find({ where: { roomId } });
+        res.json({
+          success: true,
+          tracks: tracks.map(serializeDanmakuTrack),
+        });
+      } catch (err) {
+        console.error('get danmaku tracks error:', err);
+        res.status(500).json({ success: false, message: '获取弹幕轨道失败' });
+      }
+    },
+  );
+
+  // POST /api/rooms/:roomId/danmaku-tracks - 添加或替换单个弹幕轨道（仅 root 或房间创建者）
+  router.post(
+    '/:roomId/danmaku-tracks',
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const roomId = req.params.roomId as string;
+        const room = await roomRepository().findOneBy({ roomId });
+        if (!room) {
+          res.status(404).json({ success: false, message: '房间不存在' });
+          return;
+        }
+        if (!canControlRoom(req, room)) {
+          res.status(403).json({ success: false, message: '无权限：仅 root 或房间创建者可添加弹幕轨道' });
+          return;
+        }
+
+        const { trackId, label, source, items, offset, hidden } = req.body as {
+          trackId?: unknown;
+          label?: unknown;
+          source?: unknown;
+          items?: unknown;
+          offset?: unknown;
+          hidden?: unknown;
+        };
+
+        if (
+          typeof trackId !== 'string' ||
+          !trackId.trim() ||
+          typeof label !== 'string' ||
+          !label.trim() ||
+          typeof source !== 'string' ||
+          !source.trim() ||
+          !Array.isArray(items)
+        ) {
+          res.status(400).json({ success: false, message: 'trackId/label/source/items 为必填项' });
+          return;
+        }
+
+        // upsert：按 (roomId, trackId) 唯一，避免重复调用 setDefaultTrack
+        // 等场景导致同一 trackId 累积多条记录。
+        let track = await danmakuTrackRepository().findOneBy({
+          roomId,
+          trackId: trackId.trim(),
+        });
+        if (track) {
+          track.label = label.trim();
+          track.source = source.trim();
+          track.items = JSON.stringify(items);
+          track.offset =
+            typeof offset === 'number' && Number.isFinite(offset) ? offset : 0;
+          track.hidden = hidden === true;
+        } else {
+          track = danmakuTrackRepository().create({
+            trackId: trackId.trim(),
+            roomId,
+            label: label.trim(),
+            source: source.trim(),
+            items: JSON.stringify(items),
+            offset:
+              typeof offset === 'number' && Number.isFinite(offset) ? offset : 0,
+            hidden: hidden === true,
+          });
+        }
+        await danmakuTrackRepository().save(track);
+        await broadcastDanmakuTracks(io, roomId);
+        res.status(201).json({ success: true, track: serializeDanmakuTrack(track) });
+      } catch (err) {
+        console.error('create danmaku track error:', err);
+        res.status(500).json({ success: false, message: '添加弹幕轨道失败' });
+      }
+    },
+  );
+
+  // PUT /api/rooms/:roomId/danmaku-tracks/:trackId/offset - 修改弹幕轨道偏移（仅 root 或房间创建者）
+  router.put(
+    '/:roomId/danmaku-tracks/:trackId/offset',
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const roomId = req.params.roomId as string;
+        const trackId = req.params.trackId as string;
+        const room = await roomRepository().findOneBy({ roomId });
+        if (!room) {
+          res.status(404).json({ success: false, message: '房间不存在' });
+          return;
+        }
+        if (!canControlRoom(req, room)) {
+          res.status(403).json({ success: false, message: '无权限：仅 root 或房间创建者可修改弹幕轨道' });
+          return;
+        }
+
+        const { offset, hidden } = req.body as { offset?: unknown; hidden?: unknown };
+        const track = await danmakuTrackRepository().findOneBy({ roomId, trackId });
+        if (!track) {
+          res.status(404).json({ success: false, message: '弹幕轨道不存在' });
+          return;
+        }
+
+        if (typeof offset === 'number' && Number.isFinite(offset)) {
+          track.offset = offset;
+        }
+        if (typeof hidden === 'boolean') {
+          track.hidden = hidden;
+        }
+        await danmakuTrackRepository().save(track);
+        await broadcastDanmakuTracks(io, roomId);
+        res.json({ success: true, track: serializeDanmakuTrack(track) });
+      } catch (err) {
+        console.error('update danmaku track offset error:', err);
+        res.status(500).json({ success: false, message: '修改弹幕轨道失败' });
+      }
+    },
+  );
+
+  // DELETE /api/rooms/:roomId/danmaku-tracks/:trackId - 删除弹幕轨道（仅 root 或房间创建者）
+  router.delete(
+    '/:roomId/danmaku-tracks/:trackId',
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const roomId = req.params.roomId as string;
+        const trackId = req.params.trackId as string;
+        const room = await roomRepository().findOneBy({ roomId });
+        if (!room) {
+          res.status(404).json({ success: false, message: '房间不存在' });
+          return;
+        }
+        if (!canControlRoom(req, room)) {
+          res.status(403).json({ success: false, message: '无权限：仅 root 或房间创建者可删除弹幕轨道' });
+          return;
+        }
+
+        // 批量删除所有匹配 (roomId, trackId) 的记录，
+        // 避免历史累积的重复 trackId 残留。
+        await danmakuTrackRepository().delete({ roomId, trackId });
+        await broadcastDanmakuTracks(io, roomId);
+        res.json({ success: true });
+      } catch (err) {
+        console.error('delete danmaku track error:', err);
+        res.status(500).json({ success: false, message: '删除弹幕轨道失败' });
+      }
+    },
+  );
+
+  // POST /api/rooms/:roomId/danmaku-tracks/bulk - 批量替换弹幕轨道（仅 root 或房间创建者）
+  router.post(
+    '/:roomId/danmaku-tracks/bulk',
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const roomId = req.params.roomId as string;
+        const room = await roomRepository().findOneBy({ roomId });
+        if (!room) {
+          res.status(404).json({ success: false, message: '房间不存在' });
+          return;
+        }
+        if (!canControlRoom(req, room)) {
+          res.status(403).json({ success: false, message: '无权限：仅 root 或房间创建者可修改弹幕轨道' });
+          return;
+        }
+
+        const { tracks } = req.body as { tracks?: unknown };
+        if (!Array.isArray(tracks)) {
+          res.status(400).json({ success: false, message: 'tracks 必须是数组' });
+          return;
+        }
+
+        await AppDataSource.transaction(async (manager) => {
+          await manager.delete(DanmakuTrack, { roomId });
+          for (const t of tracks) {
+            const raw = t as Record<string, unknown>;
+            if (
+              typeof raw.trackId !== 'string' ||
+              !raw.trackId.trim() ||
+              typeof raw.label !== 'string' ||
+              !raw.label.trim() ||
+              typeof raw.source !== 'string' ||
+              !raw.source.trim() ||
+              !Array.isArray(raw.items)
+            ) {
+              continue;
+            }
+            const entity = manager.create(DanmakuTrack, {
+              trackId: raw.trackId.trim(),
+              roomId,
+              label: raw.label.trim(),
+              source: raw.source.trim(),
+              items: JSON.stringify(raw.items),
+              offset:
+                typeof raw.offset === 'number' && Number.isFinite(raw.offset)
+                  ? raw.offset
+                  : 0,
+              hidden: raw.hidden === true,
+            });
+            await manager.save(entity);
+          }
+        });
+
+        await broadcastDanmakuTracks(io, roomId);
+        const saved = await danmakuTrackRepository().find({ where: { roomId } });
+        res.json({ success: true, tracks: saved.map(serializeDanmakuTrack) });
+      } catch (err) {
+        console.error('bulk replace danmaku tracks error:', err);
+        res.status(500).json({ success: false, message: '批量替换弹幕轨道失败' });
+      }
+    },
+  );
+
+  // GET /api/rooms/:roomId/danmaku-meta - 获取房间弹幕辅助数据（屏蔽词/已删除/实时弹幕记录）
+  router.get(
+    '/:roomId/danmaku-meta',
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const roomId = req.params.roomId as string;
+        const meta = await danmakuMetaService.getOrCreate(roomId);
+        res.json({ success: true, meta: serializeDanmakuMeta(meta) });
+      } catch (err) {
+        console.error('get danmaku meta error:', err);
+        res.status(500).json({ success: false, message: '获取弹幕辅助数据失败' });
+      }
+    },
+  );
+
+  // PUT /api/rooms/:roomId/danmaku-meta - 整体替换屏蔽词和已删除弹幕（仅 root 或房间创建者）
+  // 注意：realtimeLog 由 send-danmaku 事件持久化，此接口不修改 realtimeLog
+  router.put(
+    '/:roomId/danmaku-meta',
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const roomId = req.params.roomId as string;
+        const room = await roomRepository().findOneBy({ roomId });
+        if (!room) {
+          res.status(404).json({ success: false, message: '房间不存在' });
+          return;
+        }
+        if (!canControlRoom(req, room)) {
+          res.status(403).json({ success: false, message: '无权限：仅 root 或房间创建者可修改弹幕辅助数据' });
+          return;
+        }
+
+        const { blockKeywords, deletedLog } = req.body as {
+          blockKeywords?: unknown;
+          deletedLog?: unknown;
+        };
+
+        // 未提供的字段从已有记录读取，保持原值
+        const existing = await danmakuMetaService.getOrCreate(roomId);
+        const existingDto = serializeDanmakuMeta(existing);
+        const nextKeywords = Array.isArray(blockKeywords)
+          ? blockKeywords.filter(
+              (k): k is string => typeof k === 'string' && k.trim().length > 0,
+            )
+          : existingDto.blockKeywords;
+        const nextDeleted = Array.isArray(deletedLog) ? deletedLog : existingDto.deletedLog;
+
+        const meta = await danmakuMetaService.replaceBlockAndDeleted(
+          roomId,
+          nextKeywords,
+          nextDeleted,
+        );
+        await broadcastDanmakuMeta(io, roomId);
+        res.json({ success: true, meta: serializeDanmakuMeta(meta) });
+      } catch (err) {
+        console.error('update danmaku meta error:', err);
+        res.status(500).json({ success: false, message: '更新弹幕辅助数据失败' });
       }
     },
   );

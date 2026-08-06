@@ -378,10 +378,10 @@ export function RealtimeDanmakuCard() {
   const handleBlock = useCallback(
     (content: string) => {
       if (blockKeywords.includes(content)) {
-        removeBlockKeyword(content)
+        void removeBlockKeyword(content)
         message.info('已取消屏蔽该内容')
       } else {
-        addBlockKeyword(content)
+        void addBlockKeyword(content)
         message.success('已屏蔽该内容关键词')
       }
       triggerDanmakuRefresh()
@@ -394,7 +394,7 @@ export function RealtimeDanmakuCard() {
       const track = tracks.find((t) => t.trackId === trackId)
       const item = track?.items.find((i) => i.id === itemId)
       if (track && item) {
-        addDeletedLog({ trackId, trackLabel: track.label, item })
+        void addDeletedLog({ trackId, trackLabel: track.label, item })
       }
       // removeTrackItem 内部会自动触发 refreshSignal，播放器弹幕层会立即清屏重载
       removeTrackItem(trackId, itemId)
@@ -407,7 +407,7 @@ export function RealtimeDanmakuCard() {
     (trackId: string, item: DanmakuItem) => {
       // restoreTrackItem 内部会自动触发 refreshSignal
       restoreTrackItem(trackId, item)
-      removeDeletedLog(trackId, item.id)
+      void removeDeletedLog(trackId, item.id)
       message.success('已恢复该弹幕')
     },
     [restoreTrackItem, removeDeletedLog]
@@ -518,7 +518,7 @@ export function RealtimeDanmakuCard() {
                 className="max-w-full truncate rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/70 transition-colors hover:bg-white/10"
                 title={`点击取消屏蔽：${kw}`}
                 onClick={() => {
-                  removeBlockKeyword(kw)
+                  void removeBlockKeyword(kw)
                   triggerDanmakuRefresh()
                 }}
               >
@@ -675,7 +675,7 @@ export function RealtimeDanmakuCard() {
                       className="shrink-0 rounded p-1 text-[10px] text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-white/10 hover:text-red-400"
                       title="取消屏蔽"
                       onClick={() => {
-                        removeBlockKeyword(kw)
+                        void removeBlockKeyword(kw)
                         triggerDanmakuRefresh()
                       }}
                     >
@@ -735,7 +735,7 @@ export function RealtimeDanmakuCard() {
                     size="sm"
                     className="mt-1 h-7 w-full text-[10px] text-red-400 hover:bg-red-400/10"
                     onClick={() => {
-                      clearDeletedLog()
+                      void clearDeletedLog()
                       message.success('已清空删除记录')
                     }}
                   >
