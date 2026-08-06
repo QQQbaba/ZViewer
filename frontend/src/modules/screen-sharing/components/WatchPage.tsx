@@ -127,6 +127,7 @@ function WatchPage() {
 
   // UI state
   const [isMuted, setIsMuted] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(true)
   const [videoResolution, setVideoResolution] = useState<{
     width: number
     height: number
@@ -290,6 +291,20 @@ function WatchPage() {
     video.muted = isMuted
   }, [isMuted])
 
+  // 5.1 监听 video play/pause 事件同步 isPlaying 状态
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const handlePlay = () => setIsPlaying(true)
+    const handlePause = () => setIsPlaying(false)
+    video.addEventListener('play', handlePlay)
+    video.addEventListener('pause', handlePause)
+    return () => {
+      video.removeEventListener('play', handlePlay)
+      video.removeEventListener('pause', handlePause)
+    }
+  }, [videoVersion])
+
   // 6. 事件处理
   const handleJoin = (values: JoinFormValues) => {
     if (!values.roomId.trim()) {
@@ -328,6 +343,16 @@ function WatchPage() {
   }
 
   const handleToggleMute = () => setIsMuted((prev) => !prev)
+
+  const handleTogglePlayPause = useCallback(() => {
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) {
+      void video.play().catch(() => {})
+    } else {
+      video.pause()
+    }
+  }, [])
 
   const handleRefresh = useCallback(() => {
     cleanupPc()
@@ -417,6 +442,7 @@ function WatchPage() {
         )}
         <WatchControlsBar
           isMuted={isMuted}
+          isPlaying={isPlaying}
           hasRemoteAudio={hasRemoteAudio}
           hasRemoteStream={hasRemoteStream}
           isPictureInPicture={isPictureInPicture}
@@ -426,6 +452,7 @@ function WatchPage() {
           connectionState={connectionState}
           videoResolution={videoResolution}
           onToggleMute={handleToggleMute}
+          onTogglePlayPause={handleTogglePlayPause}
           onFullscreen={handleFullscreen}
           onTogglePiP={handleTogglePictureInPicture}
           onToggleAnnotation={() => setShowAnnotationToolbar((prev) => !prev)}

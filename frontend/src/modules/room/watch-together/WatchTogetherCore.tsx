@@ -184,11 +184,29 @@ export function WatchTogetherCore({
   const [pausePending, setPausePending] = useState(false)
   const [playPending, setPlayPending] = useState(false)
 
+  // ── 房主离线状态 ──────────────────────────────────────
+  // 房主离开后观众进入自主控制模式，可直接 play/pause/seek，无需向房主申请。
+  // 房主重连后恢复申请模式。
+  const [hostOffline, setHostOffline] = useState(false)
+
   const autoApproveRequests = useRoomStore((state) => state.autoApproveRequests)
   const autoApproveRef = useRef(autoApproveRequests)
   useEffect(() => {
     autoApproveRef.current = autoApproveRequests
   }, [autoApproveRequests])
+
+  // 监听房主离线/重连（仅观众）
+  useEffect(() => {
+    if (!socket || isHost) return
+    const handleHostDisconnected = () => setHostOffline(true)
+    const handleHostReconnect = () => setHostOffline(false)
+    socket.on('host-disconnected', handleHostDisconnected)
+    socket.on('sharer-ready', handleHostReconnect)
+    return () => {
+      socket.off('host-disconnected', handleHostDisconnected)
+      socket.off('sharer-ready', handleHostReconnect)
+    }
+  }, [socket, isHost])
 
   // ── 弹幕状态 ─────────────────────────────────────────
   const danmakuLayerRef = useRef<DanmakuLayerHandle | null>(null)
@@ -1388,6 +1406,7 @@ export function WatchTogetherCore({
       {watchTogether.sourceUrl && (
         <PlayerControlBar
           isHost={isHost}
+          hostOffline={hostOffline}
           videoRef={videoRef}
           watchTogether={watchTogether}
           isPlaying={isPlaying}

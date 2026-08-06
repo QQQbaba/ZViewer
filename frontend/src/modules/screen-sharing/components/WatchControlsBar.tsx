@@ -3,9 +3,11 @@ import { Tag } from '@/components/ui/Tag'
 import { IconButton } from '@/components/VideoControls'
 import {
   Maximize,
+  Pause,
+  Play,
+  Pencil,
   PictureInPicture,
   PictureInPicture2,
-  Pencil,
   Volume2,
   VolumeX,
   X,
@@ -15,6 +17,8 @@ import {
 interface WatchControlsBarProps {
   /** 是否静音 */
   isMuted: boolean
+  /** 是否正在播放 */
+  isPlaying: boolean
   /** 是否有远端音频 */
   hasRemoteAudio: boolean
   /** 是否有远端视频流 */
@@ -34,6 +38,8 @@ interface WatchControlsBarProps {
   videoResolution: { width: number; height: number } | null
   /** 切换静音 */
   onToggleMute: () => void
+  /** 播放 / 暂停 */
+  onTogglePlayPause: () => void
   /** 全屏 */
   onFullscreen: () => void
   /** 切换画中画 */
@@ -82,6 +88,7 @@ function getConnectionStateColor(
 
 export function WatchControlsBar({
   isMuted,
+  isPlaying,
   hasRemoteAudio,
   hasRemoteStream,
   isPictureInPicture,
@@ -91,6 +98,7 @@ export function WatchControlsBar({
   connectionState,
   videoResolution,
   onToggleMute,
+  onTogglePlayPause,
   onFullscreen,
   onTogglePiP,
   onToggleAnnotation,
@@ -100,6 +108,12 @@ export function WatchControlsBar({
     <div className="vc-container absolute bottom-0 left-0 right-0 z-20 p-2">
       <div className="glass-strong rounded-xl px-2.5 py-2 shadow-lg">
         <div className="flex flex-wrap items-center vc-gap">
+          {/* 播放 / 暂停 */}
+          <IconButton
+            icon={isPlaying ? <Pause /> : <Play />}
+            label={isPlaying ? '暂停' : '播放'}
+            onClick={onTogglePlayPause}
+          />
           {hasRemoteAudio && (
             <IconButton
               icon={isMuted ? <VolumeX /> : <Volume2 />}

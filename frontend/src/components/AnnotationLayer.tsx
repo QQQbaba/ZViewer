@@ -423,7 +423,7 @@ export const AnnotationLayer = forwardRef<
   return (
     <div
       ref={containerRef}
-      className={`absolute inset-0 ${className ?? ''}`}
+      className={`absolute inset-0 z-10 ${className ?? ''}`}
       style={{ pointerEvents: readOnly || !active ? 'none' : 'auto' }}
     >
       <canvas

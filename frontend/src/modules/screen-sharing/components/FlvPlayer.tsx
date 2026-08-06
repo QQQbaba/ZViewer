@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react'
 import flvjs from 'flv.js'
 import Artplayer from 'artplayer'
+import type { Option } from 'artplayer'
 import { Spinner } from '@/components/ui/Spinner'
 import { configureArtStatics } from '@/modules/art-player'
 import { cn } from '@/lib/utils'
@@ -120,6 +121,8 @@ export function FlvPlayer({
       isLive: true,
       muted: mutedRef.current,
       autoplay: false,
+      // 禁用单击视频区域暂停：共享画面通过控制栏按钮控制
+      click: false,
       hotkey: false,
       pip: false,
       screenshot: false,
@@ -139,7 +142,7 @@ export function FlvPlayer({
       moreVideoAttr: {
         playsInline: true,
       },
-    })
+    } as Option)
     // 空 url 初始化会让 ArtPlayer 一直显示 loading，延迟隐藏
     const hideLoadingTimer = setTimeout(() => {
       art.loading.show = false
