@@ -195,6 +195,8 @@ function useVideoDuration(
 
 interface PlayerControlBarProps {
   isHost: boolean
+  /** 房主已离线：观众进入自主控制模式，可直接 play/pause/seek */
+  hostOffline?: boolean
   videoRef: React.RefObject<HTMLVideoElement | null>
   watchTogether: WatchTogetherState
   isPlaying: boolean
@@ -222,6 +224,7 @@ interface PlayerControlBarProps {
 
 export function PlayerControlBar({
   isHost,
+  hostOffline = false,
   videoRef,
   watchTogether,
   isPlaying,
@@ -256,6 +259,9 @@ export function PlayerControlBar({
     duration > 0 && Number.isFinite(watchTogether.currentTime)
       ? Math.min(1, Math.max(0, watchTogether.currentTime / duration))
       : null
+
+  // 可直接控制播放：房主或房主离线后的观众
+  const canControl = isHost || hostOffline
 
   // 本地进度与服务器/房主进度的时间差（秒），用于动态调整同步线视觉强度
   const serverTimeDiff =
@@ -367,7 +373,7 @@ export function PlayerControlBar({
       e.stopPropagation()
       const video = videoRef.current
       if (!video) return
-      if (isHost) {
+      if (canControl) {
         setDragging(true)
         const time = computeTimeFromClientX(e.clientX)
         if (Number.isFinite(time)) video.currentTime = time
@@ -394,13 +400,13 @@ export function PlayerControlBar({
         window.addEventListener('pointerup', handleUp)
       }
     },
-    [isHost, videoRef, computeTimeFromClientX, onRequestSeek]
+    [canControl, videoRef, computeTimeFromClientX, onRequestSeek]
   )
 
   const handlePlayPauseClick = useCallback(() => {
     const video = videoRef.current
     if (!video) return
-    if (isHost) {
+    if (canControl) {
       if (video.paused) {
         void video.play().catch(() => {})
       } else {
@@ -413,7 +419,7 @@ export function PlayerControlBar({
         onRequestPlay?.()
       }
     }
-  }, [isHost, videoRef, isPlaying, onRequestPause, onRequestPlay])
+  }, [canControl, videoRef, isPlaying, onRequestPause, onRequestPlay])
 
   const handleVolumePointer = useCallback(
     (clientY: number) => {
@@ -467,14 +473,14 @@ export function PlayerControlBar({
   /* eslint-disable react-hooks/preserve-manual-memoization */
   const handleRateSelect = useCallback(
     (rate: number) => {
-      if (!isHost) return
+      if (!canControl) return
       const video = videoRef.current
       if (video) {
         video.playbackRate = rate
       }
       setRateOpen(false)
     },
-    [isHost, videoRef]
+    [canControl, videoRef]
   )
   /* eslint-enable react-hooks/preserve-manual-memoization */
 
@@ -498,14 +504,14 @@ export function PlayerControlBar({
         <div
           ref={progressRef}
           role="slider"
-          aria-label={isHost ? '播放进度' : '播放进度（仅房主可拖动）'}
+          aria-label={canControl ? '播放进度' : '播放进度（仅房主可拖动）'}
           aria-valuemin={0}
           aria-valuemax={duration}
           aria-valuenow={currentTime}
-          aria-disabled={!isHost}
+          aria-disabled={!canControl}
           className={cn(
             'group relative h-1.5 md:h-2 w-full cursor-pointer overflow-visible rounded-full transition-all',
-            isHost && 'hover:h-2 md:hover:h-2.5'
+            canControl && 'hover:h-2 md:hover:h-2.5'
           )}
           style={{ backgroundColor: 'rgba(128, 128, 128, 0.4)' }}
           onPointerDown={handleProgressPointerDown}
@@ -531,7 +537,7 @@ export function PlayerControlBar({
                 left: `${serverProgress * 100}%`,
                 opacity: Math.min(1, Math.max(0.35, absDiffSeconds / 3)),
               }}
-              title={`${isHost ? '服务器进度' : '房主进度'}: ${formatMediaTime(watchTogether.currentTime)}${
+              title={`${canControl ? '服务器进度' : '房主进度'}: ${formatMediaTime(watchTogether.currentTime)}${
                 absDiffSeconds > 0.5
                   ? ` (${serverTimeDiff > 0 ? '落后' : '超前'} ${formatMediaTime(absDiffSeconds)})`
                   : ''
@@ -561,7 +567,7 @@ export function PlayerControlBar({
           <div
             className={cn(
               'absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border-2 border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-on-primary)] shadow transition-opacity duration-150',
-              dragging || isHost
+              dragging || canControl
                 ? 'opacity-100'
                 : 'opacity-0 group-hover:opacity-100'
             )}
@@ -579,7 +585,7 @@ export function PlayerControlBar({
           {/* 播放 / 暂停 */}
           <ControlButton
             label={
-              isHost
+              canControl
                 ? isPlaying
                   ? '暂停'
                   : '播放'
@@ -587,7 +593,7 @@ export function PlayerControlBar({
                   ? '申请暂停'
                   : '申请继续播放'
             }
-            disabled={!isHost && (isPlaying ? pausePending : playPending)}
+            disabled={!canControl && (isPlaying ? pausePending : playPending)}
             onClick={handlePlayPauseClick}
           >
             {isPlaying ? <Pause size={18} /> : <Play size={18} />}
@@ -617,15 +623,15 @@ export function PlayerControlBar({
           <div ref={rateContainerRef} className="relative">
             <ControlButton
               label="播放倍速"
-              disabled={!isHost}
+              disabled={!canControl}
               active={rateOpen}
-              onClick={() => isHost && setRateOpen((v) => !v)}
+              onClick={() => canControl && setRateOpen((v) => !v)}
             >
               <span className="min-w-[2ch] text-xs font-semibold">
                 {playbackRate}x
               </span>
             </ControlButton>
-            {rateOpen && isHost && (
+            {rateOpen && canControl && (
               <div className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 overflow-hidden rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-1 shadow-lg">
                 {RATES.map((rate) => {
                   const active = Math.abs(playbackRate - rate) < 0.01

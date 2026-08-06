@@ -47,6 +47,8 @@ export function useServerHeartbeat({
   const { socket } = useSocket()
   // 防止重复提示"房主已离开"
   const hostLeftNotifiedRef = useRef(false)
+  // 房主离线标记：房主离开后观众进入自主控制模式，不再应用服务器心跳
+  const hostOfflineRef = useRef(false)
   // URL 过期状态标记
   const urlExpiredRef = useRef(false)
   // 已处理的 video error 签名，避免同一个 error 重复触发过期提示
@@ -64,6 +66,11 @@ export function useServerHeartbeat({
       // 设置 suppressEventsRef=true，若此处提前释放会破坏下载期间的抑制标记，
       // 导致旧源触发的 video 事件回环。下载完成后下一帧心跳会自然应用最新状态。
       if (suppressEventsRef.current) return
+
+      // 房主离线后观众进入自主控制模式：不再应用服务器推算的播放状态，
+      // 避免 isPlaying/currentTime 强制覆盖观众的 play/pause/seek 操作。
+      // URL 过期检测由 video error 事件兜底。
+      if (hostOfflineRef.current) return
 
       const state = payload.state
       suppressEventsRef.current = true
@@ -142,14 +149,16 @@ export function useServerHeartbeat({
     if (!socket || isHostRef.current) return
 
     const handleHostDisconnected = () => {
+      hostOfflineRef.current = true
       if (hostLeftNotifiedRef.current) return
       hostLeftNotifiedRef.current = true
-      // 仅提示，不暂停播放（服务器继续广播 server-heartbeat）
-      message.info('房主已离开，服务器继续维持播放')
+      // 仅提示，不暂停播放（观众进入自主控制模式）
+      message.info('房主已离开，您可以自主控制播放')
     }
 
-    // 房主重连时重置提示标记（通过 sharer-ready 事件判断）
+    // 房主重连时重置标记（通过 sharer-ready 事件判断）
     const handleHostReconnect = () => {
+      hostOfflineRef.current = false
       hostLeftNotifiedRef.current = false
       urlExpiredRef.current = false
     }
