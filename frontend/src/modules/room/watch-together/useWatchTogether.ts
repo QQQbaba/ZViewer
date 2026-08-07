@@ -534,6 +534,19 @@ export function useWatchTogether({
         quality.setCurrentQuality(newState.currentQn ?? null)
         quality.setAvailableQualities(newState.acceptQuality ?? [])
 
+        // 同步更新 movie 对象的 acceptQuality/currentQn/format，
+        // 否则 BilibiliQualitySelect 仍使用旧的 MP4 过滤后的清晰度列表，
+        // 导致 CLI 开启后无法选择高画质。
+        try {
+          await useRoomStore.getState().updateMovie(roomId, movie.id, {
+            acceptQuality: newState.acceptQuality,
+            currentQn: newState.currentQn,
+            format: newState.format,
+          })
+        } catch {
+          // 持久化失败不阻塞播放，watchTogether state 已更新
+        }
+
         broadcastState(newState)
       } catch (err) {
         console.error('[useWatchTogether] 重新解析 B站 视频失败:', err)

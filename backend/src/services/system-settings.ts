@@ -16,7 +16,7 @@ const DEFAULT_SETTINGS: Partial<SystemSettings> = {
   registrationMode: 'approval',
   roomCreationMode: 'admin-only',
   betaFeaturesEnabled: false,
-  dashDisabled: false,
+  dashDisabled: true,
   cdnAccelerate: false,
   cdnProxyUrl: 'https://gh-proxy.com',
 };

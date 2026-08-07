@@ -54,6 +54,14 @@ export interface WatchTogetherState {
   /** 预览源的显示标题 */
   previewTitle?: string
   /**
+   * 房主是否启用了 CLI 高画质代理（仅房主广播时设置）。
+   *
+   * CLI 是各客户端独立的本地代理，房主开启后走 CLI DASH 高画质。
+   * 观众无法使用房主的 CLI，收到 hostCliEnabled=true 时应强制走 MP4，
+   * 避免观众被迫走服务器 DASH 消耗带宽（CLI 仅为开启者本地高画质代理）。
+   */
+  hostCliEnabled?: boolean
+  /**
    * 是否启用缓冲模式（仅 B站 DASH 源有效）。
    *
    * 启用后所有用户先从 B站 CDN 完整缓存 m4s 流到 IndexedDB，

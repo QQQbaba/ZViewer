@@ -75,6 +75,11 @@ export interface SyncStateDto {
   isPreview?: boolean;
   /** 预览源显示标题 */
   previewTitle?: string;
+  /**
+   * 房主是否启用了 CLI 高画质代理（仅房主广播时设置）。
+   * 观众收到此标记后强制走 MP4，避免被迫走服务器 DASH。
+   */
+  hostCliEnabled?: boolean;
 }
 
 /**

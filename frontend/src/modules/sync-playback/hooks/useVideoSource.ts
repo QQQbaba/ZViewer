@@ -49,6 +49,10 @@ interface ViewerLocalOverride {
  * 而观众默认 MP4），观众端按自己的偏好重新解析，避免被迫使用房主的 CLI 代理
  * 或被切换到自己不期望的格式。
  *
+ * 房主启用 CLI 时广播 hostCliEnabled=true。CLI 是各客户端独立的本地代理，
+ * 观众无法使用房主的 CLI，因此收到此标记时强制走 MP4（即使观众本地偏好 DASH），
+ * 避免观众被迫走服务器 DASH 消耗带宽。
+ *
  * 若本地偏好与房主一致且房主源不是本地 CLI 代理地址，则返回 null，直接使用房主源。
  * 本地已启用 CLI 时同样会按 DASH 偏好解析并覆盖。
  */
@@ -70,8 +74,14 @@ async function ensureViewerLocalOverride(
   const existing = storeState.viewerCliResolvedSource
   const existingIsMp4 = existing?.resolved.format === 'mp4'
 
+  // 房主启用了 CLI（hostCliEnabled=true）但观众本地未开启 CLI 时，
+  // 强制观众走 MP4：CLI 仅为房主本地高画质代理，观众无法使用。
+  const viewerCliEnabled = getBilibiliParseOptions(movieId).cliEnabled
+  const forceViewerMp4 = !!state.hostCliEnabled && !viewerCliEnabled
+  const adjustedPreferMp4 = forceViewerMp4 || effectivePreferMp4
+
   // 本地偏好与房主一致且房主源不是 CLI 代理地址：直接使用房主广播源
-  if (effectivePreferMp4 === hostIsMp4 && !isCliProxyUrl(state.sourceUrl)) {
+  if (adjustedPreferMp4 === hostIsMp4 && !isCliProxyUrl(state.sourceUrl)) {
     if (existing?.movieId === movieId) {
       storeState.setViewerCliResolvedSource(null)
     }
@@ -79,14 +89,14 @@ async function ensureViewerLocalOverride(
   }
 
   // 已有匹配的本地覆盖时直接复用，避免重复解析
-  if (existing?.movieId === movieId && existingIsMp4 === effectivePreferMp4) {
+  if (existing?.movieId === movieId && existingIsMp4 === adjustedPreferMp4) {
     return existing
   }
 
   // 按本地偏好独立解析
   try {
     const resolved = await resolveBilibiliOnline(movie, undefined, {
-      preferMp4: effectivePreferMp4,
+      preferMp4: adjustedPreferMp4,
     })
     const resolvedSource: ResolvedSource = {
       videoUrl: resolved.sourceUrl,
