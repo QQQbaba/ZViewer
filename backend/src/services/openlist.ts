@@ -84,7 +84,18 @@ export async function fetchOpenListDirectUrl(
   path: string,
 ): Promise<string> {
   const baseUrl = deriveApiBaseUrl(serverUrl);
-  const targetPath = path.startsWith('/') ? path : `/${path}`;
+  // AList 的 /api/fs/get 接口期望的是原始路径（未 URL 编码），
+  // 但前端通过 URLSearchParams 传递的 path 可能是 URL 编码的。
+  // 这里对 path 进行 URL 解码，得到原始路径。
+  let targetPath: string;
+  try {
+    targetPath = decodeURIComponent(path);
+  } catch {
+    targetPath = path;
+  }
+  if (!targetPath.startsWith('/')) {
+    targetPath = '/' + targetPath;
+  }
 
   // 1. 登录获取 token（仅在提供凭证时进行）
   let token: string | undefined;
@@ -138,16 +149,34 @@ export async function fetchOpenListDirectUrl(
     data?: { raw_url?: string; name?: string };
   };
   if (fsData.code !== 200) {
-    throw new OpenListError(
-      fsData.message || 'OpenList 拒绝返回直链',
-      fsData.code === 401 ? 'AUTH_FAILED' : 'NOT_FOUND',
+    const code = fsData.code === 401 ? 'AUTH_FAILED' : 'NOT_FOUND';
+    // AList 上游返回的英文错误消息（如 "object not found"）对用户不友好，
+    // 根据 code 转换为中文提示，保留原始消息作为辅助信息。
+    const upstreamMessage = fsData.message || '';
+    let friendlyMessage: string;
+    if (code === 'AUTH_FAILED') {
+      friendlyMessage = 'OpenList 认证失败，请检查挂载的用户名和密码';
+    } else {
+      // NOT_FOUND：AList 返回 "object not found" 表示文件/路径不存在
+      friendlyMessage = `文件不存在或路径错误: ${targetPath}`;
+    }
+    console.warn(
+      `[openlist] /api/fs/get 失败 code=${fsData.code} path=${targetPath} upstream=${upstreamMessage}`,
     );
+    throw new OpenListError(friendlyMessage, code);
   }
   const rawUrl = fsData.data?.raw_url;
   if (!rawUrl) {
     throw new OpenListError('OpenList 未返回 raw_url', 'UNREACHABLE');
   }
-  return rawUrl;
+  // AList 未配置 site_url 时，raw_url 可能是相对路径（如 /d/path/file.mp4?sign=xxx），
+  // 需要拼接 AList 服务器地址，否则浏览器会相对当前页面 origin 解析，请求到前端服务器。
+  if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+    return rawUrl;
+  }
+  // 相对路径：拼接 AList API 基地址
+  const absoluteUrl = `${baseUrl}${rawUrl.startsWith('/') ? rawUrl : '/' + rawUrl}`;
+  return absoluteUrl;
 }
 
 /**

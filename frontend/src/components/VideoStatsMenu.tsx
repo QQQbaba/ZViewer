@@ -26,6 +26,11 @@ export interface VideoStatsMenuProps {
    * 非 B站 源不需要传入。
    */
   format?: 'dash' | 'mp4'
+  /**
+   * 访问模式：true=直链（浏览器直接请求源服务器），false/undefined=服务器中转
+   * 仅对 custom 源（webdav/openlist/ftp 等）有意义；bilibili/webrtc 不传入。
+   */
+  directLink?: boolean
 }
 
 interface Position {
@@ -229,6 +234,7 @@ export function VideoStatsMenu({
   currentQuality,
   availableQualities,
   format,
+  directLink,
 }: VideoStatsMenuProps) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState<Position>({ x: 0, y: 0 })
@@ -496,6 +502,9 @@ export function VideoStatsMenu({
     if (playMode) {
       lines.push(`播放模式: ${playMode}`)
     }
+    if (sourceType === 'custom') {
+      lines.push(`访问模式: ${directLink ? '直链' : '服务器中转'}`)
+    }
     lines.push(`编码: ${stats.codec}`, `分辨率: ${stats.resolution}`)
     if (sourceType === 'bilibili' && format !== 'mp4') {
       lines.push(`清晰度: ${stats.quality}`)
@@ -514,7 +523,7 @@ export function VideoStatsMenu({
       console.error('[VideoStatsMenu] copy error:', err)
       message.error('复制失败，请检查浏览器剪贴板权限')
     }
-  }, [stats, isWebRtc, sourceType, format])
+  }, [stats, isWebRtc, sourceType, format, directLink, sourceUrl])
 
   const handleOpenDevPanel = useCallback(() => {
     if (!videoElement) return
@@ -624,6 +633,12 @@ export function VideoStatsMenu({
           const mode = detectPlayMode(sourceType, format, sourceUrl)
           return mode ? <StatsRow label="播放模式" value={mode} /> : null
         })()}
+        {sourceType === 'custom' && (
+          <StatsRow
+            label="访问模式"
+            value={directLink ? '直链' : '服务器中转'}
+          />
+        )}
         <StatsRow label="编码" value={displayStats.codec} />
         <StatsRow label="分辨率" value={displayStats.resolution} />
         {sourceType === 'bilibili' && format !== 'mp4' && (
