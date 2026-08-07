@@ -290,7 +290,13 @@ export function useWatchTogether({
 
     const handleMovieList = (payload: { movies: MovieDto[] }) => {
       // 后端广播的 movie-list 事件仅作实时刷新：直接覆盖本地缓存
-      setMovies(payload.movies.map(mapDtoToMovie))
+      // 防御性检查：仅接受属于当前房间的影片，避免切换房间时旧房间的事件
+      // 残留导致新房间显示其他房间的视频
+      const currentRoomId = useRoomStore.getState().roomId
+      const filtered = payload.movies.filter(
+        (m) => !m.roomId || m.roomId === currentRoomId
+      )
+      setMovies(filtered.map(mapDtoToMovie))
     }
 
     const handleCurrentMovie = (payload: { movieId: number | null }) => {

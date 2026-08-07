@@ -15,6 +15,7 @@ import { customAlphabet } from 'nanoid';
 import bcrypt from 'bcryptjs';
 import { AppDataSource } from '../../../data-source';
 import { Room } from '../../../entities/Room';
+import { Session } from '../../../entities/Session';
 import type { UserRole } from '../../../entities/User';
 import { getSystemSettings } from '../../../services/system-settings';
 import {
@@ -73,6 +74,19 @@ export class RoomLifecycleHandler implements SocketEventHandler {
               success: false,
               message: hint,
             });
+          }
+
+          // 创建新房间前，查找并离开用户当前活跃的旧房间（sharer session）。
+          // 否则 socket 会同时存在于新旧两个房间，收到旧房间的 movie-list 等
+          // 广播事件，导致新房间显示旧房间的影片列表。
+          const oldSharer = await roomPermissionService.getSharerBySocketId(socket.id);
+          if (oldSharer && oldSharer.roomId) {
+            socket.leave(oldSharer.roomId);
+            // 结束旧 session，避免旧房间的状态残留
+            oldSharer.endedAt = new Date();
+            await AppDataSource.getRepository(Session).save(oldSharer);
+            // 通知旧房间（如有观众）房主已离开
+            roomStateService.cancelReconnectTimer(oldSharer.roomId);
           }
 
           const roomRepo = AppDataSource.getRepository(Room);
