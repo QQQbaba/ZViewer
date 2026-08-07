@@ -220,6 +220,11 @@ const server = http.createServer((req, res) => {
     return proxyRequest(req, res, BACKEND_URL, '/api');
   }
 
+  // 上传文件代理（头像等静态资源由后端 express.static 提供）
+  if (url.startsWith('/uploads')) {
+    return proxyRequest(req, res, BACKEND_URL, '/uploads');
+  }
+
   // Socket.IO 代理
   if (url.startsWith('/socket.io')) {
     return proxyRequest(req, res, BACKEND_URL, '/socket.io');

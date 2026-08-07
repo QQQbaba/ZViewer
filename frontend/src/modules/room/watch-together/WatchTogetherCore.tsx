@@ -1127,24 +1127,66 @@ export function WatchTogetherCore({
     }
   }, [settingsOpen, slots])
 
-  // ── 补充快捷键（F 全屏 / M 静音，与重构前一致；Space/方向键由 ArtPlayer 内置处理）──
+  // ── 补充快捷键（F 全屏 / M 静音 / 方向键 跳转+音量）──
   useEffect(() => {
-    if (!isHost) return
     const handler = (e: KeyboardEvent) => {
       const tag = (document.activeElement?.tagName ?? '').toUpperCase()
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
       if (e.key === 'f' || e.key === 'F') {
         handleToggleFullscreen()
-      } else if (e.key === 'm' || e.key === 'M') {
+        return
+      }
+      if (e.key === 'm' || e.key === 'M') {
         video.muted = !video.muted
+        return
+      }
+      // 方向键：左右 5s 跳转，上下 5% 音量
+      const canControl = isHost || hostOffline
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        const cur = video.currentTime
+        if (!Number.isFinite(cur)) return
+        const target = Math.max(0, cur - 5)
+        if (canControl) {
+          video.currentTime = target
+        } else {
+          handleRequestSeek(target)
+        }
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        const cur = video.currentTime
+        if (!Number.isFinite(cur)) return
+        const dur = video.duration
+        const target = dur > 0 ? Math.min(dur, cur + 5) : cur + 5
+        if (canControl) {
+          video.currentTime = target
+        } else {
+          handleRequestSeek(target)
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        const next = Math.min(1, (video.muted ? 0 : video.volume) + 0.05)
+        video.muted = false
+        video.volume = next
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        const next = Math.max(0, (video.muted ? 0 : video.volume) - 0.05)
+        video.volume = next
       }
     }
     document.addEventListener('keydown', handler)
     return () => {
       document.removeEventListener('keydown', handler)
     }
-  }, [isHost, art, video, handleToggleFullscreen])
+  }, [
+    isHost,
+    hostOffline,
+    art,
+    video,
+    handleToggleFullscreen,
+    handleRequestSeek,
+  ])
 
   // ── 观众申请按钮（渲染用）──────────────────────────────
   const isPlaying = useVideoPlayingState(video)

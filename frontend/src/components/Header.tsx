@@ -670,7 +670,7 @@ export function Header() {
                   alt={user.username}
                   src={
                     user.avatar
-                      ? `${getApiUrl()}${user.avatar}`
+                      ? user.avatar
                       : user.role === 'root'
                         ? '/root-avatar.jpg'
                         : undefined
@@ -718,7 +718,7 @@ export function Header() {
                         alt={user.username}
                         src={
                           user.avatar
-                            ? `${getApiUrl()}${user.avatar}`
+                            ? user.avatar
                             : user.role === 'root'
                               ? '/root-avatar.jpg'
                               : undefined

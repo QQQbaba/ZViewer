@@ -345,6 +345,9 @@ export const useDanmakuStore = create<DanmakuState>()(
         const roomId = get().roomId
         set((state) => ({
           tracks: state.tracks.filter((t) => t.trackId !== trackId),
+          // 删除整条轨道后同步触发刷新信号，让播放器立即清屏并按当前时间
+          // 重发剩余轨道的弹幕，避免已飞出的弹幕继续残留在画面上。
+          refreshSignal: state.refreshSignal + 1,
         }))
         if (!roomId) return
         try {
