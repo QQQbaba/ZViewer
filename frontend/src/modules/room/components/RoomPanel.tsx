@@ -22,6 +22,7 @@ export function RoomPanel({ onModeSelected }: RoomPanelProps) {
     setMode,
     setRoomId,
     setRoomSettings,
+    reset: resetRoomStore,
     mode: storeMode,
   } = useRoomStore()
   // 默认模式从 store 读取，不再从 URL 读取 mode 参数。
@@ -53,6 +54,10 @@ export function RoomPanel({ onModeSelected }: RoomPanelProps) {
         setCreating(false)
         const roomId = response.data?.roomId
         if (response.success && roomId) {
+          // 创建新房间前先重置 store，清除上一个房间的 movies/currentMovieId 等残留状态。
+          // RoomPage 的 reset effect 是异步的（在渲染后执行），如果不在这里同步清理，
+          // navigate 后 MovieListPanel 等组件会在 reset 前渲染一帧旧数据。
+          resetRoomStore()
           setRoomId(roomId)
           setMode(response.data?.mode || selectedMode)
           // 同步 requireApproval 到 store：创建房间时房主选择的值必须与后端一致，
