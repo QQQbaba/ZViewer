@@ -30,13 +30,13 @@ function wrapWebDAVError(err: unknown): WebDAVError {
   const lower = message.toLowerCase();
 
   if (lower.includes('timeout') || lower.includes('超时')) {
-    return new WebDAVError(message, 'TIMEOUT');
+    return new WebDAVError('WebDAV 请求超时', 'TIMEOUT');
   }
   if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('auth')) {
-    return new WebDAVError(message, 'AUTH_FAILED');
+    return new WebDAVError('WebDAV 认证失败，请检查用户名和密码', 'AUTH_FAILED');
   }
-  if (lower.includes('404') || lower.includes('not found') || lower.includes('不存在')) {
-    return new WebDAVError(message, 'NOT_FOUND');
+  if (lower.includes('404') || lower.includes('not found') || lower.includes('不存在') || lower.includes('object not found')) {
+    return new WebDAVError('文件不存在或路径错误', 'NOT_FOUND');
   }
   return new WebDAVError(message, 'UNREACHABLE');
 }
@@ -96,18 +96,48 @@ function getServerPathPrefix(serverUrl: string): string {
   }
 }
 
+// webdav-client 库在解析 DAV 服务器返回的 XML 时，可能对 href 中的非 ASCII
+// 字符进行了错误的 Latin-1 解码（把 UTF-8 字节当作 Latin-1 字符）。
+// 例如 `！` (U+FF01) 的 UTF-8 字节 `EF BC 81` 被解码为 `ï¼\u0081`。
+// 此函数把这种错误解码的 Latin-1 字符串还原为正确的 UTF-8 字符串。
+function fixLatin1Decoding(str: string): string {
+  if (!str || !/[\u0080-\u00FF]/.test(str)) return str;
+  try {
+    const fixed = Buffer.from(str, 'latin1').toString('utf8');
+    // 仅当修复后确实发生了变化时才返回修复结果，避免误伤已经是 UTF-8 的字符串
+    if (fixed !== str) return fixed;
+  } catch {
+    // 忽略错误
+  }
+  return str;
+}
+
+// 从可能为完整 URL 的 href 中提取 pathname，不使用 new URL().pathname
+// 因为 WHATWG URL 规范化会对路径中的非 ASCII 字符进行重新编码，
+// 导致双重编码问题（Latin-1 字符被重新编码为 UTF-8 百分号编码）。
+function extractPathname(href: string): string {
+  const match = /^https?:\/\/[^/]+(\/[^?#]*)?/i.exec(href);
+  if (match) {
+    return match[1] || '/';
+  }
+  return href;
+}
+
 // 将 DAV 服务器返回的 href 转换为相对 webdav 根的路径
 // 例如 href="/dav/folder1"，serverUrl="http://host/dav"，返回 "/folder1"
-// 这样转换后的路径可以直接传给 connection.readdir/stat/get
+// 返回的是已解码的原始路径（非 URL 编码），由调用方按需编码
 function hrefToWebDAVPath(href: string, serverUrl: string): string {
   if (!href) return '/';
   let pathname = href;
-  // 若 href 是完整 URL（含协议），先取 pathname
+  // 修复 webdav-client 库可能进行的错误 Latin-1 解码
+  pathname = fixLatin1Decoding(pathname);
+  // 提取 pathname（避免使用 new URL().pathname 导致的双重编码）
+  pathname = extractPathname(pathname);
+  // 解码 URL 编码，得到原始路径
   try {
-    const parsed = new URL(href);
-    pathname = parsed.pathname;
+    pathname = decodeURIComponent(pathname);
   } catch {
-    // 不是完整 URL，保持原样
+    // 解码失败（可能包含无效的 % 序列），保持原样
   }
   // 剥离 serverUrl 的 path 前缀（如 /dav）
   const prefix = getServerPathPrefix(serverUrl);
@@ -206,9 +236,29 @@ export function createWebDAVReadStream(
 export function buildWebDAVDirectUrl(
   serverUrl: string,
   path: string,
+  username?: string,
+  password?: string,
 ): string {
   const normalizedUrl = normalizeServerUrl(serverUrl);
-  return `${normalizedUrl}${normalizePath(path)}`;
+  // 修复可能传入的 Latin-1 乱码路径（webdav-client 库的解码 bug）
+  const fixedPath = fixLatin1Decoding(path);
+  const encodedPath = normalizePath(fixedPath);
+  // WebDAV 协议不支持生成真实直链，仅返回 serverUrl+path 拼接。
+  // 若提供了认证信息，嵌入 Basic Auth（http://user:pass@host/path），
+  // 让浏览器可以直接播放需要认证的 WebDAV 文件。
+  // 注意：密码暴露在 URL 中，仅适用于内网/可信环境。
+  if (username && password) {
+    try {
+      const parsed = new URL(normalizedUrl);
+      parsed.username = encodeURIComponent(username);
+      parsed.password = encodeURIComponent(password);
+      parsed.pathname = encodedPath;
+      return parsed.toString();
+    } catch {
+      // URL 解析失败，回退到简单拼接
+    }
+  }
+  return `${normalizedUrl}${encodedPath}`;
 }
 
 export interface WebDAVDirectoryEntry {
@@ -251,7 +301,7 @@ export async function listWebDAVDirectory(
             lastModified?: Date;
           }>;
           return entries.map((entry) => ({
-            name: entry.name || '',
+            name: fixLatin1Decoding(entry.name || ''),
             // 将 DAV 服务器返回的 href（如 /dav/folder1）转换为相对 webdav 根的路径（/folder1）
             // 避免前端把带前缀的路径回传给后端时造成路径重复（/dav/dav/folder1）导致 404
             path: entry.href

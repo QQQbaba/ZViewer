@@ -115,6 +115,12 @@ export function WatchTogetherCore({
     (state) => state.viewerCliResolvedSource
   )
   const currentMovieId = useRoomStore((state) => state.currentMovieId)
+  // 当前影片的 directLink 标记，用于统计信息中显示"直链/服务器中转"
+  const currentMovieDirectLink = useRoomStore(
+    (state) =>
+      state.movies.find((m) => m.id === state.currentMovieId)?.directLink ??
+      false
+  )
   const {
     watchTogether,
     setWatchTogether,
@@ -1460,6 +1466,7 @@ export function WatchTogetherCore({
             currentQuality={override?.currentQn ?? currentQuality}
             availableQualities={override?.acceptQuality ?? availableQualities}
             format={statsFormat}
+            directLink={currentMovieDirectLink}
           />
         )
       })()}

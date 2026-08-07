@@ -12,6 +12,11 @@ import {
   WebDAVError,
   type WebDAVConnectionParams,
 } from '../services/webdav';
+import {
+  fetchOpenListDirectUrl,
+  OpenListError,
+  normalizeOpenListServerUrl,
+} from '../services/openlist';
 import { detectMediaFormat, getContentType } from '../services/mediaFormat';
 import { resolveUserMount, pipeRangeStream } from '../services/proxy';
 
@@ -430,6 +435,8 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
 // 2.6 获取直链 - GET /direct-url?mountId=&path=
 // 房主添加影片时调用：后端使用挂载凭证返回直链 URL。
 // 对 WebDAV：协议不支持生成真实直链，仅返回 serverUrl+path 拼接（浏览器可能无法直接播放，卡死就卡死）
+// 但如果服务器实际上是 AList（OpenList），则优先使用 AList API 获取带签名的真实下载直链，
+// 避免 CORS/ORB 跨域问题。
 router.get('/direct-url', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const mountIdRaw = req.query.mountId;
@@ -464,8 +471,47 @@ router.get('/direct-url', async (req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
+    // 优先尝试 AList API 获取真实直链（带签名的下载 URL）。
+    // 很多用户将 AList 服务器以 WebDAV 类型挂载（AList 同时支持 WebDAV 和 HTTP API）。
+    // AList 的 raw_url 是带签名的直链，服务器会返回正确的 Content-Type 和 CORS 头，
+    // 可以避免浏览器 ERR_BLOCKED_BY_ORB 等跨域问题。
+    // 如果服务器不是 AList（/api/fs/get 返回 404），则回退到 WebDAV 直链拼接。
+    try {
+      const alistDirectUrl = await fetchOpenListDirectUrl(
+        mount.serverUrl,
+        mount.username || undefined,
+        mount.password || undefined,
+        targetPath,
+      );
+      res.json({ success: true, directUrl: alistDirectUrl });
+      return;
+    } catch (err) {
+      // AList API 调用失败，可能是非 AList 服务器或路径不存在
+      if (err instanceof OpenListError) {
+        // 如果是明确的"文件不存在"或"认证失败"错误，说明服务器是 AList 但路径/凭证有问题
+        // 直接返回错误，不回退到 WebDAV 拼接（拼接的 URL 同样无法访问）
+        if (err.code === 'NOT_FOUND' || err.code === 'AUTH_FAILED') {
+          const status = err.code === 'AUTH_FAILED' ? 401 : 404;
+          res.status(status).json({
+            success: false,
+            message: err.message,
+            code: err.code,
+          });
+          return;
+        }
+        // UNREACHABLE 等错误：可能不是 AList 服务器，回退到 WebDAV 拼接
+      }
+      // 非 OpenListError：不是 AList 服务器，回退到 WebDAV 拼接
+    }
+
     // WebDAV 协议不支持获取真实直链，直接拼接 serverUrl+path
-    const directUrl = buildWebDAVDirectUrl(mount.serverUrl, targetPath);
+    // 传入挂载的认证信息，让浏览器可以直接访问需要认证的 WebDAV 文件
+    const directUrl = buildWebDAVDirectUrl(
+      mount.serverUrl,
+      targetPath,
+      mount.username || undefined,
+      mount.password || undefined,
+    );
     res.json({ success: true, directUrl });
   } catch (err) {
     console.error('[webdav] direct-url error:', err);
