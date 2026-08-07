@@ -81,12 +81,13 @@ function getPlatformAssetName(): string {
 }
 
 /**
- * HTTPS GET JSON — 请求 GitHub API，支持 CDN 代理加速。
+ * HTTPS GET JSON — 请求 GitHub API（直连，不走 CDN 代理）。
+ *
+ * 检查更新走直连 GitHub API，避免 gh-proxy.com 等代理转发 API 请求时
+ * 因共享 IP/账号触发 GitHub API 速率限制（403 rate limit exceeded）。
+ * CDN 代理仅用于 release 文件下载（见 downloadFile）。
  */
-function httpsGetJson<T>(
-  url: string,
-  cdnConfig?: CdnConfig,
-): Promise<T> {
+function httpsGetJson<T>(url: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
@@ -104,12 +105,8 @@ function httpsGetJson<T>(
           res.statusCode < 400 &&
           res.headers.location
         ) {
-          // 重定向跟随：对重定向 URL 也应用 CDN 代理
-          let redirectUrl = res.headers.location;
-          if (cdnConfig?.proxyUrl) {
-            redirectUrl = applyCdnToUrl(redirectUrl, cdnConfig.proxyUrl);
-          }
-          httpsGetJson<T>(redirectUrl, cdnConfig).then(resolve).catch(reject);
+          // 重定向跟随
+          httpsGetJson<T>(res.headers.location).then(resolve).catch(reject);
           return;
         }
         if (res.statusCode && res.statusCode >= 400) {
@@ -225,15 +222,14 @@ export async function getUpdateInfo(
     ? { proxyUrl: settings.cdnProxyUrl || 'https://gh-proxy.com' }
     : undefined;
 
-  // 对 GitHub API URL 应用 CDN 代理（更新检测加速）
-  let apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=10`;
-  if (cdnConfig?.proxyUrl) {
-    apiUrl = applyCdnToUrl(apiUrl, cdnConfig.proxyUrl);
-    console.log(`[updater] CDN 加速: ${cdnConfig.proxyUrl}`);
-  }
+  // 检查更新：直连 GitHub API，不走 CDN 代理。
+  // 原因：gh-proxy.com 等代理转发 api.github.com 时使用代理自身的 GitHub 账号/IP，
+  // 多用户共用易触发 GitHub API 速率限制（403 rate limit exceeded）。
+  // CDN 代理仅用于 release 文件下载（下载不受 API 限制）。
+  const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=10`;
 
   // 获取 releases 列表（包含正式版和预发布版）
-  const releases = await httpsGetJson<GithubRelease[]>(apiUrl, cdnConfig);
+  const releases = await httpsGetJson<GithubRelease[]>(apiUrl);
 
   if (!releases || releases.length === 0) {
     throw new Error('未找到任何发布版本');
@@ -333,6 +329,7 @@ function downloadFile(
   dest: string,
   onProgress?: (received: number, total: number) => void,
   cdnConfig?: CdnConfig,
+  originalUrl?: string,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(dest);
@@ -351,7 +348,26 @@ function downloadFile(
         if (cdnConfig?.proxyUrl) {
           redirectUrl = applyCdnToUrl(redirectUrl, cdnConfig.proxyUrl);
         }
-        downloadFile(redirectUrl, dest, onProgress, cdnConfig)
+        downloadFile(redirectUrl, dest, onProgress, cdnConfig, originalUrl)
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+      // CDN 代理失败（403/5xx）：自动回退到直连 GitHub
+      if (
+        cdnConfig?.proxyUrl &&
+        originalUrl &&
+        url !== originalUrl &&
+        res.statusCode &&
+        (res.statusCode === 403 || res.statusCode >= 500)
+      ) {
+        file.close();
+        try { fs.unlinkSync(dest); } catch { /* ignore */ }
+        res.resume();
+        console.warn(
+          `[updater] CDN 下载失败 HTTP ${res.statusCode}, 回退到直连: ${originalUrl}`,
+        );
+        downloadFile(originalUrl, dest, onProgress, undefined, originalUrl)
           .then(resolve)
           .catch(reject);
         return;
@@ -372,9 +388,33 @@ function downloadFile(
         file.close(() => resolve());
       });
     });
-    req.on('error', reject);
+    req.on('error', (err) => {
+      // CDN 代理网络错误：回退到直连 GitHub
+      if (cdnConfig?.proxyUrl && originalUrl && url !== originalUrl) {
+        file.close();
+        try { fs.unlinkSync(dest); } catch { /* ignore */ }
+        console.warn(
+          `[updater] CDN 下载网络错误, 回退到直连: ${originalUrl}`,
+        );
+        downloadFile(originalUrl, dest, onProgress, undefined, originalUrl)
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+      reject(err);
+    });
     req.on('timeout', () => {
       req.destroy();
+      // CDN 代理超时：回退到直连 GitHub
+      if (cdnConfig?.proxyUrl && originalUrl && url !== originalUrl) {
+        file.close();
+        try { fs.unlinkSync(dest); } catch { /* ignore */ }
+        console.warn('[updater] CDN 下载超时, 回退到直连');
+        downloadFile(originalUrl, dest, onProgress, undefined, originalUrl)
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
       reject(new Error('下载超时'));
     });
   });
@@ -726,6 +766,7 @@ async function applyUpdateFromArchive(
   archiveFilename: string,
   onStage?: (event: UpdateStageEvent) => void,
   cdnConfig?: CdnConfig,
+  originalUrl?: string,
 ): Promise<{ success: boolean; message: string }> {
   const root = projectRoot();
   const tempDir = path.join(root, '.update-temp');
@@ -740,10 +781,10 @@ async function applyUpdateFromArchive(
   try {
     // 写入压缩包
     if (typeof archiveData === 'string') {
-      // archiveData 是 URL，需要下载（带进度），透传 CDN 配置
+      // archiveData 是 URL，需要下载（带进度），透传 CDN 配置与原始 URL
       await downloadFile(archiveData, archivePath, (received, total) => {
         if (onStage) onStage({ stage: 'downloading', received, total });
-      }, cdnConfig);
+      }, cdnConfig, originalUrl);
     } else {
       fs.writeFileSync(archivePath, archiveData);
     }
@@ -844,14 +885,22 @@ export async function applyUpdate(
     : undefined;
 
   // 对 downloadUrl 应用 CDN 代理前缀（覆盖 github.com 等所有 GitHub 域名）
-  let downloadUrl = info.downloadUrl;
+  const originalDownloadUrl = info.downloadUrl;
+  let downloadUrl = originalDownloadUrl;
   if (cdnConfig?.proxyUrl) {
     downloadUrl = applyCdnToUrl(downloadUrl, cdnConfig.proxyUrl);
     console.log(`[updater] CDN 加速: ${cdnConfig.proxyUrl}`);
   }
 
-  // downloadFile 在 302 重定向跟随时也会对重定向 URL 应用 CDN 代理前缀
-  return applyUpdateFromArchive(downloadUrl, info.assetName, onStage, cdnConfig);
+  // downloadFile 在 302 重定向跟随后也会对重定向 URL 应用 CDN 代理前缀；
+  // 传入 originalDownloadUrl 用于 CDN 代理失败时自动回退直连
+  return applyUpdateFromArchive(
+    downloadUrl,
+    info.assetName,
+    onStage,
+    cdnConfig,
+    originalDownloadUrl,
+  );
 }
 
 /**

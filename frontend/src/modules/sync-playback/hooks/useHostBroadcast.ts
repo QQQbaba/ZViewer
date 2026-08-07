@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react'
 import type { RefObject } from 'react'
 import { useSocket } from '@/hooks/useSocket'
 import { useRoomStore } from '@/store/roomStore'
+import { getBilibiliParseOptions } from '@/modules/bilibili/parseOptions'
 import type { WatchTogetherState, ControlAction } from '../types'
 import { SOCKET_EVENT } from '../constants'
 import { buildStateFromVideo, isStateEqual } from '../services'
@@ -42,10 +43,20 @@ export function useHostBroadcast({
   const broadcastState = useCallback(
     (state: WatchTogetherState) => {
       if (!socket || !isHostRef.current) return
+      // 注入房主 CLI 标记：让观众知道房主是否启用了 CLI 高画质代理，
+      // 从而决定是否需要强制走 MP4（观众无法使用房主的 CLI 代理）
+      const movieId = useRoomStore.getState().currentMovieId
+      const stateWithCli: WatchTogetherState = {
+        ...state,
+        hostCliEnabled:
+          movieId != null
+            ? getBilibiliParseOptions(movieId).cliEnabled
+            : state.hostCliEnabled,
+      }
       // 浅比较跳过等价状态：房主正常播放时 currentTime 增长 < 0.5s 不广播
-      if (isStateEqual(lastStateRef.current, state)) return
-      lastStateRef.current = state
-      socket.emit(SOCKET_EVENT.STATE, { roomId, state })
+      if (isStateEqual(lastStateRef.current, stateWithCli)) return
+      lastStateRef.current = stateWithCli
+      socket.emit(SOCKET_EVENT.STATE, { roomId, state: stateWithCli })
     },
     [socket, roomId, isHostRef]
   )
@@ -63,6 +74,11 @@ export function useHostBroadcast({
     const video = videoRef.current
     const storeState = useRoomStore.getState().watchTogether
     const newState = buildStateFromVideo(video, storeState)
+    // 注入房主 CLI 标记（与 broadcastState 一致）
+    const movieId = useRoomStore.getState().currentMovieId
+    if (movieId != null) {
+      newState.hostCliEnabled = getBilibiliParseOptions(movieId).cliEnabled
+    }
     // forceSync 总是广播，跳过浅比较
     lastStateRef.current = newState
     socket.emit(SOCKET_EVENT.STATE, { roomId, state: newState })
