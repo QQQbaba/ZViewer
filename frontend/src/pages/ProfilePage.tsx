@@ -43,11 +43,11 @@ import { apiFetch, getApiUrl } from '@/lib/api'
 /** 构建头像完整 URL（后端返回相对路径，前端拼接 API_URL） */
 function buildAvatarUrl(
   avatar: string | null | undefined,
-  username?: string
+  role?: string
 ): string | undefined {
   const baseUrl = getApiUrl()
   if (!avatar) {
-    if (username === 'root') {
+    if (role === 'root') {
       return `${baseUrl}/root-avatar.jpg`
     }
     return undefined
@@ -385,7 +385,7 @@ export default function ProfilePage() {
           <Avatar
             size="lg"
             alt={user.username}
-            src={buildAvatarUrl(user.avatar, user.username)}
+            src={buildAvatarUrl(user.avatar, user.role)}
             className="mx-auto mb-3 h-14 w-14"
           />
           <Title level={3} className="m-0">
@@ -417,7 +417,7 @@ export default function ProfilePage() {
                   <Avatar
                     size="md"
                     alt={user.username}
-                    src={buildAvatarUrl(user.avatar, user.username)}
+                    src={buildAvatarUrl(user.avatar, user.role)}
                   />
                   <div className="min-w-0">
                     <p className="truncate text-base font-medium text-[var(--md-sys-color-on-surface)]">
@@ -694,7 +694,7 @@ export default function ProfilePage() {
                     <Avatar
                       size="lg"
                       alt={user.username}
-                      src={buildAvatarUrl(user.avatar, user.username)}
+                      src={buildAvatarUrl(user.avatar, user.role)}
                     />
                     {avatarLoading && (
                       <div
