@@ -95,6 +95,42 @@ export async function logoutBilibili(): Promise<void> {
   })
 }
 
+/**
+ * 使用 Cookie 字符串登录 B站。
+ *
+ * 用户手动粘贴从浏览器复制的 B站 Cookie，
+ * 后端验证有效性后保存凭证。
+ */
+export async function loginBilibiliWithCookie(
+  cookie: string
+): Promise<{ name: string; avatar: string }> {
+  const res = await apiFetch('/api/stream/bilibili/cookie-login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cookie }),
+  })
+  // 防止非 JSON 响应（如 404 HTML 页面）导致 JSON 解析报错
+  const contentType = res.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    throw new Error(
+      `服务器返回了非 JSON 响应 (${res.status})，请确认后端服务已正常运行`
+    )
+  }
+  const data = (await res.json()) as {
+    success: boolean
+    message?: string
+    name?: string
+    avatar?: string
+  }
+  if (!res.ok || !data.success) {
+    throw new Error(data.message || 'Cookie 登录失败')
+  }
+  return {
+    name: data.name || '',
+    avatar: data.avatar || '',
+  }
+}
+
 export async function getBilibiliUserInfo(): Promise<BilibiliUserInfo | null> {
   try {
     const res = await apiFetch('/api/stream/bilibili/user-info')

@@ -155,6 +155,60 @@ router.get('/bilibili/login-status', async (req: AuthenticatedRequest, res) => {
   res.json({ success: true, loggedIn: !!(await getUserCookie(userId)) });
 });
 
+// Cookie 登录 B站（手动粘贴 Cookie）
+router.post('/bilibili/cookie-login', async (req: AuthenticatedRequest, res) => {
+  const userId = req.user?.userId;
+  const cookie = typeof req.body?.cookie === 'string' ? req.body.cookie.trim() : '';
+
+  if (!userId) {
+    res.status(401).json({ success: false, message: '未登录' });
+    return;
+  }
+  if (!cookie) {
+    res.status(400).json({ success: false, message: '请输入 Cookie' });
+    return;
+  }
+
+  // 基本格式校验：至少包含 SESSDATA
+  if (!/SESSDATA\s*=/.test(cookie)) {
+    res.status(400).json({
+      success: false,
+      message: 'Cookie 中未找到 SESSDATA，请确认已复制完整的 Cookie',
+    });
+    return;
+  }
+
+  try {
+    const validation = await validateCookieAndCacheUserInfo(
+      cookie,
+      String(userId),
+    );
+    if (!validation.valid) {
+      res.status(400).json({
+        success: false,
+        message: 'Cookie 验证失败，可能已过期或不正确',
+      });
+      return;
+    }
+
+    await saveCredential(String(userId), cookie);
+    console.log('[bilibili] cookie login success, user:', validation.name, 'for user', userId);
+
+    res.json({
+      success: true,
+      message: 'B站 Cookie 登录成功',
+      name: validation.name,
+      avatar: validation.avatar,
+    });
+  } catch (err) {
+    console.error('[bilibili] cookie login error:', err);
+    res.status(500).json({
+      success: false,
+      message: err instanceof Error ? err.message : 'Cookie 登录失败',
+    });
+  }
+});
+
 // 退出 B站登录
 router.post('/bilibili/logout', async (req: AuthenticatedRequest, res) => {
   const userId = req.user?.userId;

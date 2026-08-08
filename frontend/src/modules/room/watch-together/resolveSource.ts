@@ -24,6 +24,7 @@ export {
   getBilibiliQrCode,
   pollBilibiliQrCode,
   getBilibiliLoginStatus,
+  loginBilibiliWithCookie,
   logoutBilibili,
 } from '@/modules/bilibili/bilibiliApi'
 

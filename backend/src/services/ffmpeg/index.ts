@@ -579,6 +579,17 @@ export function resolveFfprobePath(): string | null {
   return 'ffprobe'
 }
 
+export interface SubtitleStreamInfo {
+  /** ffprobe 流索引（0-based，在所有流中的绝对索引） */
+  index: number
+  /** 字幕编码格式（如 'subrip', 'ass', 'mov_text', 'webvtt'） */
+  codecName: string
+  /** 语言标签（如 'chi', 'eng', 'jpn'），可能为空 */
+  language: string | null
+  /** 字幕轨道标题（如 '简体中文'），可能为空 */
+  title: string | null
+}
+
 export interface MediaProbeInfo {
   /** 音频编码（如 'aac', 'dts', 'ac3', 'eac3'），无音频流时为 null */
   audioCodec: string | null
@@ -586,13 +597,15 @@ export interface MediaProbeInfo {
   videoCodec: string | null
   /** 时长（秒） */
   duration: number | null
+  /** 内嵌字幕轨道列表（可能为空数组） */
+  subtitleStreams: SubtitleStreamInfo[]
 }
 
 /** 探测结果内存缓存（key = 文件路径） */
 const probeCache = new Map<string, MediaProbeInfo>()
 
 /**
- * 使用 ffprobe 探测媒体文件的音视频编码和时长。
+ * 使用 ffprobe 探测媒体文件的音视频编码、时长和内嵌字幕轨道。
  *
  * 结果缓存在内存中，避免重复探测同一文件。
  * ffprobe 不可用时返回全 null。
@@ -602,15 +615,14 @@ export function probeMediaInfo(filePath: string): Promise<MediaProbeInfo> {
   if (cached) return Promise.resolve(cached)
 
   const ffprobePath = resolveFfprobePath()
-  if (!ffprobePath) return Promise.resolve({ audioCodec: null, videoCodec: null, duration: null })
+  if (!ffprobePath) return Promise.resolve({ audioCodec: null, videoCodec: null, duration: null, subtitleStreams: [] })
 
   return new Promise((resolve) => {
     execFile(
       ffprobePath,
       [
         '-v', 'error',
-        '-select_streams', 'a:0',
-        '-show_entries', 'stream=codec_name',
+        '-show_entries', 'stream=index,codec_name,codec_type:stream_tags=language,title',
         '-show_entries', 'format=duration',
         '-of', 'json',
         filePath,
@@ -618,21 +630,92 @@ export function probeMediaInfo(filePath: string): Promise<MediaProbeInfo> {
       { timeout: 10000 },
       (err, stdout) => {
         if (err) {
-          resolve({ audioCodec: null, videoCodec: null, duration: null })
+          resolve({ audioCodec: null, videoCodec: null, duration: null, subtitleStreams: [] })
           return
         }
         try {
           const data = JSON.parse(stdout)
-          const audioCodec = data.streams?.[0]?.codec_name || null
           const duration = parseFloat(data.format?.duration) || null
-          const result: MediaProbeInfo = { audioCodec, videoCodec: null, duration }
+
+          let audioCodec: string | null = null
+          const subtitleStreams: SubtitleStreamInfo[] = []
+
+          for (const stream of data.streams || []) {
+            if (stream.codec_type === 'audio' && !audioCodec) {
+              audioCodec = stream.codec_name || null
+            } else if (stream.codec_type === 'subtitle') {
+              subtitleStreams.push({
+                index: stream.index,
+                codecName: stream.codec_name || 'unknown',
+                language: stream.tags?.language || null,
+                title: stream.tags?.title || null,
+              })
+            }
+          }
+
+          const result: MediaProbeInfo = {
+            audioCodec,
+            videoCodec: null,
+            duration,
+            subtitleStreams,
+          }
           probeCache.set(filePath, result)
           resolve(result)
         } catch {
-          resolve({ audioCodec: null, videoCodec: null, duration: null })
+          resolve({ audioCodec: null, videoCodec: null, duration: null, subtitleStreams: [] })
         }
       }
     )
+  })
+}
+
+/**
+ * 使用 ffmpeg 提取指定字幕轨道为 SRT 格式文本。
+ *
+ * @param filePath  源文件路径
+ * @param streamIndex  ffprobe 流索引（绝对索引）
+ * @returns SRT 格式字幕文本
+ */
+export function extractSubtitleTrack(
+  filePath: string,
+  streamIndex: number,
+): Promise<string> {
+  const ffmpegPath = resolveFfmpegPath()
+  if (!ffmpegPath) return Promise.reject(new Error('FFmpeg 不可用'))
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(
+      ffmpegPath,
+      [
+        '-i', filePath,
+        '-map', `0:${streamIndex}`,
+        '-f', 'srt',
+        'pipe:1',
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    )
+
+    let stdout = ''
+    let stderr = ''
+
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString()
+    })
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
+
+    proc.on('error', (err) => {
+      reject(new Error(`FFmpeg 启动失败：${err.message}`))
+    })
+
+    proc.on('exit', (code) => {
+      if (code === 0) {
+        resolve(stdout)
+      } else {
+        reject(new Error(`字幕提取失败，退出码 ${code}。${stderr.slice(-300)}`))
+      }
+    })
   })
 }
 

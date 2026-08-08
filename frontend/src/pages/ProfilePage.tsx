@@ -14,6 +14,7 @@ import {
   Camera,
   Trash2,
   Download,
+  Cookie,
 } from 'lucide-react'
 import { PageBackButton } from '@/components/PageBackButton'
 import { Button } from '@/components/ui/Button'
@@ -32,6 +33,7 @@ import {
   pollBilibiliQrCode,
   getBilibiliUserInfo,
   logoutBilibili,
+  loginBilibiliWithCookie,
   buildBilibiliImageProxyUrl,
   type BilibiliUserInfo,
 } from '@/modules/room/watch-together/resolveSource'
@@ -81,6 +83,11 @@ export default function ProfilePage() {
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isPollingRef = useRef(false)
   const qrRetryCountRef = useRef(0)
+
+  // Cookie 登录
+  const [cookieModalOpen, setCookieModalOpen] = useState(false)
+  const [cookieInput, setCookieInput] = useState('')
+  const [cookieLoading, setCookieLoading] = useState(false)
 
   // B站视频下载 Popup（root 限定，位于「刷新绑定状态」旁）
   const [biliDownloadOpen, setBiliDownloadOpen] = useState(false)
@@ -202,6 +209,31 @@ export default function ProfilePage() {
     } catch {
       message.error('退出 B站 登录失败')
     }
+  }, [])
+
+  const handleCookieLogin = useCallback(async () => {
+    const trimmed = cookieInput.trim()
+    if (!trimmed) {
+      message.warning('请输入 Cookie')
+      return
+    }
+    setCookieLoading(true)
+    try {
+      await loginBilibiliWithCookie(trimmed)
+      message.success('B站 Cookie 登录成功')
+      setCookieModalOpen(false)
+      setCookieInput('')
+      await loadBilibiliUser()
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Cookie 登录失败')
+    } finally {
+      setCookieLoading(false)
+    }
+  }, [cookieInput, loadBilibiliUser])
+
+  const handleCloseCookieModal = useCallback(() => {
+    setCookieModalOpen(false)
+    setCookieInput('')
   }, [])
 
   const handleChangePassword = useCallback(async () => {
@@ -538,14 +570,24 @@ export default function ProfilePage() {
                 <Paragraph type="secondary" className="m-0 text-sm">
                   未绑定 B站 账号
                 </Paragraph>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  icon={<QrCode className="h-4 w-4" />}
-                  onClick={handleOpenQrModal}
-                >
-                  扫码登录 B站
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={<QrCode className="h-4 w-4" />}
+                    onClick={handleOpenQrModal}
+                  >
+                    扫码登录 B站
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Cookie className="h-4 w-4" />}
+                    onClick={() => setCookieModalOpen(true)}
+                  >
+                    Cookie 登录
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -642,6 +684,54 @@ export default function ProfilePage() {
               重新获取二维码
             </Button>
           )}
+        </div>
+      </Modal>
+
+      {/* Cookie 登录 Modal */}
+      <Modal
+        open={cookieModalOpen}
+        onClose={handleCloseCookieModal}
+        title="Cookie 登录哔哩哔哩"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleCloseCookieModal}
+              disabled={cookieLoading}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleCookieLogin}
+              disabled={cookieLoading || !cookieInput.trim()}
+            >
+              {cookieLoading ? '验证中...' : '登录'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <Paragraph type="secondary" className="m-0 text-xs leading-relaxed">
+            1. 在浏览器中登录 bilibili.com
+            <br />
+            2. 按 F12 打开开发者工具 → Application → Cookies
+            <br />
+            3. 复制全部 Cookie（至少需包含 SESSDATA）
+          </Paragraph>
+          <textarea
+            value={cookieInput}
+            onChange={(e) => setCookieInput(e.target.value)}
+            placeholder="粘贴 B站 Cookie，如：SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx"
+            rows={5}
+            className="w-full resize-none rounded-[var(--md-sys-shape-corner)] border bg-[var(--md-sys-color-surface-container)] px-3 py-2 text-sm text-[var(--md-sys-color-on-surface)] placeholder:text-[var(--md-sys-color-on-surface-variant)] focus:outline-none focus:ring-1 focus:ring-[var(--md-sys-color-primary)]"
+            style={{
+              borderColor: 'var(--md-sys-color-outline-variant)',
+            }}
+            disabled={cookieLoading}
+          />
         </div>
       </Modal>
 
