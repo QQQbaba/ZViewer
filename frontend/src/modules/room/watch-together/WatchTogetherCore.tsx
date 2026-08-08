@@ -456,6 +456,10 @@ export function WatchTogetherCore({
       danmakuLayerRef.current?.clear()
       return
     }
+    // 切换B站视频时立即清空旧弹幕，避免异步加载新弹幕期间
+    // 旧弹幕仍保留在 danmaku.js comments 数组中被重新发射
+    danmakuLayerRef.current?.loadDanmakuTrack('default', [])
+    danmakuLayerRef.current?.clear()
     fetchBilibiliDanmakuByCid(cid)
       .then((items) => {
         danmakuItemsRef.current = items
