@@ -84,13 +84,13 @@ async function main() {
     assert(info.sans.includes('127.0.0.1'), 'SAN 含 127.0.0.1');
     console.log('  输出片段:', r.stdout.split('\n').slice(0, 2).join(' | '));
 
-    // ---- 2. 公网 IP 自签 ----
-    console.log('\n===== CLI: 公网 IP 自签 =====');
-    r = runCli(['8.8.8.8', '--force']);
+    // ---- 2. 内网 IP 自签 ----（公网 IP 现走 Let's Encrypt，用内网 IP 测试自签）
+    console.log('\n===== CLI: 内网 IP 自签 =====');
+    r = runCli(['192.168.1.1', '--force']);
     assert(r.code === 0, `退出码 0 (实际 ${r.code})`);
     info = readLeafInfo();
-    assert(info.cn === '8.8.8.8', `CN=8.8.8.8`);
-    assert(info.sans.includes('8.8.8.8'), 'SAN 含 8.8.8.8');
+    assert(info.cn === '192.168.1.1', `CN=192.168.1.1`);
+    assert(info.sans.includes('192.168.1.1'), 'SAN 含 192.168.1.1');
 
     // ---- 3. 域名 --selfsigned 强制自签 ----
     console.log('\n===== CLI: 域名 --selfsigned 自签 =====');

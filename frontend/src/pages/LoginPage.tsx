@@ -9,7 +9,7 @@ import { Space } from '@/components/ui/Space'
 import { Title, Paragraph } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, resetSessionExpired } from '@/lib/api'
 import { reconnectSocket } from '@/hooks/useSocket'
 import { cn } from '@/lib/utils'
 
@@ -108,6 +108,8 @@ export default function LoginPage() {
           setMode('login')
           return
         }
+        // 登录成功 → 重置 session 过期标志，允许后续 401 时再次尝试 refresh
+        resetSessionExpired()
         login({
           id: data.user.id,
           username: data.user.username,

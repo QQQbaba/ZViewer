@@ -101,9 +101,9 @@ select_cert_host() {
   echo "  请选择证书签发类型："
   echo "    [1] localhost（本机访问，默认，自签证书）"
   echo "    [2] 域名或公网 IP（如 example.com 或 1.2.3.4）"
-  echo "        - 域名将自动申请 Let's Encrypt 可信 CA 证书"
-  echo "          （需域名已解析到本机且 80 端口可访问）"
-  echo "        - 公网 IP 或内网地址使用自签证书"
+  echo "        - 域名和公网 IP 将自动申请 Let's Encrypt 可信 CA 证书"
+  echo "          （需已指向本机且 80 端口可访问）"
+  echo "        - 内网 IP 使用自签证书"
   printf "  请输入 1 或 2（直接回车默认 1）: "
   read CERT_CHOICE
   if [ "$CERT_CHOICE" = "2" ]; then
@@ -114,8 +114,8 @@ select_cert_host() {
       CERT_HOST="localhost"
     else
       echo ""
-      echo "  [提示] 若输入的是域名，将自动申请 Let's Encrypt 可信 CA 证书；"
-      echo "         若无法申请（域名未解析 / 80 端口不可达），可改输入 IP 或 localhost 使用自签证书。"
+      echo "  [提示] 域名和公网 IP 将自动申请 Let's Encrypt 可信 CA 证书；"
+      echo "         若无法申请（未解析 / 80 端口不可达），可改输入内网 IP 或 localhost 使用自签证书。"
     fi
   else
     CERT_HOST="localhost"
@@ -156,7 +156,8 @@ do_start() {
   echo "  ZViewer 启动"
   echo "  后端端口: $BACKEND_PORT"
   if [ "$HTTPS_MODE" -eq 1 ]; then
-    echo "  模式: HTTPS（可信/自签证书，前端由后端统一提供）"
+    echo "  模式: HTTPS（可信/自签证书）"
+    echo "  前端端口: $FRONTEND_PORT"
   elif [ "$BACKEND_ONLY" -eq 1 ]; then
     echo "  模式: 仅后端（HTTP）"
   else
@@ -165,13 +166,13 @@ do_start() {
   echo "========================================"
 
   if ! has_exe "$BACKEND_BIN" "后端程序 zviewer-backend"; then return 1; fi
-  if [ "$HTTPS_MODE" -ne 1 ] && [ "$BACKEND_ONLY" -ne 1 ] && ! has_exe "$FRONTEND_BIN" "前端程序 zviewer-frontend"; then return 1; fi
+  if [ "$BACKEND_ONLY" -ne 1 ] && ! has_exe "$FRONTEND_BIN" "前端程序 zviewer-frontend"; then return 1; fi
 
   if port_in_use "$BACKEND_PORT"; then
     echo "  [错误] 后端端口 $BACKEND_PORT 已被占用"
     return 1
   fi
-  if [ "$HTTPS_MODE" -ne 1 ] && [ "$BACKEND_ONLY" -ne 1 ] && port_in_use "$FRONTEND_PORT"; then
+  if [ "$BACKEND_ONLY" -ne 1 ] && port_in_use "$FRONTEND_PORT"; then
     echo "  [错误] 前端端口 $FRONTEND_PORT 已被占用"
     return 1
   fi
@@ -192,7 +193,7 @@ do_start() {
   mkdir -p "$LOG_DIR"
   : > "$LOG_DIR/backend.log"
   : > "$LOG_DIR/backend.err.log"
-  if [ "$HTTPS_MODE" -ne 1 ] && [ "$BACKEND_ONLY" -ne 1 ]; then
+  if [ "$BACKEND_ONLY" -ne 1 ]; then
     : > "$LOG_DIR/frontend.log"
     : > "$LOG_DIR/frontend.err.log"
   fi
@@ -217,10 +218,17 @@ do_start() {
   fi
 
   if [ "$HTTPS_MODE" -eq 1 ]; then
-    write_pids "$local_backend_pid" ""
+    # HTTPS 模式：后端使用 HTTPS，前端单独启动在 4173 端口
+    echo "  启动前端..."
+    PORT="$FRONTEND_PORT" BACKEND_URL="https://localhost:$BACKEND_PORT" HOST='0.0.0.0' \
+      nohup "$FRONTEND_BIN" >> "$LOG_DIR/frontend.log" 2>> "$LOG_DIR/frontend.err.log" &
+    local_frontend_pid=$!
+    write_pids "$local_backend_pid" "$local_frontend_pid"
     echo "  后端 PID: $local_backend_pid"
-    echo "  HTTPS 访问: https://localhost:$BACKEND_PORT   （后端统一提供前端页面）"
-    echo "  日志: $LOG_DIR/"
+    echo "  前端 PID: $local_frontend_pid"
+    echo "  HTTPS 后端: https://localhost:$BACKEND_PORT"
+    echo "  访问  : http://localhost:$FRONTEND_PORT"
+    echo "  日志  : $LOG_DIR/"
   elif [ "$BACKEND_ONLY" -eq 1 ]; then
     # 仅后端模式：不启动前端
     write_pids "$local_backend_pid" ""
@@ -252,9 +260,7 @@ do_stop() {
   rm -f "$PIDS_FILE"
   resolve_ports
   kill_port "$BACKEND_PORT"
-  if [ "$HTTPS_MODE" -ne 1 ]; then
-    kill_port "$FRONTEND_PORT"
-  fi
+  kill_port "$FRONTEND_PORT"
   echo "  已停止"
 }
 
@@ -289,7 +295,7 @@ do_status() {
     echo "    端口监听: $(if port_in_use "$FRONTEND_PORT"; then echo 是; else echo 否; fi)"
     echo "    记录 PID: $fp ($(if [ "$frontend_running" = "是" ]; then echo 运行中; else echo 未运行; fi))"
   elif [ -f "$PIDS_FILE" ] && grep -q '"frontend":null' "$PIDS_FILE"; then
-    echo "    模式: 仅后端 / HTTPS（未启动前端）"
+    echo "    模式: 仅后端（未启动前端）"
   else
     echo "    端口监听: $(if port_in_use "$FRONTEND_PORT"; then echo 是; else echo 否; fi)"
   fi
@@ -329,12 +335,12 @@ usage() {
   status             查看运行状态
   logs [backend|frontend]  查看日志（默认 backend）
   cert [host]        一键签发 SSL 证书（localhost / 域名(Let's Encrypt) / 公网 IP）
-  https [host]       签发证书后以 HTTPS 启动（仅后端，统一提供前端页面）
+  https [host]       签发证书后以 HTTPS 启动（后端 HTTPS，前端 4173）
   help               显示此帮助
   menu               交互菜单（无参数时自动进入）
 
 start/restart/cert/https 选项:
-      --https              start 时使用 HTTPS
+      --https              start 时使用 HTTPS（后端 HTTPS，前端仍为 4173）
       --force              证书强制重新签发
 
 端口: 后端 3333，前端 4173
@@ -344,7 +350,7 @@ start/restart/cert/https 选项:
   ./start.sh start              # HTTP 启动（前后端）
   ./start.sh backend            # 仅启动后端
   ./start.sh https example.com  # 申请 Let's Encrypt 证书后 HTTPS 启动
-  ./start.sh cert 1.2.3.4 --force  # 为公网 IP 强制重新签发自签证书
+  ./start.sh cert 1.2.3.4 --force  # 为公网 IP 强制重新签发 Let's Encrypt 证书
 EOF
 }
 

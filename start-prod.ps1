@@ -147,7 +147,7 @@ function Invoke-Start {
     Write-Host "  后端端口: $Port"
     if ($Https) {
       Write-Host "  模式: HTTPS（自签/可信证书）"
-      Write-Host "  前端: 由后端统一提供"
+      Write-Host "  前端端口: $FrontendPort"
     } elseif ($BackendOnly) {
       Write-Host "  模式: 仅后端（HTTP）"
     } else {
@@ -159,7 +159,7 @@ function Invoke-Start {
         Write-Host "  错误：后端端口 $Port 已被占用" -ForegroundColor Red
         exit 1
     }
-    if (-not $Https -and -not $BackendOnly -and (Test-PortInUse $FrontendPort)) {
+    if (-not $BackendOnly -and (Test-PortInUse $FrontendPort)) {
         Write-Host "  错误：前端端口 $FrontendPort 已被占用" -ForegroundColor Red
         exit 1
     }
@@ -177,12 +177,7 @@ function Invoke-Start {
     if (-not (Test-Path $backendArtifact)) {
         throw "后端构建产物缺失: $backendArtifact，请先执行 build 或加 -Build 启动"
     }
-    if ($Https) {
-      # HTTPS 模式：后端需要前端构建产物来提供静态文件服务
-      if (-not (Test-Path $frontendArtifact)) {
-        throw "前端构建产物缺失: $frontendArtifact，HTTPS 模式需要前端构建产物"
-      }
-    } elseif (-not $BackendOnly) {
+    if (-not $BackendOnly) {
       if (-not (Test-Path $frontendArtifact)) {
         throw "前端构建产物缺失: $frontendArtifact，请先执行 build 或加 -Build 启动"
       }
@@ -204,7 +199,7 @@ function Invoke-Start {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     "" | Set-Content "$logDir/backend.log" -Encoding UTF8
     "" | Set-Content "$logDir/backend.err.log" -Encoding UTF8
-    if (-not $Https -and -not $BackendOnly) {
+    if (-not $BackendOnly) {
       "" | Set-Content "$logDir/frontend.log" -Encoding UTF8
       "" | Set-Content "$logDir/frontend.err.log" -Encoding UTF8
     }
@@ -237,11 +232,24 @@ function Invoke-Start {
     }
 
     if ($Https) {
-      # HTTPS 模式：后端已提供前端静态文件服务，无需单独启动前端
-      Write-PidsFile -backendPid $backend.Id -frontendPid $null
+      # HTTPS 模式：后端使用 HTTPS，前端单独启动在 4173 端口
+      # Vite preview 代理通过 VITE_API_TARGET 指向 HTTPS 后端
+      Write-Host "  启动前端..."
+      $viteJs = Resolve-ViteJs
+      if (-not $viteJs) { throw "未找到 vite.js" }
+      $env:VITE_API_TARGET = "https://localhost:$Port"
+      $frontend = Start-Process -FilePath "node" -ArgumentList "`"$viteJs`" preview --port $FrontendPort --host" `
+          -WorkingDirectory $frontendDir -WindowStyle Hidden `
+          -RedirectStandardOutput "$logDir/frontend.log" `
+          -RedirectStandardError "$logDir/frontend.err.log" -PassThru
+      Remove-Item Env:VITE_API_TARGET -ErrorAction SilentlyContinue
+
+      Write-PidsFile -backendPid $backend.Id -frontendPid $frontend.Id
       Write-Host "  后端 PID: $($backend.Id)"
-      Write-Host "  HTTPS 访问: https://localhost:$Port"
-      Write-Host "  日志: $logDir/"
+      Write-Host "  前端 PID: $($frontend.Id)"
+      Write-Host "  HTTPS 后端: https://localhost:$Port"
+      Write-Host "  访问  : http://localhost:$FrontendPort"
+      Write-Host "  日志  : $logDir/"
     } elseif ($BackendOnly) {
       # 仅后端模式：不启动前端
       Write-PidsFile -backendPid $backend.Id -frontendPid $null
@@ -284,9 +292,7 @@ function Invoke-Stop {
     # 兜底：按端口清理
     Set-Ports
     Stop-ProcessByPort $Port
-    if (-not $Https) {
-        Stop-ProcessByPort $FrontendPort
-    }
+    Stop-ProcessByPort $FrontendPort
     Write-Host "  已停止"
 }
 
@@ -366,9 +372,9 @@ function Select-CertHost {
     Write-Host "  请选择证书签发类型："
     Write-Host "    [1] localhost（本机访问，默认，自签证书）"
     Write-Host "    [2] 域名或公网 IP（如 example.com 或 1.2.3.4）"
-    Write-Host "        - 域名将自动申请 Let's Encrypt 可信 CA 证书"
-    Write-Host "          （需域名已解析到本机且 80 端口可访问）"
-    Write-Host "        - 公网 IP 或内网地址使用自签证书"
+    Write-Host "        - 域名和公网 IP 将自动申请 Let's Encrypt 可信 CA 证书"
+    Write-Host "          （需已指向本机且 80 端口可访问）"
+    Write-Host "        - 内网 IP 使用自签证书"
     $choice = Read-Host "  请输入 1 或 2（直接回车默认 1）"
     if ($choice -eq '2') {
         $hostValue = Read-Host "  请输入域名或公网 IP 地址"
@@ -377,8 +383,8 @@ function Select-CertHost {
             return 'localhost'
         }
         Write-Host ""
-        Write-Host "  [提示] 若输入的是域名，将自动申请 Let's Encrypt 可信 CA 证书；"
-        Write-Host "         若无法申请（域名未解析 / 80 端口不可达），可改输入 IP 或 localhost 使用自签证书。"
+        Write-Host "  [提示] 域名和公网 IP 将自动申请 Let's Encrypt 可信 CA 证书；"
+        Write-Host "         若无法申请（未解析 / 80 端口不可达），可改输入内网 IP 或 localhost 使用自签证书。"
         return $hostValue.Trim()
     }
     return 'localhost'
@@ -430,7 +436,7 @@ function Show-Help {
     Write-Host "  start              安装依赖后直接启动（默认不构建）"
     Write-Host "  backend            仅启动后端（加 -Https 使用 HTTPS）"
     Write-Host "  cert               一键签发 SSL 证书（localhost / 域名(Let's Encrypt) / 公网 IP）"
-    Write-Host "  https              签发证书后以 HTTPS 启动（仅后端，统一提供前端页面）"
+    Write-Host "  https              签发证书后以 HTTPS 启动（后端 HTTPS，前端 4173）"
     Write-Host "  build              单独构建前后端"
     Write-Host "  stop               停止服务"
     Write-Host "  restart            重启服务"
@@ -440,7 +446,7 @@ function Show-Help {
     Write-Host ""
     Write-Host "start/restart/backend 选项:"
     Write-Host "  -Build                    启动前执行构建"
-    Write-Host "  -Https                    使用 HTTPS（后端统一提供前端页面）"
+    Write-Host "  -Https                    使用 HTTPS（后端 HTTPS，前端仍为 4173）"
     Write-Host ""
     Write-Host "端口: 后端默认取 .env 的 PORT（否则 3333），前端固定 4173"
 }

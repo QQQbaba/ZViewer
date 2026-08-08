@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, safeJson } from '@/lib/api'
 import type { DanmakuItem, DanmakuSource } from '@/modules/danmaku/types'
 
 export interface DanmakuTrack {
@@ -179,11 +179,11 @@ export const useDanmakuStore = create<DanmakuState>()(
           const res = await apiFetch(
             `/api/rooms/${encodeURIComponent(roomId)}/danmaku-tracks`
           )
-          const data = (await res.json()) as {
+          const data = await safeJson<{
             success: boolean
             tracks?: DanmakuTrack[]
             message?: string
-          }
+          }>(res, { success: false })
           if (data.success && Array.isArray(data.tracks)) {
             // 按 trackId 去重：后端历史可能因重复 setDefaultTrack 调用
             // 累积多条相同 trackId 的记录，保留最后一条（最新的）
@@ -222,11 +222,11 @@ export const useDanmakuStore = create<DanmakuState>()(
           const res = await apiFetch(
             `/api/rooms/${encodeURIComponent(roomId)}/danmaku-meta`
           )
-          const data = (await res.json()) as {
+          const data = await safeJson<{
             success: boolean
             meta?: DanmakuMeta
             message?: string
-          }
+          }>(res, { success: false })
           if (data.success && data.meta) {
             // 保留本地 self 标记：用本地 realtimeLog 中的 self 标记覆盖后端推送的
             const localSelfIds = new Set(
@@ -279,10 +279,10 @@ export const useDanmakuStore = create<DanmakuState>()(
               body: JSON.stringify(updates),
             }
           )
-          const data = (await res.json()) as {
+          const data = await safeJson<{
             success: boolean
             message?: string
-          }
+          }>(res, { success: false })
           if (!data.success) {
             console.error('[danmakuStore] persist meta failed:', data.message)
           }
@@ -329,10 +329,10 @@ export const useDanmakuStore = create<DanmakuState>()(
               }),
             }
           )
-          const data = (await res.json()) as {
+          const data = await safeJson<{
             success: boolean
             message?: string
-          }
+          }>(res, { success: false })
           if (!data.success) {
             console.error('[danmakuStore] add track failed:', data.message)
           }
@@ -355,10 +355,10 @@ export const useDanmakuStore = create<DanmakuState>()(
             `/api/rooms/${encodeURIComponent(roomId)}/danmaku-tracks/${encodeURIComponent(trackId)}`,
             { method: 'DELETE' }
           )
-          const data = (await res.json()) as {
+          const data = await safeJson<{
             success: boolean
             message?: string
-          }
+          }>(res, { success: false })
           if (!data.success) {
             console.error('[danmakuStore] remove track failed:', data.message)
           }
@@ -384,10 +384,10 @@ export const useDanmakuStore = create<DanmakuState>()(
               body: JSON.stringify({ offset }),
             }
           )
-          const data = (await res.json()) as {
+          const data = await safeJson<{
             success: boolean
             message?: string
-          }
+          }>(res, { success: false })
           if (!data.success) {
             console.error('[danmakuStore] update offset failed:', data.message)
           }
@@ -416,10 +416,10 @@ export const useDanmakuStore = create<DanmakuState>()(
               body: JSON.stringify({ hidden }),
             }
           )
-          const data = (await res.json()) as {
+          const data = await safeJson<{
             success: boolean
             message?: string
-          }
+          }>(res, { success: false })
           if (!data.success) {
             console.error('[danmakuStore] toggle hidden failed:', data.message)
           }

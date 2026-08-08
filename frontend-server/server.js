@@ -14,6 +14,7 @@
  */
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
@@ -123,10 +124,11 @@ function filterHopByHopHeaders(headers) {
   return filtered;
 }
 
-/** 创建 HTTP 代理请求 */
+/** 创建 HTTP/HTTPS 代理请求（根据目标 URL 协议自动选择） */
 function proxyRequest(req, res, targetUrl, pathPrefix) {
   const target = parseTargetUrl(targetUrl);
   const targetPath = req.url;
+  const isHttps = target.protocol === 'https:';
   const options = {
     hostname: target.hostname,
     port: target.port,
@@ -139,7 +141,13 @@ function proxyRequest(req, res, targetUrl, pathPrefix) {
     timeout: 120_000,
   };
 
-  const proxyReq = http.request(options, (proxyRes) => {
+  // HTTPS 后端使用自签证书时，需要跳过证书验证
+  if (isHttps) {
+    options.rejectUnauthorized = false;
+  }
+
+  const requestModule = isHttps ? https.request : http.request;
+  const proxyReq = requestModule(options, (proxyRes) => {
     // 过滤响应中的 hop-by-hop 头部，防止 Transfer-Encoding 等头部冲突
     // 导致 NDJSON 流式响应被浏览器解析失败
     res.writeHead(proxyRes.statusCode, filterHopByHopHeaders(proxyRes.headers));
@@ -264,6 +272,7 @@ server.on('upgrade', (req, socket, head) => {
   }
 
   const target = parseTargetUrl(BACKEND_URL);
+  const isHttps = target.protocol === 'https:';
   const options = {
     hostname: target.hostname,
     port: parseInt(target.port, 10),
@@ -275,7 +284,13 @@ server.on('upgrade', (req, socket, head) => {
     },
   };
 
-  const proxyReq = http.request(options);
+  // HTTPS 后端使用自签证书时，需要跳过证书验证
+  if (isHttps) {
+    options.rejectUnauthorized = false;
+  }
+
+  const requestModule = isHttps ? https.request : http.request;
+  const proxyReq = requestModule(options);
 
   // 后端返回普通 HTTP 响应（非 101 升级）— 说明后端拒绝了 WebSocket 升级
   // 需要将拒绝响应转发给客户端，否则客户端会收到 ECONNRESET 而非后端的错误信息
