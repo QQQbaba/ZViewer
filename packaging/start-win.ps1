@@ -86,28 +86,59 @@ function Test-Exe([string]$Exe, [string]$Name) {
 # 解析端口：显式参数 > 持久化 > .env / 默认
 # ==================== 证书 ====================
 
-# 交互选择证书签发类型（localhost / 域名或公网 IP）
+# 交互选择证书签发类型（localhost / 公网域名）
 function Select-CertHost {
     Write-Host ""
     Write-Host "  请选择证书签发类型："
     Write-Host "    [1] localhost（本机访问，默认，自签证书）"
-    Write-Host "    [2] 域名或公网 IP（如 example.com 或 1.2.3.4）"
-    Write-Host "        - 域名和公网 IP 将自动申请 Let's Encrypt 可信 CA 证书"
-    Write-Host "          （需已指向本机且 80 端口可访问）"
-    Write-Host "        - 内网 IP 使用自签证书"
+    Write-Host "    [2] 公网域名或公网 IP（自动申请 Let's Encrypt 可信证书）"
+    Write-Host "        - 域名：需已解析到本机，且 80 端口可访问（ACME HTTP-01 验证）"
+    Write-Host "        - 公网 IP：Let's Encrypt 已支持（2026-01 GA），证书约 6 天有效，到期需重新签发"
+    Write-Host "        - 内网 IP 无法通过 ACME 验证，请选 1 使用自签证书"
     $choice = Read-Host "  请输入 1 或 2（直接回车默认 1）"
     if ($choice -eq '2') {
-        $hostValue = Read-Host "  请输入域名或公网 IP 地址"
+        $hostValue = (Read-Host "  请输入公网域名或公网 IP 地址").Trim()
         if ([string]::IsNullOrWhiteSpace($hostValue)) {
-            Write-Host "  [提示] 未输入地址，将使用 localhost"
+            Write-Host "  [提示] 未输入地址，将使用 localhost（自签）"
+            return 'localhost'
+        }
+        if ($hostValue -ieq 'localhost') {
+            Write-Host "  [提示] localhost 请选 1 使用自签证书"
+            return 'localhost'
+        }
+        # 内网 IP 无法通过 ACME 验证，回退自签
+        $ip = $null
+        if ([System.Net.IPAddress]::TryParse($hostValue, [ref]$ip) -and (Test-PrivateIpAddress $hostValue)) {
+            Write-Host "  [提示] '$hostValue' 是内网地址，Let's Encrypt 无法验证，将使用自签证书。"
+            Write-Host "         公网域名或公网 IP 才能申请可信证书。"
             return 'localhost'
         }
         Write-Host ""
-        Write-Host "  [提示] 域名和公网 IP 将自动申请 Let's Encrypt 可信 CA 证书；"
-        Write-Host "         若无法申请（未解析 / 80 端口不可达），可改输入内网 IP 或 localhost 使用自签证书。"
-        return $hostValue.Trim()
+        Write-Host "  [提示] 正在为 $hostValue 自动申请 Let's Encrypt 可信证书..."
+        Write-Host "         公网 IP 证书有效期约 6 天，到期后请重新签发。"
+        return $hostValue
     }
     return 'localhost'
+}
+
+# 判断是否为内网/保留 IP 地址
+function Test-PrivateIpAddress([string]$HostValue) {
+    $ip = $null
+    if (-not [System.Net.IPAddress]::TryParse($HostValue, [ref]$ip)) { return $false }
+    if ($ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        $b = $ip.GetAddressBytes()
+        if ($b[0] -eq 10) { return $true }
+        if ($b[0] -eq 127) { return $true }
+        if ($b[0] -eq 192 -and $b[1] -eq 168) { return $true }
+        if ($b[0] -eq 172 -and $b[1] -ge 16 -and $b[1] -le 31) { return $true }
+        if ($b[0] -eq 169 -and $b[1] -eq 254) { return $true }
+        if ($b[0] -eq 100 -and $b[1] -ge 64 -and $b[1] -le 127) { return $true }
+        return $false
+    }
+    if ($ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6) {
+        return [System.Net.IPAddress]::IsLoopback($ip) -or $ip.IsIPv6LinkLocal -or $ip.IsIPv6Multicast
+    }
+    return $false
 }
 
 # 执行签发：zviewer-cert.exe [host] [--force]
@@ -356,7 +387,7 @@ function Show-Help {
     Write-Host "  restart            重启服务"
     Write-Host "  status             查看运行状态"
     Write-Host "  logs [backend|frontend]  查看日志（默认 backend）"
-    Write-Host "  cert [host]        一键签发 SSL 证书（localhost / 域名(Let's Encrypt) / 公网 IP）"
+    Write-Host "  cert [host]        一键签发 SSL 证书（localhost / 公网域名或公网 IP(Let's Encrypt)）"
     Write-Host "  https [host]       签发证书后以 HTTPS 启动（后端 HTTPS，前端 4173）"
     Write-Host "  help               显示此帮助"
     Write-Host "  menu               交互菜单（无参数时自动进入）"
@@ -372,7 +403,7 @@ function Show-Help {
     Write-Host "  start.bat start            # HTTP 启动（前后端）"
     Write-Host "  start.bat backend          # 仅启动后端"
     Write-Host "  start.bat https example.com  # 申请 Let's Encrypt 证书后 HTTPS 启动"
-    Write-Host "  start.bat cert 1.2.3.4 -Force  # 为公网 IP 强制重新签发 Let's Encrypt 证书"
+    Write-Host "  start.bat cert example.com -Force  # 为公网域名强制重新签发 Let's Encrypt 证书"
 }
 
 function Show-Menu {
