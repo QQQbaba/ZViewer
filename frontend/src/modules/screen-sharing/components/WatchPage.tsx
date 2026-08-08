@@ -12,6 +12,7 @@ import { useSocket } from '@/hooks/useSocket'
 import { useRoomStore, type StreamStatus } from '@/store/roomStore'
 import { Spinner } from '@/components/ui/Spinner'
 import { Text } from '@/components/ui/Typography'
+import { cn } from '@/lib/utils'
 import {
   AnnotationLayer,
   AnnotationToolbar,
@@ -31,9 +32,9 @@ import { buildFlvUrl } from '../streamPushApi'
 import { JoinRoomForm } from './JoinRoomForm'
 import { RemoteVideoPlayer } from './RemoteVideoPlayer'
 import { WatchControlsBar } from './WatchControlsBar'
-import { FlvPlayer, type FlvStatistics } from './FlvPlayer'
+import { FlvPlayer } from './FlvPlayer'
 import { ConnectionStatsPanel } from './ConnectionStatsPanel'
-import { StreamStatusPanel } from './StreamStatusPanel'
+import { useControlBarAutoHide } from '@/hooks/useControlBarAutoHide'
 import type { JoinFormValues } from '../types'
 
 declare global {
@@ -66,8 +67,20 @@ function StreamPushViewer({
   chatPanel,
   roomInfoPanel,
 }: StreamPushViewerProps) {
-  const [flvStats, setFlvStats] = useState<FlvStatistics | null>(null)
+  const [isWebFullscreen, setIsWebFullscreen] = useState(false)
   const flvUrl = useMemo(() => buildFlvUrl(streamKey), [streamKey])
+
+  // 网页全屏模式下按 ESC 退出
+  useEffect(() => {
+    if (!isWebFullscreen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsWebFullscreen(false)
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isWebFullscreen])
 
   const playerContent = (
     <div className="relative h-full w-full">
@@ -90,7 +103,13 @@ function StreamPushViewer({
           </div>
         </div>
       ) : (
-        <FlvPlayer src={flvUrl} muted autoPlay onStatistics={setFlvStats} />
+        <FlvPlayer
+          src={flvUrl}
+          muted
+          autoPlay
+          isWebFullscreen={isWebFullscreen}
+          onToggleWebFullscreen={() => setIsWebFullscreen((prev) => !prev)}
+        />
       )}
     </div>
   )
@@ -98,11 +117,9 @@ function StreamPushViewer({
   return (
     <CinemaLayout
       children={playerContent}
-      statsPanel={
-        <StreamStatusPanel streamStatus={streamStatus} statistics={flvStats} />
-      }
       roomInfoPanel={roomInfoPanel}
       chatPanel={chatPanel}
+      webFullscreen={isWebFullscreen}
     />
   )
 }
@@ -142,6 +159,9 @@ function WatchPage() {
   const [showAnnotationToolbar, setShowAnnotationToolbar] = useState(false)
   const annotationRef = useRef<{ clear: () => void }>(null)
   const [isWebFullscreen, setIsWebFullscreen] = useState(false)
+
+  // WebRTC 播放器舞台 ref（用于控制栏自动隐藏）
+  const webrtcStageRef = useRef<HTMLDivElement | null>(null)
 
   // video ref（使用回调 ref 触发 videoVersion 变化，驱动 resolution 监听 effect 重新订阅）
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -220,6 +240,27 @@ function WatchPage() {
   const { shareMethod } = useShareMethod(socket, roomId ?? '', false)
   const streamKey = useRoomStore((state) => state.streamKey)
   const exitRoom = useRoomStore((state) => state.exitRoom)
+
+  // WebRTC 控制栏自动隐藏（逻辑仿照 WatchTogetherCore）
+  const webrtcActive =
+    joinStatus === 'approved' &&
+    roomMode === 'screen-share' &&
+    shareMethod !== 'stream-push'
+  const webrtcControlBarVisible = useControlBarAutoHide(webrtcStageRef, {
+    disabled: !webrtcActive,
+  })
+
+  // WebRTC 网页全屏模式下按 ESC 退出
+  useEffect(() => {
+    if (!isWebFullscreen || !webrtcActive) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsWebFullscreen(false)
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isWebFullscreen, webrtcActive])
 
   const streamPushChatPanel = useMemo(
     () => <CommentPanel socket={socket} roomId={roomId ?? ''} commentsOnly />,
@@ -426,7 +467,16 @@ function WatchPage() {
 
     // screen-share + webrtc 子模式：原有 WebRTC 接收逻辑
     const playerContent = (
-      <div className="relative h-full w-full">
+      <div
+        ref={webrtcStageRef}
+        className={cn(
+          'zart-stage relative h-full w-full',
+          isWebFullscreen && 'zart-web-fullscreen fixed inset-0 z-[100]'
+        )}
+        style={
+          isWebFullscreen ? { width: '100dvw', height: '100dvh' } : undefined
+        }
+      >
         <RemoteVideoPlayer
           videoRef={videoRef}
           setVideoRef={setVideoRef}
@@ -474,6 +524,9 @@ function WatchPage() {
           onTogglePiP={handleTogglePictureInPicture}
           onToggleAnnotation={() => setShowAnnotationToolbar((prev) => !prev)}
           onRefresh={handleRefresh}
+          controlBarVisible={webrtcControlBarVisible}
+          isWebFullscreen={isWebFullscreen}
+          onToggleWebFullscreen={() => setIsWebFullscreen((prev) => !prev)}
         />
       </div>
     )
@@ -486,6 +539,7 @@ function WatchPage() {
         chatPanel={
           <CommentPanel socket={socket} roomId={roomId ?? ''} commentsOnly />
         }
+        webFullscreen={isWebFullscreen}
       />
     )
   }

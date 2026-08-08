@@ -1,8 +1,10 @@
 import { Text, Paragraph } from '@/components/ui/Typography'
 import { Tag } from '@/components/ui/Tag'
 import { IconButton } from '@/components/VideoControls'
+import { cn } from '@/lib/utils'
 import {
   Maximize,
+  Minimize,
   Pause,
   Play,
   Pencil,
@@ -48,6 +50,12 @@ interface WatchControlsBarProps {
   onToggleAnnotation: () => void
   /** 刷新连接 */
   onRefresh: () => void
+  /** 控制栏是否可见（自动隐藏），默认 true */
+  controlBarVisible?: boolean
+  /** 是否处于网页全屏 */
+  isWebFullscreen?: boolean
+  /** 切换网页全屏 */
+  onToggleWebFullscreen?: () => void
 }
 
 function getConnectionStateText(
@@ -103,10 +111,23 @@ export function WatchControlsBar({
   onTogglePiP,
   onToggleAnnotation,
   onRefresh,
+  controlBarVisible = true,
+  isWebFullscreen = false,
+  onToggleWebFullscreen,
 }: WatchControlsBarProps): JSX.Element {
   return (
-    <div className="vc-container absolute bottom-0 left-0 right-0 z-20 p-2">
-      <div className="glass-strong rounded-xl px-2.5 py-2 shadow-lg">
+    <div
+      className={cn(
+        'vc-container absolute bottom-0 left-0 right-0 z-20 p-2',
+        !controlBarVisible && 'pointer-events-none'
+      )}
+    >
+      <div
+        className={cn(
+          'glass-strong rounded-xl px-2.5 py-2 shadow-lg',
+          controlBarVisible ? 'zart-controlbar-enter' : 'zart-controlbar-exit'
+        )}
+      >
         <div className="flex flex-wrap items-center vc-gap">
           {/* 播放 / 暂停 */}
           <IconButton
@@ -121,6 +142,11 @@ export function WatchControlsBar({
               onClick={onToggleMute}
             />
           )}
+          <IconButton
+            icon={isWebFullscreen ? <Minimize /> : <Maximize />}
+            label={isWebFullscreen ? '退出网页全屏' : '网页全屏'}
+            onClick={onToggleWebFullscreen}
+          />
           <IconButton icon={<Maximize />} label="全屏" onClick={onFullscreen} />
           {isPiPSupported && (
             <IconButton

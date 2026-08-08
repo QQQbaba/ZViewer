@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react'
 import { Download, Copy, Radio, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Text, Paragraph } from '@/components/ui/Typography'
-import { Tag } from '@/components/ui/Tag'
 import { Card } from '@/components/ui/Card'
 import { message } from '@/components/ui/message'
 import { useRoomStore } from '@/store/roomStore'
@@ -31,7 +30,6 @@ export function StreamPushPage({
   className,
   style,
 }: StreamPushPageProps) {
-  const streamStatus = useRoomStore((state) => state.streamStatus)
   const streamKey = useRoomStore((state) => state.streamKey)
   const [downloading, setDownloading] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
@@ -79,13 +77,6 @@ export function StreamPushPage({
             OBS 推流模式
           </Text>
         </div>
-        <Tag color={streamStatus === 'live' ? 'success' : 'default'}>
-          {streamStatus === 'live'
-            ? '推流中'
-            : streamStatus === 'offline'
-              ? '未推流'
-              : '等待状态'}
-        </Tag>
       </div>
 
       <Card className="flex flex-col gap-3 p-4">
@@ -171,7 +162,7 @@ export function StreamPushPage({
           <li>
             切换到导入的「ZViewer 推流」场景集合，确认推流服务地址与流密钥正确
           </li>
-          <li>点击 OBS 右下角「开始推流」，本页面状态将变为「推流中」</li>
+          <li>点击 OBS 右下角「开始推流」</li>
           <li>观众通过观看链接进入房间后会自动拉流播放</li>
         </ol>
         <Paragraph type="secondary" className="m-0 mt-2 text-xs">

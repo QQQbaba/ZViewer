@@ -97,6 +97,25 @@ export function LiveArtPlayer({
     }
   }, [video])
 
+  // ── 阻止点击视频画面暂停/播放：由控制栏按钮控制 ──────────
+  // ArtPlayer 的 click:false 可能不完全阻止点击暂停，
+  // 在 capture 阶段拦截 click/dblclick 确保 video 点击不触发任何操作
+  useEffect(() => {
+    if (!video) return
+    const blockVideoClick = (e: Event) => {
+      if (e.target === video) {
+        e.stopImmediatePropagation()
+        e.preventDefault()
+      }
+    }
+    video.addEventListener('click', blockVideoClick, true)
+    video.addEventListener('dblclick', blockVideoClick, true)
+    return () => {
+      video.removeEventListener('click', blockVideoClick, true)
+      video.removeEventListener('dblclick', blockVideoClick, true)
+    }
+  }, [video])
+
   // muted 变更同步
   useEffect(() => {
     if (video) {

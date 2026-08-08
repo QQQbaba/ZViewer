@@ -2,18 +2,40 @@
  * FlvPlayer —— HTTP-FLV 拉流播放器（ArtPlayer 版）。
  *
  * 基于 ArtPlayer（isLive 模式）+ flv.js：
- * - 控制栏（播放/音量/全屏）由 ArtPlayer 提供，附自定义「刷新」控件
+ * - 自定义玻璃拟态控制栏（播放/音量/全屏/刷新），与 WebRTC 控制栏风格一致
  * - 保留重构前全部行为：指数退避重连（最多 5 次）、卡顿自动追帧、
  *   统计信息每秒上报、自动播放静音重试
  * - props 契约与重构前完全一致（WatchPage / StreamPushPage 无需改动）
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import flvjs from 'flv.js'
 import Artplayer from 'artplayer'
 import type { Option } from 'artplayer'
+import {
+  Maximize,
+  Maximize2,
+  Minimize,
+  Minimize2,
+  Pause,
+  Play,
+  RefreshCw,
+  Volume2,
+  VolumeX,
+} from 'lucide-react'
 import { Spinner } from '@/components/ui/Spinner'
+import { Tag } from '@/components/ui/Tag'
+import { IconButton } from '@/components/VideoControls'
 import { configureArtStatics } from '@/modules/art-player'
 import { cn } from '@/lib/utils'
+import {
+  isIOSDevice,
+  supportsContainerFullscreen,
+  getFullscreenElement,
+  exitFullscreen,
+  requestFullscreen,
+  onFullscreenChange,
+} from '@/lib/fullscreen-utils'
+import { useControlBarAutoHide } from '@/hooks/useControlBarAutoHide'
 import '@/modules/art-player/art-overrides.css'
 
 /** flv.js 统计信息
@@ -53,13 +75,14 @@ interface FlvPlayerProps {
   ) => void
   /** 统计信息回调（每秒触发） */
   onStatistics?: (stats: FlvStatistics) => void
+  /** 网页全屏状态（受控） */
+  isWebFullscreen?: boolean
+  /** 切换网页全屏 */
+  onToggleWebFullscreen?: () => void
 }
 
 const MAX_RETRY = 5
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000]
-
-/** 刷新图标（ArtPlayer 控件用内联 SVG） */
-const REFRESH_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>`
 
 export function FlvPlayer({
   src,
@@ -69,11 +92,26 @@ export function FlvPlayer({
   onError,
   onStatusChange,
   onStatistics,
+  isWebFullscreen = false,
+  onToggleWebFullscreen,
 }: FlvPlayerProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [reloadVersion, setReloadVersion] = useState(0)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [isMuted, setIsMuted] = useState(muted)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [streamStatus, setStreamStatus] = useState<
+    'connecting' | 'playing' | 'error' | 'stopped'
+  >('connecting')
+
+  // 控制栏自动隐藏（逻辑仿照 WatchTogetherCore）
+  const controlBarVisible = useControlBarAutoHide(stageRef, {
+    disabled: loading || !!errorMsg,
+  })
 
   // 用 ref 存储回调，避免内联函数引用变化导致 useEffect 重新执行（播放器闪烁）
   const onErrorRef = useRef(onError)
@@ -111,6 +149,7 @@ export function FlvPlayer({
 
     setLoading(true)
     setErrorMsg(null)
+    setStreamStatus('connecting')
     onStatusChangeRef.current?.('connecting')
 
     // ── ArtPlayer 实例（isLive 隐藏进度条与时间显示）────────────
@@ -131,7 +170,8 @@ export function FlvPlayer({
       flip: false,
       playbackRate: false,
       aspectRatio: false,
-      fullscreen: true,
+      // 禁用 ArtPlayer 原生全屏和控制栏；由自定义控制栏接管
+      fullscreen: false,
       fullscreenWeb: false,
       subtitleOffset: false,
       miniProgressBar: false,
@@ -142,6 +182,8 @@ export function FlvPlayer({
       moreVideoAttr: {
         playsInline: true,
       },
+      // 禁用 ArtPlayer 原生控制栏
+      controls: [],
     } as Option)
     // 空 url 初始化会让 ArtPlayer 一直显示 loading，延迟隐藏
     const hideLoadingTimer = setTimeout(() => {
@@ -150,18 +192,27 @@ export function FlvPlayer({
 
     const video = art.video
     video.muted = mutedRef.current
+    videoRef.current = video
 
-    // 「刷新」控件：重建播放器
-    art.controls.add({
-      name: 'refresh',
-      position: 'right',
-      index: 60,
-      html: REFRESH_ICON,
-      tooltip: '刷新',
-      click() {
-        setReloadVersion((v) => v + 1)
-      },
-    })
+    // ── video 事件监听：同步播放/静音状态到自定义控制栏 ──────
+    const handlePlay = () => setIsPlaying(true)
+    const handlePause = () => setIsPlaying(false)
+    const handleVolumeChange = () => setIsMuted(video.muted)
+    video.addEventListener('play', handlePlay)
+    video.addEventListener('pause', handlePause)
+    video.addEventListener('volumechange', handleVolumeChange)
+
+    // ── 阻止点击视频画面暂停/播放：由控制栏按钮控制 ──────────
+    // ArtPlayer 的 click:false 可能不完全阻止点击暂停，
+    // 在 capture 阶段拦截 click/dblclick 确保 video 点击不触发任何操作
+    const blockVideoClick = (e: Event) => {
+      if (e.target === video) {
+        e.stopImmediatePropagation()
+        e.preventDefault()
+      }
+    }
+    video.addEventListener('click', blockVideoClick, true)
+    video.addEventListener('dblclick', blockVideoClick, true)
 
     // ── flv.js 实例 ──────────────────────────────────────
     const player = flvjs.createPlayer(
@@ -195,6 +246,7 @@ export function FlvPlayer({
           `[FlvPlayer] retry ${retryCount}/${MAX_RETRY} in ${delay}ms`
         )
         onStatusChangeRef.current?.('connecting')
+        setStreamStatus('connecting')
         if (retryTimer) clearTimeout(retryTimer)
         retryTimer = setTimeout(() => {
           player.unload()
@@ -213,6 +265,7 @@ export function FlvPlayer({
         setErrorMsg(err.message)
         onErrorRef.current?.(err)
         onStatusChangeRef.current?.('error')
+        setStreamStatus('error')
       }
     })
     player.on(flvjs.Events.MEDIA_INFO, () => {
@@ -295,6 +348,7 @@ export function FlvPlayer({
       // 直播流不应触发 LOADING_COMPLETE，触发说明流已结束
       console.warn('[FlvPlayer] loading complete (stream ended)')
       onStatusChangeRef.current?.('stopped')
+      setStreamStatus('stopped')
     })
     player.load()
     if (autoPlay) {
@@ -323,10 +377,17 @@ export function FlvPlayer({
     }
 
     onStatusChangeRef.current?.('playing')
+    setStreamStatus('playing')
 
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
       video.removeEventListener('waiting', handleWaiting)
+      video.removeEventListener('play', handlePlay)
+      video.removeEventListener('pause', handlePause)
+      video.removeEventListener('volumechange', handleVolumeChange)
+      video.removeEventListener('click', blockVideoClick, true)
+      video.removeEventListener('dblclick', blockVideoClick, true)
+      videoRef.current = null
       clearInterval(stallCheckTimer)
       clearTimeout(hideLoadingTimer)
       if (retryTimer) {
@@ -348,8 +409,76 @@ export function FlvPlayer({
     }
   }, [src, autoPlay, reloadVersion])
 
+  // ── 全屏状态跟踪 ──────────────────────────────────────
+  useEffect(() => {
+    const dispose = onFullscreenChange(() => {
+      setIsFullscreen(Boolean(getFullscreenElement()))
+    })
+    return dispose
+  }, [])
+
+  // ── 控制栏操作 ─────────────────────────────────────────
+  const handleTogglePlayPause = useCallback(() => {
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) {
+      void video.play().catch(() => {})
+    } else {
+      video.pause()
+    }
+  }, [])
+
+  const handleToggleMute = useCallback(() => {
+    const video = videoRef.current
+    if (!video) return
+    video.muted = !video.muted
+  }, [])
+
+  const handleFullscreen = useCallback(() => {
+    const stage = stageRef.current
+    const video = videoRef.current
+    if (!stage) return
+    // iOS 不支持容器全屏，使用 video 元素的 webkit 全屏
+    if (isIOSDevice() || !supportsContainerFullscreen()) {
+      if (!video) return
+      const webkitVideo = video as HTMLVideoElement & {
+        webkitEnterFullscreen?: () => void
+        webkitExitFullscreen?: () => void
+      }
+      if (webkitVideo.webkitEnterFullscreen && !getFullscreenElement()) {
+        webkitVideo.webkitEnterFullscreen()
+        return
+      }
+      if (getFullscreenElement()) {
+        void exitFullscreen()
+        return
+      }
+      video.requestFullscreen().catch(() => {})
+      return
+    }
+    if (getFullscreenElement()) {
+      void exitFullscreen()
+    } else {
+      void requestFullscreen(stage).catch(() => {})
+    }
+  }, [])
+
+  const handleRefresh = useCallback(() => {
+    setReloadVersion((v) => v + 1)
+  }, [])
+
   return (
-    <div className={cn('zart-stage group', className)}>
+    <div
+      ref={stageRef}
+      className={cn(
+        'zart-stage group',
+        isWebFullscreen && 'zart-web-fullscreen fixed inset-0 z-[100]',
+        className
+      )}
+      style={
+        isWebFullscreen ? { width: '100dvw', height: '100dvh' } : undefined
+      }
+    >
       <div ref={containerRef} className="h-full w-full" />
 
       {loading && !errorMsg && (
@@ -368,10 +497,82 @@ export function FlvPlayer({
           <button
             type="button"
             className="mt-1 rounded-lg border border-white/20 px-4 py-1.5 text-sm text-white transition-colors hover:bg-white/10"
-            onClick={() => setReloadVersion((v) => v + 1)}
+            onClick={handleRefresh}
           >
             重新连接
           </button>
+        </div>
+      )}
+
+      {/* 自定义玻璃拟态控制栏（与 WebRTC 控制栏风格一致） */}
+      {!loading && !errorMsg && (
+        <div
+          className={cn(
+            'vc-container absolute bottom-0 left-0 right-0 z-20 p-2',
+            !controlBarVisible && 'pointer-events-none'
+          )}
+        >
+          <div
+            className={cn(
+              'glass-strong rounded-xl px-2.5 py-2 shadow-lg',
+              controlBarVisible
+                ? 'zart-controlbar-enter'
+                : 'zart-controlbar-exit'
+            )}
+          >
+            <div className="flex flex-wrap items-center vc-gap">
+              <IconButton
+                icon={isPlaying ? <Pause /> : <Play />}
+                label={isPlaying ? '暂停' : '播放'}
+                onClick={handleTogglePlayPause}
+              />
+              <IconButton
+                icon={isMuted ? <VolumeX /> : <Volume2 />}
+                label={isMuted ? '取消静音' : '静音'}
+                onClick={handleToggleMute}
+              />
+              <IconButton
+                icon={isWebFullscreen ? <Minimize /> : <Maximize />}
+                label={isWebFullscreen ? '退出网页全屏' : '网页全屏'}
+                onClick={onToggleWebFullscreen}
+              />
+              <IconButton
+                icon={isFullscreen ? <Minimize2 /> : <Maximize2 />}
+                label={isFullscreen ? '退出全屏' : '全屏'}
+                onClick={handleFullscreen}
+              />
+              <IconButton
+                icon={<RefreshCw />}
+                label="刷新连接"
+                onClick={handleRefresh}
+              />
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Tag
+                color={
+                  streamStatus === 'playing'
+                    ? 'success'
+                    : streamStatus === 'error'
+                      ? 'danger'
+                      : 'primary'
+                }
+              >
+                {streamStatus === 'playing'
+                  ? '直播中'
+                  : streamStatus === 'error'
+                    ? '连接失败'
+                    : streamStatus === 'stopped'
+                      ? '已停止'
+                      : '连接中'}
+              </Tag>
+              <Tag color="primary">OBS 推流</Tag>
+              {isMuted ? (
+                <Tag color="default">静音中</Tag>
+              ) : (
+                <Tag color="cyan">音频开启</Tag>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
