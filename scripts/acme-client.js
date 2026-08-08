@@ -283,6 +283,10 @@ async function requestCertificate({
     nonce,
     payload: {
       identifiers: [{ type: acmeIdType, value: domain }],
+      // Let's Encrypt IP 证书（2026-01 GA）强制要求 shortlived profile
+      // （ACME Profiles 扩展 draft-aaron-acme-profiles），否则订单被拒。
+      // 有效期 160 小时（约 6.6 天），到期需重新签发。
+      ...(acmeIdType === 'ip' ? { profile: 'shortlived' } : {}),
     },
     kid,
   });

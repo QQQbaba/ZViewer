@@ -14,6 +14,10 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Text } from '@/components/ui/Typography'
 import { cn } from '@/lib/utils'
 import {
+  isIOSDevice,
+  supportsContainerFullscreen,
+} from '@/lib/fullscreen-utils'
+import {
   AnnotationLayer,
   AnnotationToolbar,
   type AnnotationTool,
@@ -362,29 +366,20 @@ function WatchPage() {
   }
 
   const handleFullscreen = () => {
+    // iOS 不支持容器全屏，降级为网页全屏（CSS 模拟全屏，保留控制栏等 UI）
+    if (isIOSDevice() || !supportsContainerFullscreen()) {
+      setIsWebFullscreen((prev) => !prev)
+      return
+    }
     const video = videoRef.current
     if (!video) return
-    // iOS Safari 不支持标准 Fullscreen API，使用 webkit 前缀的 video 全屏
-    const webkitVideo = video as HTMLVideoElement & {
-      webkitEnterFullscreen?: () => void
-      webkitExitFullscreen?: () => void
-    }
-    if (webkitVideo.webkitEnterFullscreen && !document.fullscreenElement) {
-      webkitVideo.webkitEnterFullscreen()
-      return
-    }
     if (document.fullscreenElement) {
-      if (document.exitFullscreen) {
-        void document.exitFullscreen().catch(() => {})
-      } else if (webkitVideo.webkitExitFullscreen) {
-        webkitVideo.webkitExitFullscreen()
-      }
-      return
+      void document.exitFullscreen().catch(() => {})
+    } else {
+      video.requestFullscreen().catch(() => {
+        setIsWebFullscreen((prev) => !prev)
+      })
     }
-    video.requestFullscreen().catch((err) => {
-      console.error('[WatchPage] fullscreen error:', err)
-      message.error('无法进入全屏模式')
-    })
   }
 
   const handleTogglePictureInPicture = async () => {

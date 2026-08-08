@@ -435,33 +435,21 @@ export function FlvPlayer({
   }, [])
 
   const handleFullscreen = useCallback(() => {
-    const stage = stageRef.current
-    const video = videoRef.current
-    if (!stage) return
-    // iOS 不支持容器全屏，使用 video 元素的 webkit 全屏
+    // iOS 不支持容器全屏，降级为网页全屏（CSS 模拟全屏，保留控制栏等 UI）
     if (isIOSDevice() || !supportsContainerFullscreen()) {
-      if (!video) return
-      const webkitVideo = video as HTMLVideoElement & {
-        webkitEnterFullscreen?: () => void
-        webkitExitFullscreen?: () => void
-      }
-      if (webkitVideo.webkitEnterFullscreen && !getFullscreenElement()) {
-        webkitVideo.webkitEnterFullscreen()
-        return
-      }
-      if (getFullscreenElement()) {
-        void exitFullscreen()
-        return
-      }
-      video.requestFullscreen().catch(() => {})
+      onToggleWebFullscreen?.()
       return
     }
+    const stage = stageRef.current
+    if (!stage) return
     if (getFullscreenElement()) {
       void exitFullscreen()
     } else {
-      void requestFullscreen(stage).catch(() => {})
+      void requestFullscreen(stage).catch(() => {
+        onToggleWebFullscreen?.()
+      })
     }
-  }, [])
+  }, [onToggleWebFullscreen])
 
   const handleRefresh = useCallback(() => {
     setReloadVersion((v) => v + 1)
