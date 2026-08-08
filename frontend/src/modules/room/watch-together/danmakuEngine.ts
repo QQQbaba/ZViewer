@@ -246,6 +246,11 @@ export class DanmakuEngineAdapter {
 
   removeDanmakuTrack(trackId: string): void {
     this.tracks.delete(trackId)
+    // 移除整条轨道后，已通过 emit 加入 danmaku.js comments 数组的弹幕仍会保留，
+    // seek/播放到对应时间点时会被重新发射。这里同步清空 emitted 集合并重置
+    // danmaku.js 内部状态，确保移除的轨道弹幕不再出现。
+    this.resetDanmakuComments()
+    this.emitted.clear()
   }
 
   updateTrackOffset(trackId: string, offset: number): void {
@@ -262,11 +267,17 @@ export class DanmakuEngineAdapter {
 
   clear(): void {
     this.danmaku?.clear()
+    this.resetDanmakuComments()
+    this.emitted.clear()
   }
 
   seek(time: number): void {
     this.emitted.clear()
     this.lastTime = time
+    this.clear()
+    // 立即按当前时间补发当前 tracks 中的弹幕，避免 seek 后画面空白
+    // 直到下一次 timeupdate 才有弹幕
+    this.setTime(time)
   }
 
   setTime(time: number): void {
@@ -413,6 +424,28 @@ export class DanmakuEngineAdapter {
   resize(): void {
     this.danmaku?.resize()
     this.containerWidth = this.container.offsetWidth
+  }
+
+  /**
+   * 重置 danmaku.js 内部的 comments 数组与 position 指针。
+   *
+   * danmaku.js 的 `clear()` 只清空 DOM 节点和 runningList，不清空 `comments`
+   * 数组。通过 `emit()` 发射过的弹幕会永久保留在 `comments` 中，当 video
+   * seeking 事件触发时，danmaku.js 会从 `comments` 重新发射弹幕，导致：
+   * - 用户删除弹幕后，已删除的弹幕仍在 comments 中，seek 时被重新发射
+   * - 用户移除弹幕轨道后，旧轨道的弹幕仍会重新出现
+   *
+   * 通过直接重置 comments 和 position，确保下次 setTime 只发射当前 tracks
+   * 中的弹幕，已删除/已移除的弹幕不会被重新发射。
+   */
+  private resetDanmakuComments(): void {
+    if (!this.danmaku) return
+    const internal = this.danmaku as unknown as {
+      comments: unknown[]
+      _: { position: number }
+    }
+    internal.comments = []
+    internal._.position = 0
   }
 
   destroy(): void {
