@@ -19,6 +19,7 @@ import { Router, type Response } from 'express';
 import type { Server as SocketIOServer } from 'socket.io';
 import { AppDataSource } from '../../data-source';
 import { Room } from '../../entities/Room';
+import { UserMount } from '../../entities/UserMount';
 import {
   authenticateToken,
   type AuthenticatedRequest,
@@ -89,6 +90,23 @@ export function createMovieRouter(io: SocketIOServer): Router {
         if (typeof data.url !== 'string' || !data.url.trim() || typeof data.title !== 'string' || !data.title.trim()) {
           res.status(400).json({ success: false, message: 'url 和 title 为必填项' });
           return;
+        }
+
+        // WebDAV / OpenList：前端不传凭证（挂载列表 API 不返回密码），
+        // 后端从 UserMount 表按 userId + serverUrl 自动补全。
+        const sourceType = typeof data.source === 'string' ? data.source.toLowerCase() : '';
+        if ((sourceType === 'webdav' || sourceType === 'openlist') && data.serverUrl) {
+          if (!data.username || !data.password) {
+            const mount = await AppDataSource.getRepository(UserMount).findOneBy({
+              userId: req.user!.userId,
+              serverUrl: data.serverUrl,
+              type: sourceType as 'webdav' | 'openlist',
+            });
+            if (mount) {
+              if (!data.username && mount.username) data.username = mount.username;
+              if (!data.password && mount.password) data.password = mount.password;
+            }
+          }
         }
 
         const movie = await movieService.createMovie(roomId, data);

@@ -121,6 +121,11 @@ export function WatchTogetherCore({
       state.movies.find((m) => m.id === state.currentMovieId)?.directLink ??
       false
   )
+  // 当前影片的源类型，用于判断是否支持自动搜索字幕
+  const currentMovieSourceType = useRoomStore(
+    (state) =>
+      state.movies.find((m) => m.id === state.currentMovieId)?.sourceType ?? ''
+  )
   const {
     watchTogether,
     setWatchTogether,
@@ -139,6 +144,23 @@ export function WatchTogetherCore({
 
   // 字幕状态：房主操作广播同步，观众监听应用
   const subtitles = useSubtitles({ roomId, isHost })
+
+  // ── 切换影片时自动搜索同目录字幕 ──────────────────────────
+  // 当房主切换到新影片时，清空旧字幕并在影片所在目录中搜索同名字幕文件。
+  // 支持 WebDAV / FTP / OpenList / 服务器文件四种源类型，
+  // 其他源类型（如 bilibili）仅清空旧字幕。
+  const supportedSubtitleSources = ['webdav', 'ftp', 'openlist', 'server-files']
+  useEffect(() => {
+    if (currentMovieId == null) return
+    if (!isHost) return
+    // 先清空旧字幕（切换影片时旧字幕不再适用）
+    subtitles.clearTracks()
+    // 支持的源类型才触发自动搜索
+    if (supportedSubtitleSources.includes(currentMovieSourceType)) {
+      void subtitles.searchAutoSubtitles(currentMovieId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMovieId, isHost, currentMovieSourceType])
 
   // ── CLI 代理上线后自动重新加载 ──────────────────────────
   // 页面刷新时 loadMovie 在 cliAgentStore.agents 填充之前就执行了，
@@ -1297,13 +1319,13 @@ export function WatchTogetherCore({
 
   return (
     <>
-      {/* 字幕样式：使用 Monet 主题变量，字号可调、底色半透明 */}
+      {/* 字幕样式：使用 Monet 主题变量，字号可调、透明底色 */}
       <style>{`
         .zart-stage video::cue {
           font-size: ${subtitles.subtitleFontSize}px;
-          background-color: rgba(var(--md-sys-color-surface-container-rgb), var(--glass-strength));
-          color: var(--md-sys-color-on-surface, #ffffff);
-          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+          background-color: transparent;
+          color: #ffffff;
+          text-shadow: 0 0 4px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.9);
         }
       `}</style>
 
@@ -1439,11 +1461,29 @@ export function WatchTogetherCore({
               subtitleTracks={subtitles.subtitleTracks}
               activeTrackIndex={subtitles.activeTrackIndex}
               subtitleFontSize={subtitles.subtitleFontSize}
+              browseMovieId={
+                isHost &&
+                currentMovieId != null &&
+                supportedSubtitleSources.includes(currentMovieSourceType)
+                  ? currentMovieId
+                  : undefined
+              }
               onToggleSubtitles={subtitles.setEnabled}
               onSelectSubtitleTrack={subtitles.setActiveTrack}
               onAddSubtitleUrl={subtitles.addTrackFromUrl}
               onAddSubtitleFile={subtitles.addTrackFromFile}
+              onAddSubtitleContent={subtitles.addTrackFromContent}
               onChangeSubtitleFontSize={subtitles.setFontSize}
+              onAutoSearchSubtitles={
+                currentMovieId != null && isHost
+                  ? () => subtitles.searchAutoSubtitles(currentMovieId)
+                  : undefined
+              }
+              canAutoSearchSubtitles={
+                isHost &&
+                currentMovieId != null &&
+                supportedSubtitleSources.includes(currentMovieSourceType)
+              }
               onDanmakuStyleChange={setStyle}
               onDanmakuFilterChange={setFilters}
               onDanmakuAdvancedChange={setAdvancedStyle}

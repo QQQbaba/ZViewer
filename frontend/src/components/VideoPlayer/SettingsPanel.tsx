@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronDown, Check, Plus, Upload } from 'lucide-react'
+import { ChevronDown, Check, Plus, Upload, ScanSearch, Loader2, FolderOpen } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
 import { Switch } from '@/components/ui/Switch'
 import { Slider } from '@/components/ui/Slider'
@@ -11,6 +11,7 @@ import {
   DanmakuAdvancedSettings,
 } from '@/modules/room/watch-together/DanmakuStylePanel'
 import { AnimatedSidePanel } from './AnimatedSidePanel'
+import { SubtitleBrowser } from './SubtitleBrowser'
 import type {
   DanmakuStyleState,
   DanmakuTypeFilters,
@@ -21,6 +22,8 @@ import type {
 const MAIN_PANEL_WIDTH = 260
 /** 副面板宽度 */
 const SIDE_PANEL_WIDTH = 200
+/** 字幕浏览面板宽度 */
+const BROWSER_PANEL_WIDTH = 220
 /** 副面板与主面板间距 */
 const PANEL_GAP = 8
 
@@ -31,11 +34,15 @@ interface SettingsPanelProps {
   subtitleTracks?: SubtitleTrack[]
   activeTrackIndex?: number
   subtitleFontSize?: number
+  browseMovieId?: number
   onToggleSubtitles?: (enabled: boolean) => void
   onSelectSubtitleTrack?: (index: number) => void
   onAddSubtitleUrl?: (url: string, label?: string) => void
   onAddSubtitleFile?: (file: File) => void
+  onAddSubtitleContent?: (content: string, filename: string, format: string) => void
   onChangeSubtitleFontSize?: (size: number) => void
+  onAutoSearchSubtitles?: () => Promise<number>
+  canAutoSearchSubtitles?: boolean
   onDanmakuStyleChange?: (updates: Partial<DanmakuStyleState>) => void
   onDanmakuFilterChange?: (updates: Partial<DanmakuTypeFilters>) => void
   onDanmakuAdvancedChange?: (updates: Partial<DanmakuAdvancedStyle>) => void
@@ -55,11 +62,15 @@ export function SettingsPanel(props: SettingsPanelProps) {
     subtitleTracks,
     activeTrackIndex,
     subtitleFontSize,
+    browseMovieId,
     onToggleSubtitles,
     onSelectSubtitleTrack,
     onAddSubtitleUrl,
     onAddSubtitleFile,
+    onAddSubtitleContent,
     onChangeSubtitleFontSize,
+    onAutoSearchSubtitles,
+    canAutoSearchSubtitles,
     onDanmakuStyleChange,
     onDanmakuFilterChange,
     onDanmakuAdvancedChange,
@@ -72,11 +83,16 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [showSubtitleLoader, setShowSubtitleLoader] = useState(false)
   const [subtitleUrlInput, setSubtitleUrlInput] = useState('')
+  const [autoSearching, setAutoSearching] = useState(false)
+  const [autoSearchMsg, setAutoSearchMsg] = useState('')
+  const [browserOpen, setBrowserOpen] = useState(false)
   const subtitleFileInputRef = useRef<HTMLInputElement>(null)
 
   // 当前是否在弹幕视图（房主切到弹幕 Tab，或观众端默认弹幕）
   const isDanmakuView = !!danmakuStyle && (!isHost || settingsTab === 'danmaku')
+  const isSubtitleView = isHost && (settingsTab === 'subtitle' || !danmakuStyle)
   const showAdvancedPanel = advancedOpen && isDanmakuView
+  const showBrowserPanel = browserOpen && isSubtitleView && browseMovieId != null
 
   const handleAddSubtitleUrl = () => {
     const url = subtitleUrlInput.trim()
@@ -90,6 +106,21 @@ export function SettingsPanel(props: SettingsPanelProps) {
     if (!file) return
     onAddSubtitleFile?.(file)
     e.target.value = ''
+  }
+
+  const handleAutoSearch = async () => {
+    if (autoSearching || !onAutoSearchSubtitles) return
+    setAutoSearching(true)
+    setAutoSearchMsg('')
+    try {
+      const count = await onAutoSearchSubtitles()
+      setAutoSearchMsg(count > 0 ? `找到 ${count} 条字幕` : '未找到字幕')
+    } catch {
+      setAutoSearchMsg('搜索失败')
+    } finally {
+      setAutoSearching(false)
+      setTimeout(() => setAutoSearchMsg(''), 3000)
+    }
   }
 
   return (
@@ -108,6 +139,24 @@ export function SettingsPanel(props: SettingsPanelProps) {
           setFilters={onDanmakuFilterChange ?? (() => {})}
           setAdvancedStyle={onDanmakuAdvancedChange ?? (() => {})}
         />
+      </AnimatedSidePanel>
+
+      {/* 延伸面板：字幕目录浏览 */}
+      <AnimatedSidePanel
+        open={showBrowserPanel}
+        width={BROWSER_PANEL_WIDTH}
+        gap={PANEL_GAP}
+        mainPanelWidth={MAIN_PANEL_WIDTH}
+        maxHeight={300}
+      >
+        {browseMovieId != null && onAddSubtitleContent && (
+          <SubtitleBrowser
+            movieId={browseMovieId}
+            onSelect={(content, filename, format) => {
+              onAddSubtitleContent(content, filename, format)
+            }}
+          />
+        )}
       </AnimatedSidePanel>
 
       {/* 主面板（位置固定，不受副面板展开/收起影响） */}
@@ -138,6 +187,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                   onClick={() => {
                     setSettingsTab(tab)
                     setAdvancedOpen(false)
+                    setBrowserOpen(false)
                   }}
                   className={cn(
                     'rounded-md py-1 text-xs font-medium transition-all',
@@ -225,7 +275,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 >
                   <button
                     type="button"
-                    onClick={() => setShowSubtitleLoader((v) => !v)}
+                    onClick={() => {
+                      setShowSubtitleLoader((v) => !v)
+                      setBrowserOpen(false)
+                    }}
                     className="flex w-full items-center justify-between rounded-md px-1 py-0.5 text-xs transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
                     style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
                   >
@@ -250,7 +303,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                               handleAddSubtitleUrl()
                             }
                           }}
-                          placeholder="https://.../sub.vtt"
+                          placeholder="https://.../sub.vtt 或 .srt/.ass"
                           className="flex-1"
                         />
                         <Button
@@ -265,7 +318,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                       <input
                         ref={subtitleFileInputRef}
                         type="file"
-                        accept=".vtt,.srt"
+                        accept=".vtt,.srt,.ass,.ssa,.smi,.sami,.sub"
                         className="hidden"
                         onChange={handleSubtitleFileChange}
                       />
@@ -278,6 +331,57 @@ export function SettingsPanel(props: SettingsPanelProps) {
                       >
                         上传文件
                       </Button>
+                      {canAutoSearchSubtitles && onAutoSearchSubtitles && (
+                        <>
+                          <div
+                            className="border-t pt-1"
+                            style={{
+                              borderColor:
+                                'color-mix(in srgb, var(--md-sys-color-outline) 20%, transparent)',
+                            }}
+                          />
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-7 w-full justify-center gap-1 text-xs"
+                            disabled={autoSearching}
+                            icon={
+                              autoSearching ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <ScanSearch className="h-3 w-3" />
+                              )
+                            }
+                            onClick={handleAutoSearch}
+                          >
+                            {autoSearching ? '搜索中...' : '自动识别字幕'}
+                          </Button>
+                          {autoSearchMsg && (
+                            <div
+                              className="text-center text-[10px]"
+                              style={{
+                                color:
+                                  autoSearchMsg === '搜索失败'
+                                    ? 'var(--md-sys-color-error)'
+                                    : 'var(--md-sys-color-on-surface-variant)',
+                              }}
+                            >
+                              {autoSearchMsg}
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {canAutoSearchSubtitles && browseMovieId != null && onAddSubtitleContent && (
+                        <Button
+                          variant={browserOpen ? 'primary' : 'secondary'}
+                          size="sm"
+                          className="h-7 w-full justify-center gap-1 text-xs"
+                          icon={<FolderOpen className="h-3 w-3" />}
+                          onClick={() => setBrowserOpen((v) => !v)}
+                        >
+                          {browserOpen ? '关闭浏览' : '浏览目录'}
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
