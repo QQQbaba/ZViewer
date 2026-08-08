@@ -17,6 +17,7 @@ import {
   Check,
   AlertCircle,
   Loader2,
+  ExternalLink,
 } from 'lucide-react'
 import { PageBackButton } from '@/components/PageBackButton'
 import { Button } from '@/components/ui/Button'
@@ -1642,6 +1643,18 @@ export default function AdminPage() {
                               >
                                 手动安装
                               </Button>
+                            )}
+                            {(!available || needFullVersion) && !ffmpegInstalling && !ffmpegUploading && (
+                              <a
+                                href="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex h-8 items-center gap-1.5 rounded-[var(--md-sys-shape-corner-full)] px-3 text-xs font-medium text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
+                                title="在浏览器中手动下载 FFmpeg 压缩包"
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                                手动下载
+                              </a>
                             )}
                             <input
                               ref={ffmpegFileInputRef}
