@@ -36,7 +36,7 @@ import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import { apiFetch, getApiUrl } from '@/lib/api'
-import { checkFfmpeg, installFfmpeg } from '@/modules/server-files/serverFilesApi'
+import { checkFfmpeg, installFfmpeg, uploadFfmpeg } from '@/modules/server-files/serverFilesApi'
 import type { FfmpegStatus, FfmpegInstallProgress } from '@/modules/server-files/types'
 
 interface AdminUser {
@@ -182,6 +182,8 @@ export default function AdminPage() {
   const [ffmpegInstalling, setFfmpegInstalling] = useState(false)
   const [ffmpegInstallStage, setFfmpegInstallStage] = useState('')
   const [ffmpegInstallPercent, setFfmpegInstallPercent] = useState(0)
+  const [ffmpegUploading, setFfmpegUploading] = useState(false)
+  const ffmpegFileInputRef = useRef<HTMLInputElement | null>(null)
 
   const authHeaders = {
     'Content-Type': 'application/json',
@@ -633,6 +635,33 @@ export default function AdminPage() {
       setFfmpegInstalling(false)
       setFfmpegInstallStage('')
       setFfmpegInstallPercent(0)
+    }
+  }
+
+  // FFmpeg 手动上传安装
+  const handleUploadFfmpeg = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      message.error('请上传 .zip 格式的 FFmpeg 压缩包')
+      return
+    }
+    setFfmpegUploading(true)
+    try {
+      const status = await uploadFfmpeg(file)
+      setFfmpegStatus(status)
+      if (status.transcodeCapable) {
+        message.success('FFmpeg 安装成功（完整版，支持音频转码）')
+      } else if (status.available) {
+        message.warning('FFmpeg 安装成功，但不支持音频转码（精简版）')
+      } else {
+        message.error('安装后仍未检测到 FFmpeg，请检查压缩包内容')
+      }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '上传安装失败')
+    } finally {
+      setFfmpegUploading(false)
     }
   }
 
@@ -1594,7 +1623,7 @@ export default function AdminPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
-                            {(!available || needFullVersion) && !ffmpegInstalling && (
+                            {(!available || needFullVersion) && !ffmpegInstalling && !ffmpegUploading && (
                               <Button
                                 variant="primary"
                                 size="sm"
@@ -1604,7 +1633,30 @@ export default function AdminPage() {
                                 {needFullVersion ? '下载完整版' : '下载 FFmpeg'}
                               </Button>
                             )}
-                            {!ffmpegInstalling && (
+                            {(!available || needFullVersion) && !ffmpegInstalling && !ffmpegUploading && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={<Upload className="h-3.5 w-3.5" />}
+                                onClick={() => ffmpegFileInputRef.current?.click()}
+                              >
+                                手动安装
+                              </Button>
+                            )}
+                            <input
+                              ref={ffmpegFileInputRef}
+                              type="file"
+                              accept=".zip"
+                              className="hidden"
+                              onChange={handleUploadFfmpeg}
+                            />
+                            {ffmpegUploading && (
+                              <div className="flex items-center gap-1.5 text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                <span>上传安装中...</span>
+                              </div>
+                            )}
+                            {!ffmpegInstalling && !ffmpegUploading && (
                               <button
                                 onClick={() => refreshFfmpegStatus(true)}
                                 disabled={ffmpegChecking}
@@ -1616,9 +1668,9 @@ export default function AdminPage() {
                             )}
                           </div>
                         </div>
-                        {needFullVersion && !ffmpegInstalling && (
+                        {needFullVersion && !ffmpegInstalling && !ffmpegUploading && (
                           <Text className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                            当前 FFmpeg 缺少 AAC 编码器，无法转码 DTS/AC3 等音频。点击「下载完整版」安装支持全部功能的 FFmpeg。
+                            当前 FFmpeg 缺少 AAC 编码器，无法转码 DTS/AC3 等音频。点击「下载完整版」自动下载，或「手动安装」上传 zip 压缩包。
                           </Text>
                         )}
                         {ffmpegInstalling && (

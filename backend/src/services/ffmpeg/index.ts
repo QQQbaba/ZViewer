@@ -348,6 +348,57 @@ function findFileRecursive(dir: string, filename: string): string | null {
   return null
 }
 
+// ============ 手动安装（从用户上传的 zip 文件）============
+
+/**
+ * 从用户上传的 zip 文件安装 FFmpeg 到项目 `bin/` 目录。
+ *
+ * 流程：
+ *   1. 解压 zip 到临时目录
+ *   2. 递归查找 ffmpeg 可执行文件（Windows: ffmpeg.exe, Linux: ffmpeg）
+ *   3. 复制到 bin/ 目录
+ *   4. 清理临时文件
+ *
+ * @param zipPath  用户上传的 zip 文件临时路径
+ */
+export async function installFfmpegFromZip(zipPath: string): Promise<void> {
+  fs.mkdirSync(FFMPEG_BIN_DIR, { recursive: true })
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ffmpeg-manual-'))
+  try {
+    if (process.platform === 'win32') {
+      await extractZipAndFindFfmpeg(zipPath, tmpDir)
+    } else {
+      // Linux: 尝试用 unzip 解压（用户上传的可能是 zip 而非 tar.xz）
+      const extractDir = path.join(tmpDir, 'extracted')
+      fs.mkdirSync(extractDir, { recursive: true })
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('unzip', ['-o', zipPath, '-d', extractDir], {
+          stdio: 'ignore',
+        })
+        proc.on('error', reject)
+        proc.on('exit', (code) => {
+          if (code === 0) resolve()
+          else reject(new Error(`unzip 解压失败，退出码 ${code}`))
+        })
+      })
+      const ffmpegBin = findFileRecursive(extractDir, 'ffmpeg')
+      if (!ffmpegBin) throw new Error('解压后未找到 ffmpeg')
+      fs.copyFileSync(ffmpegBin, FFMPEG_BIN_PATH)
+      fs.chmodSync(FFMPEG_BIN_PATH, 0o755)
+    }
+
+    // 重置缓存
+    resetFfmpegCache()
+  } finally {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    } catch {
+      // ignore
+    }
+  }
+}
+
 // ============ 合并 m4s 流 ============
 
 export interface MergeOptions {

@@ -378,6 +378,39 @@ export async function downloadBilibiliVideo(
   }
 }
 
+/**
+ * 手动上传 zip 文件安装 FFmpeg。
+ *
+ * 用户上传包含 ffmpeg 可执行文件的 zip 压缩包，
+ * 后端解压并提取 ffmpeg 到 bin/ 目录。
+ */
+export async function uploadFfmpeg(file: File): Promise<FfmpegStatus> {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const res = await apiFetch('/api/server-files/ffmpeg-upload', {
+    method: 'POST',
+    body: formData,
+  })
+
+  const data = (await res.json()) as FfmpegStatus & {
+    success?: boolean
+    message?: string
+  }
+
+  if (!res.ok || !data.success) {
+    throw new Error(data.message || '上传安装失败')
+  }
+
+  return {
+    available: !!data.available,
+    source: data.source,
+    path: data.path,
+    version: data.version,
+    transcodeCapable: data.transcodeCapable,
+  }
+}
+
 // ============ FFmpeg 状态检测与在线安装 ============
 
 /** 检测服务器 FFmpeg 状态。 */
