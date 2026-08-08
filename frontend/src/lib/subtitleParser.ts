@@ -1,15 +1,15 @@
 /**
- * 多格式字幕解析器
+ * 多格式字幕解析器（原生渲染版）
  *
  * 支持 SRT、ASS/SSA、VTT、SMI、SUB(MicroDVD) 格式，
- * 统一转换为 WebVTT 供浏览器原生 <track> 元素渲染。
+ * 统一解析为 ParsedCue[] 供自定义 HTML/CSS 渲染层直接显示。
  *
  * 设计要点：
  * - 纯前端解析，无需后端参与
- * - 转换为 WebVTT Blob URL，兼容原生 <track> 元素
- * - ASS/SSA 格式剥离高级样式标签，保留基础文本（粗体/斜体/颜色）
- * - SMI 格式解析 <SYNC> 标签，提取文本
- * - SUB(MicroDVD) 格式解析帧号时间码
+ * - 不再转换为 WebVTT，保留各格式的位置/对齐/样式信息
+ * - ASS/SSA：保留 \pos 坐标定位、\an 对齐、\c 颜色、\b/\i/\u/\s 样式
+ * - VTT：解析 cue settings (line/position/align)
+ * - 文本输出为 HTML，支持 <b>/<i>/<u>/<s>/<br>/<span style="color:...">
  */
 
 // ── 公共类型 ──────────────────────────────────────────────
@@ -17,11 +17,17 @@
 /** 字幕格式类型 */
 export type SubtitleFormat = 'vtt' | 'srt' | 'ass' | 'smi' | 'sub' | 'unknown'
 
-/** 解析后的字幕条目 */
-interface SubtitleCue {
+/** 解析后的字幕条目（统一内部格式） */
+export interface ParsedCue {
   start: number // 秒
   end: number // 秒
-  text: string
+  text: string // HTML 格式文本
+  /** 垂直位置百分比 0-100（0=顶部, 100=底部），不设则使用默认底部 */
+  line?: number
+  /** 水平位置百分比 0-100（0=左, 100=右），不设则使用默认居中 */
+  position?: number
+  /** 文本对齐方式 */
+  align?: 'left' | 'center' | 'right'
 }
 
 // ── 格式检测 ──────────────────────────────────────────────
@@ -73,21 +79,9 @@ export function detectFormat(
 
 // ── 时间码工具 ─────────────────────────────────────────────
 
-/** 将秒数格式化为 VTT 时间码 HH:MM:SS.mmm */
-function formatVttTime(seconds: number): string {
-  const ms = Math.round(seconds * 1000)
-  const h = Math.floor(ms / 3_600_000)
-  const m = Math.floor((ms % 3_600_000) / 60_000)
-  const s = Math.floor((ms % 60_000) / 1000)
-  const milli = ms % 1000
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(milli).padStart(3, '0')}`
-}
-
-/** 解析 SRT 时间码 HH:MM:SS,mmm → 秒 */
-function parseSrtTime(timeStr: string): number {
-  const match = timeStr.match(
-    /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/
-  )
+/** 解析 SRT/VTT 时间码 HH:MM:SS,mmm 或 HH:MM:SS.mmm → 秒 */
+function parseTime(timeStr: string): number {
+  const match = timeStr.match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/)
   if (!match) return 0
   const [, h, m, s, ms] = match
   return (
@@ -113,9 +107,8 @@ function parseAssTime(timeStr: string): number {
 
 // ── SRT 解析 ──────────────────────────────────────────────
 
-function parseSrt(content: string): SubtitleCue[] {
-  const cues: SubtitleCue[] = []
-  // 以空行分割块，每块包含序号、时间码、文本
+function parseSrt(content: string): ParsedCue[] {
+  const cues: ParsedCue[] = []
   const blocks = content
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
@@ -125,7 +118,6 @@ function parseSrt(content: string): SubtitleCue[] {
     const lines = block.trim().split('\n')
     if (lines.length < 2) continue
 
-    // 找到包含 --> 的时间码行
     const timeLineIndex = lines.findIndex((l) => l.includes('-->'))
     if (timeLineIndex < 0) continue
 
@@ -134,8 +126,8 @@ function parseSrt(content: string): SubtitleCue[] {
     )
     if (!timeMatch) continue
 
-    const start = parseSrtTime(timeMatch[1])
-    const end = parseSrtTime(timeMatch[2])
+    const start = parseTime(timeMatch[1])
+    const end = parseTime(timeMatch[2])
     const text = lines
       .slice(timeLineIndex + 1)
       .join('\n')
@@ -149,54 +141,219 @@ function parseSrt(content: string): SubtitleCue[] {
   return cues
 }
 
+// ── VTT 解析 ──────────────────────────────────────────────
+
+/**
+ * 解析 VTT cue settings 为位置和对齐信息。
+ *
+ * 支持的 settings：line, position, align
+ * 示例：line:50% position:50% align:center
+ */
+function parseVttCueSettings(settingsStr: string): Pick<ParsedCue, 'line' | 'position' | 'align'> {
+  const result: Pick<ParsedCue, 'line' | 'position' | 'align'> = {}
+
+  const lineMatch = settingsStr.match(/line:(\d+(?:\.\d+)?)%/)
+  if (lineMatch) result.line = parseFloat(lineMatch[1])
+
+  const posMatch = settingsStr.match(/position:(\d+(?:\.\d+)?)%/)
+  if (posMatch) result.position = parseFloat(posMatch[1])
+
+  const alignMatch = settingsStr.match(/align:(start|center|end|left|right)/)
+  if (alignMatch) {
+    const a = alignMatch[1]
+    if (a === 'start' || a === 'left') result.align = 'left'
+    else if (a === 'end' || a === 'right') result.align = 'right'
+    else result.align = 'center'
+  }
+
+  return result
+}
+
+function parseVtt(content: string): ParsedCue[] {
+  const cues: ParsedCue[] = []
+  const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  // 移除 WEBVTT 头部和元数据
+  const blocks = normalized.split(/\n\s*\n/)
+
+  for (const block of blocks) {
+    const lines = block.trim().split('\n')
+    if (lines.length < 2) continue
+
+    // 跳过 WEBVTT 头部和 NOTE 块
+    const firstLine = lines[0].trim()
+    if (firstLine.startsWith('WEBVTT') || firstLine.startsWith('NOTE')) continue
+
+    // 找到包含 --> 的时间码行
+    const timeLineIndex = lines.findIndex((l) => l.includes('-->'))
+    if (timeLineIndex < 0) continue
+
+    const timeLine = lines[timeLineIndex]
+    const timeMatch = timeLine.match(
+      /(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}|\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}|\d{2}:\d{2}[,.]\d{1,3})/
+    )
+    if (!timeMatch) continue
+
+    const start = parseTime(timeMatch[1])
+    const end = parseTime(timeMatch[2])
+
+    // 提取 cue settings（时间码之后的部分）
+    const settingsStr = timeLine.slice(timeMatch[0].length)
+    const settings = parseVttCueSettings(settingsStr)
+
+    const text = lines
+      .slice(timeLineIndex + 1)
+      .join('\n')
+      .trim()
+
+    if (text) {
+      cues.push({ start, end, text, ...settings })
+    }
+  }
+
+  return cues
+}
+
 // ── ASS/SSA 解析 ──────────────────────────────────────────
 
-/** ASS 样式覆盖标签映射 */
-const ASS_TAG_MAP: Record<string, (open: boolean) => string> = {
-  b: (open) => (open ? '<b>' : '</b>'),
-  i: (open) => (open ? '<i>' : '</i>'),
-  u: (open) => (open ? '<u>' : '</u>'),
-  s: (open) => (open ? '<s>' : '</s>'),
+/**
+ * 从 ASS 文本行中提取位置和对齐信息。
+ *
+ * 支持的 ASS 标签：
+ *   {\pos(x,y)}  — 绝对坐标定位（基于 PlayResX/PlayResY 换算为百分比）
+ *   {\anN}       — 数字小键盘对齐（1-9），决定水平 align 和垂直 line
+ */
+function extractAssPosition(
+  rawText: string,
+  playResX: number,
+  playResY: number,
+  defaultAlign: number
+): { line?: number; position?: number; align?: 'left' | 'center' | 'right' } {
+  let line: number | undefined
+  let position: number | undefined
+  let align: 'left' | 'center' | 'right' | undefined
+
+  // 提取 \pos(x,y) — 绝对坐标
+  const posMatch = rawText.match(/\\pos\(([\d.]+),\s*([\d.]+)\)/)
+  if (posMatch) {
+    const x = parseFloat(posMatch[1])
+    const y = parseFloat(posMatch[2])
+    if (playResX > 0) position = (x / playResX) * 100
+    if (playResY > 0) line = (y / playResY) * 100
+  }
+
+  // 提取 \anN — 数字小键盘对齐（优先于样式默认值）
+  const anMatch = rawText.match(/\\an(\d)/)
+  const an = anMatch ? parseInt(anMatch[1]) : defaultAlign
+
+  if (an >= 1 && an <= 9) {
+    // 水平对齐：1/4/7=左, 2/5/8=中, 3/6/9=右
+    if (an === 1 || an === 4 || an === 7) align = 'left'
+    else if (an === 3 || an === 6 || an === 9) align = 'right'
+    else align = 'center'
+
+    // 若无 \pos，按 \an 垂直分量设置 line
+    if (line === undefined) {
+      if (an <= 3) line = 100      // 底部
+      else if (an <= 6) line = 50  // 中部
+      else line = 0                // 顶部
+    }
+  }
+
+  return { line, position, align }
 }
 
 /**
- * 清理 ASS 文本中的样式覆盖标签，保留基础 HTML 标签。
+ * 将 ASS 颜色 &HBBGGRR& 或 &HAABBGGRR& 转换为 CSS #RRGGBB。
+ *
+ * ASS 使用 BGR 顺序，CSS 使用 RGB 顺序，需要反转。
+ */
+function assColorToCss(assColor: string): string | null {
+  // 匹配 &HAABBGGRR& 或 &HBBGGRR&
+  const match = assColor.match(/&H([0-9A-Fa-f]{6,8})&?/)
+  if (!match) return null
+  let hex = match[1]
+  // 如果是 8 位（含 alpha），取后 6 位
+  if (hex.length === 8) hex = hex.slice(2)
+  if (hex.length !== 6) return null
+  const bb = hex.slice(0, 2)
+  const gg = hex.slice(2, 4)
+  const rr = hex.slice(4, 6)
+  return `#${rr}${gg}${bb}`.toUpperCase()
+}
+
+/**
+ * 清理 ASS 文本中的样式覆盖标签，保留基础 HTML 标签和颜色。
  *
  * {\b1}粗体{\b0} → <b>粗体</b>
  * {\i1}斜体{\i0} → <i>斜体</i>
- * {\c&HFFFFFF&}颜色 → 剥离（VTT ::cue 不支持内联颜色）
+ * {\c&HFFFFFF&}颜色 → <span style="color:#FFFFFF">颜色</span>（到下一个颜色标签或文本结束）
+ * {\N} / {\n} → <br>
+ * {\h} → 不间断空格
  * {其他标签} → 剥离
  */
 function cleanAssText(text: string): string {
   let result = ''
   let i = 0
+  let openColorSpan = false
+
+  const closeColorSpan = () => {
+    if (openColorSpan) {
+      result += '</span>'
+      openColorSpan = false
+    }
+  }
+
   while (i < text.length) {
     if (text[i] === '{') {
-      // 解析 {...} 标签
       const end = text.indexOf('}', i)
       if (end < 0) break
       const tagContent = text.slice(i + 1, end)
-      // 处理复合标签如 {\b1\i1}
       const tags = tagContent.split('\\').filter(Boolean)
       for (const tag of tags) {
-        const match = tag.match(/^([a-z]+)(\d+)$/i)
-        if (match) {
-          const [, name, val] = match
+        // 粗体/斜体/下划线/删除线
+        const styleMatch = tag.match(/^([bis])(\d+)$/i)
+        if (styleMatch) {
+          const [, name, val] = styleMatch
           const isOpen = val !== '0'
-          const converter = ASS_TAG_MAP[name.toLowerCase()]
-          if (converter) {
-            result += converter(isOpen)
+          const tagMap: Record<string, string> = {
+            b: isOpen ? '<b>' : '</b>',
+            i: isOpen ? '<i>' : '</i>',
+            s: isOpen ? '<s>' : '</s>',
           }
+          if (tagMap[name.toLowerCase()]) {
+            closeColorSpan()
+            result += tagMap[name.toLowerCase()]
+          }
+          continue
+        }
+        // 下划线 \u
+        const uMatch = tag.match(/^u(\d+)$/i)
+        if (uMatch) {
+          closeColorSpan()
+          result += uMatch[1] !== '0' ? '<u>' : '</u>'
+          continue
+        }
+        // 颜色 \c 或 \1c
+        const cMatch = tag.match(/^1?c(&H[0-9A-Fa-f]{6,8}&?)/i)
+        if (cMatch) {
+          const cssColor = assColorToCss(cMatch[1])
+          if (cssColor) {
+            closeColorSpan()
+            result += `<span style="color:${cssColor}">`
+            openColorSpan = true
+          }
+          continue
+        }
+        // 恢复默认颜色 \c 带空值 — 关闭颜色 span
+        if (/^1?c$/i.test(tag)) {
+          closeColorSpan()
+          continue
         }
       }
       i = end + 1
-    } else if (text[i] === '\\' && text[i + 1] === 'N') {
-      // ASS 硬换行 \N
-      result += '\n'
-      i += 2
-    } else if (text[i] === '\\' && text[i + 1] === 'n') {
-      // ASS 软换行 \n
-      result += '\n'
+    } else if (text[i] === '\\' && (text[i + 1] === 'N' || text[i + 1] === 'n')) {
+      // ASS 换行 \N 或 \n
+      result += '<br>'
       i += 2
     } else if (text[i] === '\\' && text[i + 1] === 'h') {
       // ASS 硬空格 \h
@@ -207,12 +364,22 @@ function cleanAssText(text: string): string {
       i++
     }
   }
+  closeColorSpan()
   return result
 }
 
-function parseAss(content: string): SubtitleCue[] {
-  const cues: SubtitleCue[] = []
+function parseAss(content: string): ParsedCue[] {
+  const cues: ParsedCue[] = []
   const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+
+  // 解析 [Script Info] 中的 PlayResX / PlayResY
+  let playResX = 0
+  let playResY = 0
+  // 解析 [V4+ Styles] 中 Default 样式的 Alignment
+  let defaultAlign = 2 // ASS 默认底部居中
+
+  let currentSection = ''
+  let styleFormatFields: string[] = []
 
   let inEvents = false
   let formatFields: string[] = []
@@ -223,9 +390,41 @@ function parseAss(content: string): SubtitleCue[] {
   for (const line of lines) {
     const trimmed = line.trim()
 
+    // 检测 section
     if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-      inEvents = trimmed.toLowerCase() === '[events]'
+      currentSection = trimmed.toLowerCase()
+      inEvents = currentSection === '[events]'
       formatFields = []
+      continue
+    }
+
+    // [Script Info] 解析分辨率
+    if (currentSection === '[script info]') {
+      const resXMatch = trimmed.match(/^PlayResX:\s*(\d+)/i)
+      if (resXMatch) playResX = parseInt(resXMatch[1])
+      const resYMatch = trimmed.match(/^PlayResY:\s*(\d+)/i)
+      if (resYMatch) playResY = parseInt(resYMatch[1])
+      continue
+    }
+
+    // [V4+ Styles] 解析默认对齐方式
+    if (currentSection === '[v4+ styles]') {
+      if (trimmed.toLowerCase().startsWith('format:')) {
+        styleFormatFields = trimmed
+          .slice(7)
+          .split(',')
+          .map((f) => f.trim().toLowerCase())
+      } else if (trimmed.toLowerCase().startsWith('style:') && styleFormatFields.length > 0) {
+        const styleData = trimmed.slice(6).split(',').map((s) => s.trim())
+        const styleName = styleData[0]?.toLowerCase() ?? ''
+        if (styleName === 'default') {
+          const alignIdx = styleFormatFields.indexOf('alignment')
+          if (alignIdx >= 0 && alignIdx < styleData.length) {
+            const alignVal = parseInt(styleData[alignIdx])
+            if (alignVal >= 1 && alignVal <= 9) defaultAlign = alignVal
+          }
+        }
+      }
       continue
     }
 
@@ -249,8 +448,6 @@ function parseAss(content: string): SubtitleCue[] {
       formatFields.length > 0
     ) {
       const data = trimmed.slice(9)
-      // ASS 字段以逗号分隔，但 text 字段可能包含逗号
-      // 按 formatFields 数量切割，最后一个字段取剩余全部
       const parts: string[] = []
       let remaining = data
       for (let f = 0; f < formatFields.length - 1; f++) {
@@ -270,7 +467,8 @@ function parseAss(content: string): SubtitleCue[] {
       const text = cleanAssText(rawText).trim()
 
       if (text && end > start) {
-        cues.push({ start, end, text })
+        const pos = extractAssPosition(rawText, playResX, playResY, defaultAlign)
+        cues.push({ start, end, text, ...pos })
       }
     }
   }
@@ -280,16 +478,15 @@ function parseAss(content: string): SubtitleCue[] {
 
 // ── SAMI (SMI) 解析 ───────────────────────────────────────
 
-function parseSmi(content: string): SubtitleCue[] {
-  const cues: SubtitleCue[] = []
-  // 提取所有 <SYNC Start=...>...</SYNC> 块
+function parseSmi(content: string): ParsedCue[] {
+  const cues: ParsedCue[] = []
   const syncRegex = /<SYNC\s+Start=(\d+)[^>]*>([\s\S]*?)(?=<SYNC|<\/BODY|$)/gi
   const matches: { start: number; html: string }[] = []
 
   let match: RegExpExecArray | null
   while ((match = syncRegex.exec(content)) !== null) {
     matches.push({
-      start: parseInt(match[1]) / 1000, // ms → s
+      start: parseInt(match[1]) / 1000,
       html: match[2] || '',
     })
   }
@@ -297,15 +494,11 @@ function parseSmi(content: string): SubtitleCue[] {
   for (let i = 0; i < matches.length; i++) {
     const current = matches[i]
     const next = matches[i + 1]
-    const end = next ? next.start : current.start + 4 // 无后续则默认 4 秒
+    const end = next ? next.start : current.start + 4
 
-    // 提取 <P> 标签内的文本，剥离 HTML
     let text = current.html
-    // 移除 <br> 转 \n
     text = text.replace(/<br\s*\/?>/gi, '\n')
-    // 移除所有 HTML 标签
     text = text.replace(/<[^>]+>/g, '')
-    // 解码 HTML 实体
     text = text
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
@@ -325,11 +518,10 @@ function parseSmi(content: string): SubtitleCue[] {
 
 // ── MicroDVD (SUB) 解析 ───────────────────────────────────
 
-function parseSub(content: string): SubtitleCue[] {
-  const cues: SubtitleCue[] = []
+function parseSub(content: string): ParsedCue[] {
+  const cues: ParsedCue[] = []
   const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
 
-  // 尝试检测 FPS（MicroDVD 第一行可能是 {DEFAULT}{}帧率）
   let fps = 23.976
   const fpsMatch = content.match(/\{1\}\{1\}(\d+(?:\.\d+)?)/)
   if (fpsMatch) {
@@ -355,101 +547,49 @@ function parseSub(content: string): SubtitleCue[] {
 /** 清理 MicroDVD 文本中的控制字符 */
 function cleanSubText(text: string): string {
   let result = text
-  // MicroDVD 控制字符 {y:b}粗体 {y:i}斜体
   result = result.replace(/\{y:b\}/gi, '<b>')
   result = result.replace(/\{y:i\}/gi, '<i>')
   result = result.replace(/\{y:u\}/gi, '<u>')
   result = result.replace(/\{y:s\}/gi, '<s>')
-  // 其他控制标签
   result = result.replace(/\{[^}]*\}/g, '')
-  // 管道符换行
   result = result.replace(/\|/g, '\n')
   return result.trim()
 }
 
-// ── VTT 验证 ──────────────────────────────────────────────
-
-/** 检查内容是否为有效的 VTT */
-function isVtt(content: string): boolean {
-  return content.trimStart().startsWith('WEBVTT')
-}
-
-// ── 统一转换入口 ───────────────────────────────────────────
+// ── 统一解析入口 ───────────────────────────────────────────
 
 /**
- * 将字幕条目列表转换为 WebVTT 字符串。
- */
-function cuesToVtt(cues: SubtitleCue[]): string {
-  const lines = ['WEBVTT', '']
-
-  for (let i = 0; i < cues.length; i++) {
-    const cue = cues[i]
-    lines.push(String(i + 1))
-    lines.push(
-      `${formatVttTime(cue.start)} --> ${formatVttTime(cue.end)}`
-    )
-    lines.push(cue.text)
-    lines.push('')
-  }
-
-  return lines.join('\n')
-}
-
-/**
- * 解析字幕内容并转换为 WebVTT。
+ * 解析字幕内容为 ParsedCue[]。
+ *
+ * 不再转换为 WebVTT，直接输出统一的内部数据结构，
+ * 保留各格式的位置/对齐/样式信息供自定义渲染层使用。
  *
  * @param content 字幕文件原始文本
  * @param format 字幕格式
- * @returns WebVTT 格式字符串
+ * @returns 解析后的字幕条目数组
  */
 export function parseSubtitle(
   content: string,
   format: SubtitleFormat
-): string {
-  // VTT 直接返回（确保格式规范）
-  if (format === 'vtt' || isVtt(content)) {
-    return content.trimStart().startsWith('WEBVTT')
-      ? content
-      : `WEBVTT\n\n${content}`
+): ParsedCue[] {
+  // VTT 格式直接解析（保留 cue settings）
+  if (format === 'vtt' || content.trimStart().startsWith('WEBVTT')) {
+    return parseVtt(content)
   }
-
-  let cues: SubtitleCue[]
 
   switch (format) {
     case 'srt':
-      cues = parseSrt(content)
-      break
+      return parseSrt(content)
     case 'ass':
-      cues = parseAss(content)
-      break
+      return parseAss(content)
     case 'smi':
-      cues = parseSmi(content)
-      break
+      return parseSmi(content)
     case 'sub':
-      cues = parseSub(content)
-      break
+      return parseSub(content)
     default:
       // 未知格式尝试按 SRT 解析（最常见的兜底）
-      cues = parseSrt(content)
+      return parseSrt(content)
   }
-
-  if (cues.length === 0) {
-    // 解析失败，返回空 VTT
-    return 'WEBVTT\n\n'
-  }
-
-  return cuesToVtt(cues)
-}
-
-/**
- * 将 VTT 字符串转换为 Blob URL。
- *
- * 用于给 <track src=...> 提供可加载的 URL，
- * 也可用于替换非 VTT 格式的原始 URL。
- */
-export function vttToBlobUrl(vtt: string): string {
-  const blob = new Blob([vtt], { type: 'text/vtt' })
-  return URL.createObjectURL(blob)
 }
 
 /**

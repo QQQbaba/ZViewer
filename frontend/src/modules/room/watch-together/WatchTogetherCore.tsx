@@ -6,7 +6,7 @@
  * - useWatchTogether 同步编排（房主广播 / 观众跟随 / 心跳 / 状态恢复）
  * - 观众申请审批（加入 / 跳转 / 暂停 / 继续播放）
  * - B站 官方弹幕加载、多轨道弹幕同步、实时弹幕收发
- * - 字幕轨道管理（命令式 <track> 挂载 + textTracks mode 控制）
+ * - 字幕轨道管理（自定义 SubtitleOverlay 渲染，保留各格式位置/样式）
  * - B站 清晰度切换（ArtPlayer 原生 selector 控件）
  *
  * UI 通过 createPortal 挂载到 Shell 提供的 ArtPlayer 插槽（弹幕图层 / 覆盖层 / 设置面板），
@@ -42,6 +42,7 @@ import {
 import type { MediaFormat } from '@/lib/mediaFormat'
 import { useVideoPlayingState } from '@/modules/art-player/useVideoPlayingState'
 import { SettingsPanel } from '@/components/VideoPlayer/SettingsPanel'
+import { SubtitleOverlay } from '@/components/VideoPlayer/SubtitleOverlay'
 import type { ArtSlots } from './WatchTogetherPanel'
 
 // 格式化跳转时间用于提示信息（mm:ss 或 h:mm:ss）
@@ -623,154 +624,14 @@ export function WatchTogetherCore({
     }
   }, [video, setWatchTogether])
 
-  // ── 字幕轨道命令式挂载 ────────────────────────────────
-  // ArtPlayer 自行创建 video 元素，无法以 JSX children 声明 <track>，
-  // 改为命令式追加（data-zc-subtitle 标记与 ArtPlayer 自带 $track 区分）。
-  useEffect(() => {
-    // 移除前先禁用所有 zc 字幕轨道的 textTrack，清除当前显示的字幕
-    // 防止切换视频时残留旧字幕（仅移除 track 元素不会立即清除已显示的 cue）
-    const allTrackEls = Array.from(video.querySelectorAll('track'))
-    allTrackEls.forEach((el, i) => {
-      if (!el.hasAttribute('data-zc-subtitle')) return
-      const textTrack = video.textTracks[i]
-      if (textTrack) textTrack.mode = 'disabled'
-    })
-    // 移除旧 track 元素
-    video
-      .querySelectorAll('track[data-zc-subtitle]')
-      .forEach((el) => el.remove())
-    // 挂载新轨道
-    subtitles.subtitleTracks.forEach((t) => {
-      const el = document.createElement('track')
-      el.kind = 'subtitles'
-      el.src = t.url
-      el.label = t.label
-      el.srclang = t.lang || 'zh'
-      el.setAttribute('data-zc-subtitle', '1')
-      video.appendChild(el)
-    })
-  }, [subtitles.subtitleTracks, video])
-
-  // 应用字幕状态到 textTracks（track 元素顺序与 textTracks 一一对应）
-  const applySubtitleModes = useCallback(() => {
-    const els = Array.from(video.querySelectorAll('track'))
-    let zcIndex = -1
-    els.forEach((el, i) => {
-      if (!el.hasAttribute('data-zc-subtitle')) return
-      zcIndex += 1
-      const textTrack = video.textTracks[i]
-      if (!textTrack) return
-      textTrack.mode =
-        subtitles.subtitleEnabled && zcIndex === subtitles.activeTrackIndex
-          ? 'showing'
-          : 'disabled'
-    })
-  }, [video, subtitles.subtitleEnabled, subtitles.activeTrackIndex])
-
-  useEffect(() => {
-    applySubtitleModes()
-  }, [applySubtitleModes, subtitles.subtitleTracks])
-
-  // 引擎重载（video.load()）后 textTracks mode 会被重置，loadstart 时重新应用
-  useEffect(() => {
-    const handleLoadStart = () => {
-      setTimeout(applySubtitleModes, 0)
-    }
-    video.addEventListener('loadstart', handleLoadStart)
-    return () => {
-      video.removeEventListener('loadstart', handleLoadStart)
-    }
-  }, [video, applySubtitleModes])
-
-  // ── 字幕时间偏移 ────────────────────────────────────────
-  // 存储各轨道的原始 cue 时间，偏移变化时从原始值重新计算避免累积误差
-  const originalCueTimesRef = useRef<
-    Map<number, Array<{ startTime: number; endTime: number }>>
-  >(new Map())
-
-  /** 获取指定 zc 轨道索引对应的 TextTrack */
-  const getZcTextTrack = useCallback(
-    (zcIndex: number): TextTrack | null => {
-      const els = Array.from(video.querySelectorAll('track'))
-      let idx = -1
-      for (let i = 0; i < els.length; i++) {
-        if (!els[i].hasAttribute('data-zc-subtitle')) continue
-        idx++
-        if (idx === zcIndex) return video.textTracks[i] ?? null
-      }
-      return null
-    },
-    [video]
-  )
-
-  /** 对激活轨道应用字幕偏移（从原始 cue 时间 + offset 重新计算） */
-  const applySubtitleOffset = useCallback(() => {
-    const trackIndex = subtitles.activeTrackIndex
-    if (trackIndex < 0) return
-
-    const textTrack = getZcTextTrack(trackIndex)
-    if (!textTrack) return
-
-    // cues 仅在 mode !== 'disabled' 时可用
-    // 激活轨道应为 'showing'，但若尚未设置则临时切到 'hidden' 以访问 cues
-    let restoreMode = false
-    if (textTrack.mode === 'disabled') {
-      textTrack.mode = 'hidden'
-      restoreMode = true
-    }
-
-    const cues = textTrack.cues
-    if (!cues || cues.length === 0) {
-      if (restoreMode) textTrack.mode = 'disabled'
-      return
-    }
-
-    // 首次访问：存储原始 cue 时间（后续偏移变化均从此值重算）
-    if (!originalCueTimesRef.current.has(trackIndex)) {
-      const originals: Array<{ startTime: number; endTime: number }> = []
-      for (let i = 0; i < cues.length; i++) {
-        originals.push({
-          startTime: cues[i].startTime,
-          endTime: cues[i].endTime,
-        })
-      }
-      originalCueTimesRef.current.set(trackIndex, originals)
-    }
-
-    // 从原始值 + 偏移重新计算
-    const offset = subtitles.subtitleOffset || 0
-    const originals = originalCueTimesRef.current.get(trackIndex)!
-    for (let i = 0; i < cues.length && i < originals.length; i++) {
-      cues[i].startTime = Math.max(0, originals[i].startTime + offset)
-      cues[i].endTime = Math.max(0, originals[i].endTime + offset)
-    }
-
-    if (restoreMode) textTrack.mode = 'disabled'
-  }, [getZcTextTrack, subtitles.activeTrackIndex, subtitles.subtitleOffset])
-
-  // 轨道列表变化时清空缓存的原始时间
-  useEffect(() => {
-    originalCueTimesRef.current.clear()
-  }, [subtitles.subtitleTracks])
-
-  // 偏移或激活轨道变化时应用偏移（延迟以等待 cues 加载）
-  useEffect(() => {
-    if (subtitles.activeTrackIndex < 0) return
-    const timer = setTimeout(applySubtitleOffset, 200)
-    return () => clearTimeout(timer)
-  }, [applySubtitleOffset])
-
-  // track 元素 load 事件：资源加载完成后应用偏移
-  useEffect(() => {
-    const handleLoad = () => {
-      setTimeout(applySubtitleOffset, 50)
-    }
-    const tracks = video.querySelectorAll('track[data-zc-subtitle]')
-    tracks.forEach((t) => t.addEventListener('load', handleLoad))
-    return () => {
-      tracks.forEach((t) => t.removeEventListener('load', handleLoad))
-    }
-  }, [video, subtitles.subtitleTracks, applySubtitleOffset])
+  // ── 字幕渲染 ────────────────────────────────────────────
+  // 使用自定义 SubtitleOverlay 组件渲染字幕，不再依赖 <track> + ::cue。
+  // SubtitleOverlay 监听 video 时间更新，根据 ParsedCue[] 的位置/对齐信息
+  // 用 HTML/CSS 直接渲染，保留各字幕格式的完整样式。
+  const activeSubtitleCues =
+    subtitles.subtitleEnabled && subtitles.activeTrackIndex >= 0
+      ? subtitles.subtitleTracks[subtitles.activeTrackIndex]?.cues ?? []
+      : []
 
   // ── 观众申请处理（socket 逻辑与重构前一致）─────────────────
   useEffect(() => {
@@ -1483,6 +1344,22 @@ export function WatchTogetherCore({
             onDanmakuClick={handleDanmakuClick}
           />,
           slots.danmakuRoot
+        )}
+
+      {/* 字幕渲染层（Portal → ArtPlayer overlay layer）
+          使用自定义 SubtitleOverlay 组件替代浏览器原生 <track> + ::cue，
+          根据 ParsedCue[] 的位置/对齐信息用 HTML/CSS 直接渲染，
+          完整保留 SRT/ASS/VTT/SMI/SUB 各格式的样式。 */}
+      {watchTogether.sourceUrl &&
+        createPortal(
+          <SubtitleOverlay
+            video={video}
+            cues={activeSubtitleCues}
+            enabled={subtitles.subtitleEnabled}
+            fontSize={subtitles.subtitleFontSize}
+            offset={subtitles.subtitleOffset}
+          />,
+          slots.overlayRoot
         )}
 
       {/* 播放器内通知（左上角），使用 overlayRoot 让通知始终可见 */}
