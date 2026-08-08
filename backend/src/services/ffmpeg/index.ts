@@ -24,7 +24,13 @@ export const FFMPEG_BIN_PATH = path.join(
   process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
 )
 
-/** FFmpeg 下载源（按平台） */
+/** 内置 ffprobe 可执行文件路径 */
+export const FFPROBE_BIN_PATH = path.join(
+  FFMPEG_BIN_DIR,
+  process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'
+)
+
+/** 下载源（按平台） */
 function getDownloadSource(): { url: string; kind: 'zip' | 'tar.xz'; size: number } {
   const platform = process.platform
   const arch = process.arch
@@ -246,6 +252,8 @@ export async function installFfmpeg(
     }
 
     // ===== 阶段 3：完成 =====
+    // 重置缓存，确保下次检测使用新安装的 FFmpeg
+    resetFfmpegCache()
     onProgress?.({
       stage: 'done',
       message: 'FFmpeg 安装完成',
@@ -493,4 +501,211 @@ export async function downloadToFile(
   }
 
   return received
+}
+
+// ============ ffprobe 媒体探测 ============
+
+/**
+ * 获取 ffprobe 实际可用的可执行文件路径。
+ * 优先级与 resolveFfmpegPath 一致：项目内置 > 系统 PATH。
+ */
+export function resolveFfprobePath(): string | null {
+  // 1. 项目内置
+  if (fs.existsSync(FFPROBE_BIN_PATH)) {
+    try {
+      fs.accessSync(FFPROBE_BIN_PATH, fs.constants.X_OK)
+      return FFPROBE_BIN_PATH
+    } catch {
+      try {
+        fs.chmodSync(FFPROBE_BIN_PATH, 0o755)
+        return FFPROBE_BIN_PATH
+      } catch {
+        // 修正失败，继续尝试系统
+      }
+    }
+  }
+  // 2. 系统 PATH
+  return 'ffprobe'
+}
+
+export interface MediaProbeInfo {
+  /** 音频编码（如 'aac', 'dts', 'ac3', 'eac3'），无音频流时为 null */
+  audioCodec: string | null
+  /** 视频编码（如 'h264', 'hevc'），无视频流时为 null */
+  videoCodec: string | null
+  /** 时长（秒） */
+  duration: number | null
+}
+
+/** 探测结果内存缓存（key = 文件路径） */
+const probeCache = new Map<string, MediaProbeInfo>()
+
+/**
+ * 使用 ffprobe 探测媒体文件的音视频编码和时长。
+ *
+ * 结果缓存在内存中，避免重复探测同一文件。
+ * ffprobe 不可用时返回全 null。
+ */
+export function probeMediaInfo(filePath: string): Promise<MediaProbeInfo> {
+  const cached = probeCache.get(filePath)
+  if (cached) return Promise.resolve(cached)
+
+  const ffprobePath = resolveFfprobePath()
+  if (!ffprobePath) return Promise.resolve({ audioCodec: null, videoCodec: null, duration: null })
+
+  return new Promise((resolve) => {
+    execFile(
+      ffprobePath,
+      [
+        '-v', 'error',
+        '-select_streams', 'a:0',
+        '-show_entries', 'stream=codec_name',
+        '-show_entries', 'format=duration',
+        '-of', 'json',
+        filePath,
+      ],
+      { timeout: 10000 },
+      (err, stdout) => {
+        if (err) {
+          resolve({ audioCodec: null, videoCodec: null, duration: null })
+          return
+        }
+        try {
+          const data = JSON.parse(stdout)
+          const audioCodec = data.streams?.[0]?.codec_name || null
+          const duration = parseFloat(data.format?.duration) || null
+          const result: MediaProbeInfo = { audioCodec, videoCodec: null, duration }
+          probeCache.set(filePath, result)
+          resolve(result)
+        } catch {
+          resolve({ audioCodec: null, videoCodec: null, duration: null })
+        }
+      }
+    )
+  })
+}
+
+// ============ 实时音频转码 ============
+
+/**
+ * 浏览器 <video> 元素原生支持的音频编码。
+ * 不在此列表中的编码需要后端实时转码为 AAC。
+ */
+export const BROWSER_SUPPORTED_AUDIO_CODECS = [
+  'aac', 'mp3', 'opus', 'vorbis', 'flac',
+]
+
+/**
+ * 判断音频编码是否需要转码。
+ * null（未知）时保守地返回 false，让浏览器尝试播放。
+ */
+export function needsAudioTranscode(audioCodec: string | null): boolean {
+  if (!audioCodec) return false
+  return !BROWSER_SUPPORTED_AUDIO_CODECS.includes(audioCodec.toLowerCase())
+}
+
+/** FFmpeg 转码能力缓存（null = 未检测, boolean = 检测结果） */
+let transcodeCapableCache: boolean | null = null
+
+/**
+ * 重置 FFmpeg 相关缓存。
+ *
+ * 在安装新 FFmpeg 后调用，确保下次检测重新执行。
+ */
+export function resetFfmpegCache(): void {
+  transcodeCapableCache = null
+  probeCache.clear()
+}
+
+/**
+ * 检测 FFmpeg 是否具备音频转码能力（AAC 编码器 + pipe 输出）。
+ *
+ * 某些精简版 FFmpeg（如 TRAE 自带版本）禁用了大部分编码器和解码器，
+ * 无法进行音频转码。此函数通过检查 `ffmpeg -encoders` 输出中是否包含
+ * AAC 编码器来判断。
+ *
+ * 结果缓存在模块级变量中，仅检测一次。
+ */
+export async function isFfmpegTranscodeCapable(): Promise<boolean> {
+  if (transcodeCapableCache !== null) return transcodeCapableCache
+
+  const ffmpegPath = resolveFfmpegPath()
+  if (!ffmpegPath) {
+    transcodeCapableCache = false
+    return false
+  }
+
+  return new Promise((resolve) => {
+    execFile(
+      ffmpegPath,
+      ['-hide_banner', '-encoders'],
+      { timeout: 5000 },
+      (err, stdout) => {
+        if (err) {
+          transcodeCapableCache = false
+          resolve(false)
+          return
+        }
+        // 检查是否有 AAC 编码器（原生或 libfdk_aac）
+        const hasAac = /aac|libfdk_aac/i.test(stdout)
+        transcodeCapableCache = hasAac
+        if (!hasAac) {
+          console.warn('[ffmpeg] 当前 FFmpeg 不支持 AAC 编码，音频转码不可用')
+        }
+        resolve(hasAac)
+      }
+    )
+  })
+}
+
+export interface TranscodeStreamResult {
+  /** FFmpeg stdout 可读流，可直接 pipe 到 HTTP 响应 */
+  stream: import('node:stream').Readable
+  /** FFmpeg 子进程引用，用于客户端断连时 kill */
+  process: import('node:child_process').ChildProcess
+}
+
+/**
+ * 创建实时音频转码流。
+ *
+ * 使用 FFmpeg 将音频转码为 AAC（192kbps 立体声），视频流直接复制，
+ * 输出为 fragmented MP4 以支持流式传输。
+ *
+ * @param inputPath  源文件绝对路径
+ * @param seekTime   起始时间（秒），用于 seek 支持
+ * @returns 转码流与进程引用
+ */
+export function createAudioTranscodeStream(
+  inputPath: string,
+  seekTime: number = 0,
+): TranscodeStreamResult {
+  const ffmpegPath = resolveFfmpegPath()
+  if (!ffmpegPath) throw new Error('FFmpeg 不可用')
+
+  const args: string[] = []
+
+  // seek 到指定时间（放在 -i 之前为快速 seek，精度略低但速度快）
+  if (seekTime > 0) {
+    args.push('-ss', seekTime.toFixed(3))
+  }
+
+  args.push(
+    '-i', inputPath,
+    '-c:v', 'copy',          // 视频流直接复制，不重新编码
+    '-c:a', 'aac',           // 音频转码为 AAC
+    '-b:a', '192k',          // 音频比特率
+    '-ac', '2',              // 立体声
+    '-f', 'mp4',             // 输出 MP4 容器
+    '-movflags', 'frag_keyframe+empty_moov',  // fragmented MP4，支持流式传输
+    'pipe:1',
+  )
+
+  const proc = spawn(ffmpegPath, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  return {
+    stream: proc.stdout,
+    process: proc,
+  }
 }

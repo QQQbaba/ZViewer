@@ -174,19 +174,39 @@ function useVideoDuration(
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
-    const update = () => {
-      const d =
-        Number.isFinite(storeDuration) && (storeDuration as number) > 0
-          ? (storeDuration as number)
-          : video.duration || 0
-      setDuration(d)
+
+    /** 获取有效时长：优先 storeDuration，其次 serverDuration（HEAD 请求获取），
+     *  再次 video.duration（有限时），最后回退到 video.seekable 末尾时间。 */
+    const getEffectiveDuration = (): number => {
+      // 1. storeDuration（来自后端探测 / 影片记录）
+      if (Number.isFinite(storeDuration) && (storeDuration as number) > 0)
+        return storeDuration as number
+      // 2. video.dataset.serverDuration（转码流场景，由 direct-engine HEAD 请求获取）
+      const sd = video.dataset.serverDuration
+      if (sd) {
+        const d = parseFloat(sd)
+        if (Number.isFinite(d) && d > 0) return d
+      }
+      // 3. video.duration（原生支持的格式）
+      if (Number.isFinite(video.duration) && video.duration > 0)
+        return video.duration
+      // 4. video.seekable 末尾（fragmented MP4 无 moov 时长时的回退）
+      if (video.seekable && video.seekable.length > 0) {
+        const end = video.seekable.end(video.seekable.length - 1)
+        if (Number.isFinite(end) && end > 0) return end
+      }
+      return 0
     }
+
+    const update = () => setDuration(getEffectiveDuration())
     update()
     video.addEventListener('loadedmetadata', update)
     video.addEventListener('durationchange', update)
+    video.addEventListener('progress', update)
     return () => {
       video.removeEventListener('loadedmetadata', update)
       video.removeEventListener('durationchange', update)
+      video.removeEventListener('progress', update)
     }
   }, [videoRef, storeDuration])
 

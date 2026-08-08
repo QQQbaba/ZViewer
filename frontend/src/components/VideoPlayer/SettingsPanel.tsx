@@ -34,6 +34,7 @@ interface SettingsPanelProps {
   subtitleTracks?: SubtitleTrack[]
   activeTrackIndex?: number
   subtitleFontSize?: number
+  subtitleOffset?: number
   browseMovieId?: number
   onToggleSubtitles?: (enabled: boolean) => void
   onSelectSubtitleTrack?: (index: number) => void
@@ -41,6 +42,7 @@ interface SettingsPanelProps {
   onAddSubtitleFile?: (file: File) => void
   onAddSubtitleContent?: (content: string, filename: string, format: string) => void
   onChangeSubtitleFontSize?: (size: number) => void
+  onChangeSubtitleOffset?: (offset: number) => void
   onAutoSearchSubtitles?: () => Promise<number>
   canAutoSearchSubtitles?: boolean
   onDanmakuStyleChange?: (updates: Partial<DanmakuStyleState>) => void
@@ -62,6 +64,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     subtitleTracks,
     activeTrackIndex,
     subtitleFontSize,
+    subtitleOffset,
     browseMovieId,
     onToggleSubtitles,
     onSelectSubtitleTrack,
@@ -69,6 +72,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onAddSubtitleFile,
     onAddSubtitleContent,
     onChangeSubtitleFontSize,
+    onChangeSubtitleOffset,
     onAutoSearchSubtitles,
     canAutoSearchSubtitles,
     onDanmakuStyleChange,
@@ -403,6 +407,28 @@ export function SettingsPanel(props: SettingsPanelProps) {
                     onChange={(v) => onChangeSubtitleFontSize?.(v)}
                   />
                 </div>
+                {(activeTrackIndex ?? -1) >= 0 && onChangeSubtitleOffset && (
+                  <div
+                    className="mt-1 border-t pt-1"
+                    style={{
+                      borderColor:
+                        'color-mix(in srgb, var(--md-sys-color-outline) 30%, transparent)',
+                    }}
+                  >
+                    <Slider
+                      label="时间偏移"
+                      size="sm"
+                      value={subtitleOffset ?? 0}
+                      min={-5}
+                      max={5}
+                      step={0.1}
+                      valueFormatter={(v) =>
+                        v > 0 ? `+${v.toFixed(1)}s` : `${v.toFixed(1)}s`
+                      }
+                      onChange={(v) => onChangeSubtitleOffset?.(v)}
+                    />
+                  </div>
+                )}
               </>
             )}
             {!isHost && (
