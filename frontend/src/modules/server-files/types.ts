@@ -17,6 +17,18 @@ export interface ServerBrowseResult {
   readonly?: boolean
 }
 
+/** 视频文件内嵌字幕轨道信息。 */
+export interface EmbeddedSubtitleTrack {
+  /** ffprobe 流索引（绝对索引） */
+  index: number
+  /** 字幕编码格式（如 'subrip', 'ass'） */
+  codecName: string
+  /** 语言标签（如 'chi', 'eng'） */
+  language: string | null
+  /** 轨道标题（如 '简体中文'） */
+  title: string | null
+}
+
 /** 解析文件返回结果。 */
 export interface ServerFileResolved {
   title: string
@@ -27,6 +39,8 @@ export interface ServerFileResolved {
   audioCodec?: string | null
   /** 视频时长（秒），由 ffprobe 探测 */
   duration?: number | null
+  /** 内嵌字幕轨道列表 */
+  subtitleTracks?: EmbeddedSubtitleTrack[]
 }
 
 /** 上传成功的文件信息。 */

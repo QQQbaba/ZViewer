@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronDown, Check, Plus, Upload, ScanSearch, Loader2, FolderOpen } from 'lucide-react'
+import { ChevronDown, Check, Plus, Upload, ScanSearch, Loader2, FolderOpen, FileText } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
 import { Switch } from '@/components/ui/Switch'
 import { Slider } from '@/components/ui/Slider'
@@ -45,6 +45,8 @@ interface SettingsPanelProps {
   onChangeSubtitleOffset?: (offset: number) => void
   onAutoSearchSubtitles?: () => Promise<number>
   canAutoSearchSubtitles?: boolean
+  onLoadEmbeddedSubtitles?: () => Promise<number>
+  canLoadEmbeddedSubtitles?: boolean
   onDanmakuStyleChange?: (updates: Partial<DanmakuStyleState>) => void
   onDanmakuFilterChange?: (updates: Partial<DanmakuTypeFilters>) => void
   onDanmakuAdvancedChange?: (updates: Partial<DanmakuAdvancedStyle>) => void
@@ -75,6 +77,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onChangeSubtitleOffset,
     onAutoSearchSubtitles,
     canAutoSearchSubtitles,
+    onLoadEmbeddedSubtitles,
+    canLoadEmbeddedSubtitles,
     onDanmakuStyleChange,
     onDanmakuFilterChange,
     onDanmakuAdvancedChange,
@@ -89,6 +93,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const [subtitleUrlInput, setSubtitleUrlInput] = useState('')
   const [autoSearching, setAutoSearching] = useState(false)
   const [autoSearchMsg, setAutoSearchMsg] = useState('')
+  const [embeddedLoading, setEmbeddedLoading] = useState(false)
+  const [embeddedMsg, setEmbeddedMsg] = useState('')
   const [browserOpen, setBrowserOpen] = useState(false)
   const subtitleFileInputRef = useRef<HTMLInputElement>(null)
 
@@ -124,6 +130,21 @@ export function SettingsPanel(props: SettingsPanelProps) {
     } finally {
       setAutoSearching(false)
       setTimeout(() => setAutoSearchMsg(''), 3000)
+    }
+  }
+
+  const handleLoadEmbedded = async () => {
+    if (embeddedLoading || !onLoadEmbeddedSubtitles) return
+    setEmbeddedLoading(true)
+    setEmbeddedMsg('')
+    try {
+      const count = await onLoadEmbeddedSubtitles()
+      setEmbeddedMsg(count > 0 ? `提取 ${count} 条内嵌字幕` : '未检测到内嵌字幕')
+    } catch {
+      setEmbeddedMsg('提取失败')
+    } finally {
+      setEmbeddedLoading(false)
+      setTimeout(() => setEmbeddedMsg(''), 3000)
     }
   }
 
@@ -371,6 +392,46 @@ export function SettingsPanel(props: SettingsPanelProps) {
                               }}
                             >
                               {autoSearchMsg}
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {canLoadEmbeddedSubtitles && onLoadEmbeddedSubtitles && (
+                        <>
+                          <div
+                            className="border-t pt-1"
+                            style={{
+                              borderColor:
+                                'color-mix(in srgb, var(--md-sys-color-outline) 20%, transparent)',
+                            }}
+                          />
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-7 w-full justify-center gap-1 text-xs"
+                            disabled={embeddedLoading}
+                            icon={
+                              embeddedLoading ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <FileText className="h-3 w-3" />
+                              )
+                            }
+                            onClick={handleLoadEmbedded}
+                          >
+                            {embeddedLoading ? '提取中...' : '提取内嵌字幕'}
+                          </Button>
+                          {embeddedMsg && (
+                            <div
+                              className="text-center text-[10px]"
+                              style={{
+                                color:
+                                  embeddedMsg === '提取失败'
+                                    ? 'var(--md-sys-color-error)'
+                                    : 'var(--md-sys-color-on-surface-variant)',
+                              }}
+                            >
+                              {embeddedMsg}
                             </div>
                           )}
                         </>

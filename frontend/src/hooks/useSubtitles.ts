@@ -8,6 +8,10 @@ import {
   getSubtitleLabel,
   type SubtitleFormat,
 } from '@/lib/subtitleParser'
+import {
+  extractEmbeddedSubtitle,
+  resolveServerFile,
+} from '@/modules/server-files/serverFilesApi'
 
 export interface SubtitleTrack {
   url: string
@@ -318,6 +322,61 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     [isHost, broadcast]
   )
 
+  /**
+   * 加载视频文件中的内嵌字幕轨道。
+   *
+   * 内部先调用 resolveServerFile 探测字幕轨道列表，
+   * 再逐个调用 extract-subtitle API 提取内容，
+   * 解析为 VTT data URL 后添加到字幕轨道列表。
+   * 仅房主调用有效。
+   *
+   * @param filePath  服务器文件路径（前缀式）
+   * @returns 成功加载的轨道数
+   */
+  const loadEmbeddedSubtitles = useCallback(
+    async (filePath: string): Promise<number> => {
+      if (!isHost) return 0
+
+      let tracks: { index: number; language: string | null; title: string | null }[]
+      try {
+        const resolved = await resolveServerFile(filePath)
+        tracks = resolved.subtitleTracks ?? []
+      } catch (err) {
+        console.error('[useSubtitles] resolve server file for embedded subtitles failed:', err)
+        return 0
+      }
+      if (tracks.length === 0) return 0
+
+      const loaded: SubtitleTrack[] = []
+      for (const track of tracks) {
+        try {
+          const result = await extractEmbeddedSubtitle(filePath, track.index)
+          const vtt = parseSubtitle(result.content, 'srt')
+          const dataUrl = vttToDataUrl(vtt)
+          const label = track.title || track.language || `轨道 ${track.index}`
+          loaded.push({ url: dataUrl, label, lang: track.language || undefined })
+        } catch (err) {
+          console.error('[useSubtitles] extract embedded subtitle failed:', track.index, err)
+        }
+      }
+
+      if (loaded.length === 0) return 0
+
+      setState((prev) => {
+        const next: SubtitleState = {
+          ...prev,
+          subtitleTracks: [...prev.subtitleTracks, ...loaded],
+          subtitleEnabled: prev.subtitleEnabled || prev.subtitleTracks.length === 0,
+          activeTrackIndex: prev.subtitleTracks.length === 0 ? 0 : prev.activeTrackIndex,
+        }
+        broadcast(next)
+        return next
+      })
+      return loaded.length
+    },
+    [isHost, broadcast]
+  )
+
   const setFontSize = useCallback(
     (size: number) => {
       setState((prev) => {
@@ -370,6 +429,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     addTrackFromContent,
     clearTracks,
     searchAutoSubtitles,
+    loadEmbeddedSubtitles,
     setFontSize,
     setOffset,
   }

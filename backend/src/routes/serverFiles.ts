@@ -52,11 +52,13 @@ import {
   downloadToFile,
   resolveFfmpegPath,
   probeMediaInfo,
+  extractSubtitleTrack,
   needsAudioTranscode,
   isFfmpegTranscodeCapable,
   createAudioTranscodeStream,
   resetFfmpegCache,
   type InstallProgress,
+  type SubtitleStreamInfo,
 } from '../services/ffmpeg';
 
 const router = Router();
@@ -565,10 +567,12 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
     // 探测音频编码（用于前端判断是否需要转码提示）
     let audioCodec: string | null = null;
     let duration: number | null = null;
+    let subtitleTracks: SubtitleStreamInfo[] = [];
     try {
       const probe = await probeMediaInfo(targetAbs);
       audioCodec = probe.audioCodec;
       duration = probe.duration;
+      subtitleTracks = probe.subtitleStreams || [];
     } catch {
       // 探测失败不影响正常流程
     }
@@ -580,12 +584,74 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
       format,
       audioCodec,
       duration,
+      subtitleTracks,
       size: fs.statSync(targetAbs).size,
     });
   } catch (err) {
     res.status(400).json({
       success: false,
       message: err instanceof Error ? err.message : '解析文件失败',
+    });
+  }
+});
+
+// ============ 7.5 提取内嵌字幕轨道 ============
+
+/**
+ * GET /extract-subtitle — 提取视频文件中指定字幕轨道的内容。
+ *
+ * 查询参数：
+ *   path   — 前缀式文件路径（如 'uploads:/movie.mkv'）
+ *   index  — ffprobe 流索引（绝对索引，从 /resolve 返回的 subtitleTracks 中获取）
+ *
+ * 返回 JSON：
+ *   { success: true, content, format, label }
+ *   content 为 SRT 格式字幕文本，前端解析为 VTT 后使用
+ */
+router.get('/extract-subtitle', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const target = typeof req.query.path === 'string' ? req.query.path : '';
+    const streamIndex = parseInt(String(req.query.index), 10);
+
+    if (!target.trim()) {
+      res.status(400).json({ success: false, message: '缺少 path 参数' });
+      return;
+    }
+    if (!Number.isFinite(streamIndex) || streamIndex < 0) {
+      res.status(400).json({ success: false, message: '缺少或无效的 index 参数' });
+      return;
+    }
+
+    const roots = await loadRootRegistry();
+    const { abs: targetAbs } = resolveSafePath(target, roots);
+    if (!fs.existsSync(targetAbs) || fs.statSync(targetAbs).isDirectory()) {
+      res.status(404).json({ success: false, message: '文件不存在' });
+      return;
+    }
+
+    // 验证该流索引确实是字幕流
+    const probe = await probeMediaInfo(targetAbs);
+    const subStream = (probe.subtitleStreams || []).find(s => s.index === streamIndex);
+    if (!subStream) {
+      res.status(400).json({ success: false, message: '未找到指定的字幕轨道' });
+      return;
+    }
+
+    const content = await extractSubtitleTrack(targetAbs, streamIndex);
+    const label = subStream.title || subStream.language || `轨道 ${streamIndex}`;
+
+    res.json({
+      success: true,
+      content,
+      format: 'srt',
+      label,
+      language: subStream.language,
+    });
+  } catch (err) {
+    console.error('[server-files] extract-subtitle error:', err);
+    res.status(500).json({
+      success: false,
+      message: err instanceof Error ? err.message : '提取字幕失败',
     });
   }
 });

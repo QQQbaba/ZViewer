@@ -3,6 +3,7 @@ import type {
   BilibiliDownloadedFile,
   BilibiliDownloadCallbacks,
   BilibiliDownloadProgress,
+  EmbeddedSubtitleTrack,
   FfmpegInstallProgress,
   FfmpegStatus,
   ServerBrowseResult,
@@ -151,6 +152,7 @@ export async function resolveServerFile(
     size?: number
     audioCodec?: string | null
     duration?: number | null
+    subtitleTracks?: EmbeddedSubtitleTrack[]
   }
   if (!res.ok || !data.success || !data.videoUrl) {
     throw new Error(data.message || '解析服务器文件失败')
@@ -162,6 +164,38 @@ export async function resolveServerFile(
     size: data.size ?? 0,
     audioCodec: data.audioCodec,
     duration: data.duration,
+    subtitleTracks: data.subtitleTracks,
+  }
+}
+
+/**
+ * 提取视频文件中指定内嵌字幕轨道的内容。
+ *
+ * 后端使用 ffmpeg 将字幕轨道导出为 SRT 格式。
+ */
+export async function extractEmbeddedSubtitle(
+  path: string,
+  streamIndex: number
+): Promise<{ content: string; format: string; label: string; language: string | null }> {
+  const res = await apiFetch(
+    `/api/server-files/extract-subtitle?path=${encodeURIComponent(path)}&index=${streamIndex}`
+  )
+  const data = (await res.json()) as {
+    success: boolean
+    message?: string
+    content?: string
+    format?: string
+    label?: string
+    language?: string | null
+  }
+  if (!res.ok || !data.success || !data.content) {
+    throw new Error(data.message || '提取字幕失败')
+  }
+  return {
+    content: data.content,
+    format: data.format || 'srt',
+    label: data.label || `轨道 ${streamIndex}`,
+    language: data.language ?? null,
   }
 }
 

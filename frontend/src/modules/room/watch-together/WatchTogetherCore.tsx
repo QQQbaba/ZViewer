@@ -126,6 +126,11 @@ export function WatchTogetherCore({
     (state) =>
       state.movies.find((m) => m.id === state.currentMovieId)?.sourceType ?? ''
   )
+  // 当前影片的服务器文件路径（仅 server-files 源有值），用于加载内嵌字幕
+  const currentMoviePath = useRoomStore(
+    (state) =>
+      state.movies.find((m) => m.id === state.currentMovieId)?.path ?? null
+  )
   const {
     watchTogether,
     setWatchTogether,
@@ -145,9 +150,10 @@ export function WatchTogetherCore({
   // 字幕状态：房主操作广播同步，观众监听应用
   const subtitles = useSubtitles({ roomId, isHost })
 
-  // ── 切换影片时自动搜索同目录字幕 ──────────────────────────
-  // 当房主切换到新影片时，清空旧字幕并在影片所在目录中搜索同名字幕文件。
-  // 支持 WebDAV / FTP / OpenList / 服务器文件四种源类型，
+  // ── 切换影片时自动搜索同目录字幕 + 内嵌字幕 ──────────────
+  // 当房主切换到新影片时，清空旧字幕并：
+  // - WebDAV/FTP/OpenList/服务器文件：在影片所在目录中搜索同名字幕文件
+  // - 服务器文件：额外探测并提取视频内嵌字幕轨道
   // 其他源类型（如 bilibili）仅清空旧字幕。
   const supportedSubtitleSources = ['webdav', 'ftp', 'openlist', 'server-files']
   useEffect(() => {
@@ -159,8 +165,12 @@ export function WatchTogetherCore({
     if (supportedSubtitleSources.includes(currentMovieSourceType)) {
       void subtitles.searchAutoSubtitles(currentMovieId)
     }
+    // 服务器文件：额外加载内嵌字幕轨道
+    if (currentMovieSourceType === 'server-files' && currentMoviePath) {
+      void subtitles.loadEmbeddedSubtitles(currentMoviePath)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentMovieId, isHost, currentMovieSourceType])
+  }, [currentMovieId, isHost, currentMovieSourceType, currentMoviePath])
 
   // ── CLI 代理上线后自动重新加载 ──────────────────────────
   // 页面刷新时 loadMovie 在 cliAgentStore.agents 填充之前就执行了，
@@ -617,9 +627,19 @@ export function WatchTogetherCore({
   // ArtPlayer 自行创建 video 元素，无法以 JSX children 声明 <track>，
   // 改为命令式追加（data-zc-subtitle 标记与 ArtPlayer 自带 $track 区分）。
   useEffect(() => {
+    // 移除前先禁用所有 zc 字幕轨道的 textTrack，清除当前显示的字幕
+    // 防止切换视频时残留旧字幕（仅移除 track 元素不会立即清除已显示的 cue）
+    const allTrackEls = Array.from(video.querySelectorAll('track'))
+    allTrackEls.forEach((el, i) => {
+      if (!el.hasAttribute('data-zc-subtitle')) return
+      const textTrack = video.textTracks[i]
+      if (textTrack) textTrack.mode = 'disabled'
+    })
+    // 移除旧 track 元素
     video
       .querySelectorAll('track[data-zc-subtitle]')
       .forEach((el) => el.remove())
+    // 挂载新轨道
     subtitles.subtitleTracks.forEach((t) => {
       const el = document.createElement('track')
       el.kind = 'subtitles'
@@ -1600,6 +1620,16 @@ export function WatchTogetherCore({
                 isHost &&
                 currentMovieId != null &&
                 supportedSubtitleSources.includes(currentMovieSourceType)
+              }
+              onLoadEmbeddedSubtitles={
+                isHost && currentMoviePath
+                  ? () => subtitles.loadEmbeddedSubtitles(currentMoviePath)
+                  : undefined
+              }
+              canLoadEmbeddedSubtitles={
+                isHost &&
+                currentMovieSourceType === 'server-files' &&
+                !!currentMoviePath
               }
               onDanmakuStyleChange={setStyle}
               onDanmakuFilterChange={setFilters}
