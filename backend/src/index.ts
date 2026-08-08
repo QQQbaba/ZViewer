@@ -32,6 +32,7 @@ import serverFilesRoutes from './routes/serverFiles';
 import openlistRoutes from './routes/openlist';
 import webdavRoutes from './routes/webdav';
 import ftpRoutes from './routes/ftp';
+import subtitlesRoutes from './routes/subtitles';
 import updaterRoutes from './routes/updater';
 import clientLogsRoutes from './routes/client-logs';
 import cliRoutes from './routes/cli';
@@ -279,6 +280,7 @@ async function bootstrap() {
   app.use('/api/openlist', openlistRoutes);
   app.use('/api/webdav', webdavRoutes);
   app.use('/api/ftp', ftpRoutes);
+  app.use('/api/subtitles', subtitlesRoutes);
   app.use('/api/system/update', updaterRoutes);
   app.use('/api/stream-push', streamPushRouter);
 

@@ -516,11 +516,25 @@ router.get('/stream', async (req: AuthenticatedRequest, res: Response): Promise<
       return;
     }
 
+    // 凭证回退：旧电影可能未存储 username/password，从 UserMount 表补全
+    let username = movie.username || undefined;
+    let password = movie.password || undefined;
+    if (!username || !password) {
+      const mount = await AppDataSource.getRepository(UserMount).findOneBy({
+        serverUrl: movie.serverUrl,
+        type: 'openlist',
+      });
+      if (mount) {
+        username = username || mount.username || undefined;
+        password = password || mount.password || undefined;
+      }
+    }
+
     const params: WebDAVConnectionParams = {
       serverUrl: normalizeOpenListServerUrl(movie.serverUrl),
       path: movie.path,
-      username: movie.username || undefined,
-      password: movie.password || undefined,
+      username,
+      password,
     };
 
     const rangeHeader = req.headers.range;
