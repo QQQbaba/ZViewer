@@ -220,10 +220,21 @@ type RequestOptions = Omit<RequestInit, 'headers'> & {
 /**
  * 并发安全的 refresh token。
  * 多个请求同时遇到 401 时，只发起一次 /api/auth/refresh，其他请求复用结果。
+ *
+ * sessionExpired 标志：refresh 失败后置位，阻止后续请求反复尝试 refresh（级联失败）。
+ * 重新登录或页面刷新后自动重置（模块重新加载）。
  */
 let inflightRefresh: Promise<boolean> | null = null
+let sessionExpired = false
+
+/** 重置 session 过期状态（登录成功后调用） */
+export function resetSessionExpired(): void {
+  sessionExpired = false
+}
 
 async function refreshAccessToken(): Promise<boolean> {
+  // session 已知过期 → 不再尝试 refresh，避免级联失败
+  if (sessionExpired) return false
   if (inflightRefresh) return inflightRefresh
 
   inflightRefresh = (async () => {
@@ -244,8 +255,8 @@ async function refreshAccessToken(): Promise<boolean> {
       }
 
       // refresh 接口明确拒绝（401/403）→ refresh token 也过期
-      // 不在这里调用 expireSession() —— 让调用方（validate / useSocket）统一处理降级
-      // 避免提前设置 autoLoginStatus: 'done' 导致 UI 闪烁
+      // 标记 session 已过期，阻止后续请求反复尝试 refresh
+      sessionExpired = true
       return false
     } catch {
       // 网络错误（服务器重启中）→ 不登出，让上层重试
@@ -318,6 +329,28 @@ export async function apiGet<T = unknown>(
     // 非 JSON 响应（如 204 No Content）
   }
   return { data, ok: res.ok, status: res.status, response: res }
+}
+
+/**
+ * 安全解析 Response 的 JSON 体。
+ * 当响应非 JSON（如 SPA 回退返回的 HTML、502 网关错误页等）时返回 fallback 而非抛异常。
+ *
+ * 典型用法：
+ * ```ts
+ * const data = await safeJson<{ success: boolean }>(res, { success: false })
+ * if (data.success) { ... }
+ * ```
+ */
+export async function safeJson<T>(
+  res: Response,
+  fallback: T
+): Promise<T> {
+  try {
+    return (await res.json()) as T
+  } catch (err) {
+    console.error('[safeJson] JSON parse failed:', err)
+    return fallback
+  }
 }
 
 /**

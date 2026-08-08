@@ -431,10 +431,16 @@ async function bootstrap() {
   // 挂载新模块的 REST 路由
   app.use('/api/rooms', createMovieRouter(io));
 
-  // SPA 回退：必须在所有 API 路由注册之后，否则会拦截 /api/ 请求返回 HTML
+  // SPA 回退：必须在所有 API 路由注册之后，否则会拦截 /api/ 请求返回 HTML。
+  // /api/ 路径不应被 SPA 回退处理 —— 未匹配的 API 请求返回 404 JSON，
+  // 避免前端收到 HTML（index.html）后 JSON.parse 报错。
   if (useHttps && fs.existsSync(path.resolve(PROJECT_ROOT, 'frontend/dist'))) {
     const frontendDist = path.resolve(PROJECT_ROOT, 'frontend/dist');
-    app.use((_req, res) => {
+    app.use((req, res) => {
+      if (req.path.startsWith('/api/')) {
+        res.status(404).json({ success: false, message: 'API 路径不存在' });
+        return;
+      }
       res.sendFile(path.join(frontendDist, 'index.html'));
     });
   }

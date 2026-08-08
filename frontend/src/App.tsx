@@ -5,7 +5,7 @@ import { ThemeProvider } from '@/components/ThemeProvider'
 import { RequireAuth } from '@/components/RequireAuth'
 import { useAuthStore, type User } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, resetSessionExpired } from '@/lib/api'
 import { useBackendHealth } from '@/hooks/useBackendHealth'
 import { ReturnToRoomButton } from '@/components/ReturnToRoomButton'
 import HomePage from '@/pages/HomePage'
@@ -52,6 +52,8 @@ function AuthInitializer() {
           }
         }
         if (res.ok && data.success && data.user) {
+          // guest token 获取成功 → 重置 session 过期标志
+          resetSessionExpired()
           setUser({
             id: data.user.id,
             username: data.user.username,

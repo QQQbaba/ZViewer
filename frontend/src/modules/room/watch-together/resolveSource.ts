@@ -1,6 +1,6 @@
 import type { ResolvedSource } from '@/modules/bilibili/types'
 import type { MediaFormat } from '@/lib/mediaFormat'
-import { apiFetch, getApiUrl } from '@/lib/api'
+import { apiFetch, getApiUrl, safeJson } from '@/lib/api'
 
 // Bilibili 模块化后的 re-export：保持向后兼容
 // 类型与解析偏好
@@ -45,14 +45,14 @@ export async function resolveFTP(params: FTPParams): Promise<ResolvedSource> {
     ...(params.port ? { port: String(params.port) } : {}),
   }).toString()
   const res = await apiFetch(`/api/stream/resolve-ftp?${query}`)
-  const data = (await res.json()) as {
+  const data = await safeJson<{
     success: boolean
     message?: string
     title?: string
     videoUrl?: string
     format?: MediaFormat
     duration?: number
-  }
+  }>(res, { success: false })
   if (!res.ok || !data.success || !data.videoUrl) {
     throw new Error(data.message || '解析 FTP 文件失败')
   }
@@ -86,11 +86,11 @@ export interface AnimeSource {
 
 export async function getAnimeSources(): Promise<AnimeSource[]> {
   const res = await apiFetch('/api/stream/anime/sources')
-  const data = (await res.json()) as {
+  const data = await safeJson<{
     success: boolean
     message?: string
     sources?: AnimeSource[]
-  }
+  }>(res, { success: false })
   if (!res.ok || !data.success || !Array.isArray(data.sources)) {
     throw new Error(data.message || '获取番剧数据源失败')
   }
@@ -104,11 +104,11 @@ export async function searchAnime(
   const res = await apiFetch(
     `/api/stream/anime/search?source=${encodeURIComponent(source)}&keyword=${encodeURIComponent(keyword)}`
   )
-  const data = (await res.json()) as {
+  const data = await safeJson<{
     success: boolean
     message?: string
     results?: AnimeSearchResult[]
-  }
+  }>(res, { success: false })
   if (!res.ok || !data.success || !Array.isArray(data.results)) {
     throw new Error(data.message || '搜索番剧失败')
   }
@@ -122,11 +122,11 @@ export async function getAnimeEpisodes(
   const res = await apiFetch(
     `/api/stream/anime/episodes?source=${encodeURIComponent(source)}&identifier=${encodeURIComponent(identifier)}`
   )
-  const data = (await res.json()) as {
+  const data = await safeJson<{
     success: boolean
     message?: string
     episodes?: AnimeEpisode[]
-  }
+  }>(res, { success: false })
   if (!res.ok || !data.success || !Array.isArray(data.episodes)) {
     throw new Error(data.message || '获取番剧集数失败')
   }
@@ -154,7 +154,7 @@ export async function resolveAnimeEpisode(
     },
     body: JSON.stringify({ source, episode }),
   })
-  const data = (await res.json()) as {
+  const data = await safeJson<{
     success: boolean
     message?: string
     url?: string
@@ -164,7 +164,7 @@ export async function resolveAnimeEpisode(
     videoCodec?: string
     audioCodec?: string
     duration?: number
-  }
+  }>(res, { success: false })
   if (!res.ok || !data.success || !data.url) {
     throw new Error(data.message || '解析番剧播放地址失败')
   }
@@ -206,11 +206,11 @@ export interface FollowingBangumi {
 
 export async function getFollowingBangumi(): Promise<FollowingBangumi[]> {
   const res = await apiFetch('/api/stream/bilibili/following-bangumi')
-  const data = (await res.json()) as {
+  const data = await safeJson<{
     success: boolean
     message?: string
     list?: FollowingBangumi[]
-  }
+  }>(res, { success: false })
   if (!res.ok || !data.success || !Array.isArray(data.list)) {
     throw new Error(data.message || '获取关注番剧列表失败')
   }
@@ -230,11 +230,11 @@ export async function getBangumiEpisodes(
   const res = await apiFetch(
     `/api/stream/bilibili/bangumi-episodes?seasonId=${encodeURIComponent(seasonId)}`
   )
-  const data = (await res.json()) as {
+  const data = await safeJson<{
     success: boolean
     message?: string
     episodes?: BangumiEpisode[]
-  }
+  }>(res, { success: false })
   if (!res.ok || !data.success || !Array.isArray(data.episodes)) {
     throw new Error(data.message || '获取番剧集数失败')
   }

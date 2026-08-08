@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, safeJson } from '@/lib/api'
 
 export type RegistrationMode = 'open' | 'approval' | 'closed'
 export type RoomCreationMode = 'admin-only' | 'all-users'
@@ -60,11 +60,11 @@ export const useSystemSettingsStore = create<SystemSettingsState>(
         // 公开接口：所有用户（含 guest）均可访问，仅返回非敏感字段。
         // 用于 HomePage 决定是否显示「开始共享」按钮。
         const res = await apiFetch('/api/auth/public-settings')
-        const data = (await res.json()) as {
+        const data = await safeJson<{
           success: boolean
           settings?: Partial<SystemSettings>
           message?: string
-        }
+        }>(res, { success: false })
         if (data.success && data.settings) {
           set({
             ...DEFAULT_SETTINGS,
@@ -82,11 +82,11 @@ export const useSystemSettingsStore = create<SystemSettingsState>(
       set({ loading: true })
       try {
         const res = await apiFetch('/api/admin/settings')
-        const data = (await res.json()) as {
+        const data = await safeJson<{
           success: boolean
           settings?: Partial<SystemSettings>
           message?: string
-        }
+        }>(res, { success: false })
         if (data.success && data.settings) {
           set({
             ...DEFAULT_SETTINGS,

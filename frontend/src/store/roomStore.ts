@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, safeJson } from '@/lib/api'
 import type {
   ResolvedSource,
   QualityOption,
@@ -125,7 +125,7 @@ export function mapDtoToMovie(dto: MovieDto): Movie {
 }
 
 async function parseResponse<T>(res: Response): Promise<T> {
-  const data = (await res.json()) as T
+  const data = await safeJson<T>(res, {} as T)
   return data
 }
 

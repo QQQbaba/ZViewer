@@ -13,7 +13,7 @@ param(
     [string]$HostArg = '',            # cert/https 的域名或 IP（缺省则交互选择）
 
     [switch]$Force,                   # 证书强制重新签发
-    [switch]$Https                    # start 时使用 HTTPS（后端统一提供前端页面）
+    [switch]$Https                    # start 时使用 HTTPS（后端 HTTPS，前端仍为 4173）
 )
 
 $ErrorActionPreference = "Stop"
@@ -92,9 +92,9 @@ function Select-CertHost {
     Write-Host "  请选择证书签发类型："
     Write-Host "    [1] localhost（本机访问，默认，自签证书）"
     Write-Host "    [2] 域名或公网 IP（如 example.com 或 1.2.3.4）"
-    Write-Host "        - 域名将自动申请 Let's Encrypt 可信 CA 证书"
-    Write-Host "          （需域名已解析到本机且 80 端口可访问）"
-    Write-Host "        - 公网 IP 或内网地址使用自签证书"
+    Write-Host "        - 域名和公网 IP 将自动申请 Let's Encrypt 可信 CA 证书"
+    Write-Host "          （需已指向本机且 80 端口可访问）"
+    Write-Host "        - 内网 IP 使用自签证书"
     $choice = Read-Host "  请输入 1 或 2（直接回车默认 1）"
     if ($choice -eq '2') {
         $hostValue = Read-Host "  请输入域名或公网 IP 地址"
@@ -103,8 +103,8 @@ function Select-CertHost {
             return 'localhost'
         }
         Write-Host ""
-        Write-Host "  [提示] 若输入的是域名，将自动申请 Let's Encrypt 可信 CA 证书；"
-        Write-Host "         若无法申请（域名未解析 / 80 端口不可达），可改输入 IP 或 localhost 使用自签证书。"
+        Write-Host "  [提示] 域名和公网 IP 将自动申请 Let's Encrypt 可信 CA 证书；"
+        Write-Host "         若无法申请（未解析 / 80 端口不可达），可改输入内网 IP 或 localhost 使用自签证书。"
         return $hostValue.Trim()
     }
     return 'localhost'
@@ -161,7 +161,8 @@ function Invoke-Start([switch]$BackendOnly) {
     Write-Host "  ZViewer 启动"
     Write-Host "  后端端口: $BackendPort"
     if ($Https) {
-        Write-Host "  模式: HTTPS（可信/自签证书，前端由后端统一提供）"
+        Write-Host "  模式: HTTPS（可信/自签证书）"
+        Write-Host "  前端端口: $FrontendPort"
     } elseif ($BackendOnly) {
         Write-Host "  模式: 仅后端（HTTP）"
     } else {
@@ -170,13 +171,13 @@ function Invoke-Start([switch]$BackendOnly) {
     Write-Host "========================================"
 
     if (-not (Test-Exe $backendExe "后端程序 zviewer-backend.exe")) { return 1 }
-    if (-not $Https -and -not $BackendOnly -and -not (Test-Exe $frontendExe "前端程序 zviewer-frontend.exe")) { return 1 }
+    if (-not $BackendOnly -and -not (Test-Exe $frontendExe "前端程序 zviewer-frontend.exe")) { return 1 }
 
     if (Test-PortInUse $BackendPort) {
         Write-Host "  [错误] 后端端口 $BackendPort 已被占用" -ForegroundColor Red
         return 1
     }
-    if (-not $Https -and -not $BackendOnly -and (Test-PortInUse $FrontendPort)) {
+    if (-not $BackendOnly -and (Test-PortInUse $FrontendPort)) {
         Write-Host "  [错误] 前端端口 $FrontendPort 已被占用" -ForegroundColor Red
         return 1
     }
@@ -196,7 +197,7 @@ function Invoke-Start([switch]$BackendOnly) {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     "" | Set-Content "$logDir/backend.log" -Encoding UTF8
     "" | Set-Content "$logDir/backend.err.log" -Encoding UTF8
-    if (-not $Https -and -not $BackendOnly) {
+    if (-not $BackendOnly) {
         "" | Set-Content "$logDir/frontend.log" -Encoding UTF8
         "" | Set-Content "$logDir/frontend.err.log" -Encoding UTF8
     }
@@ -221,11 +222,22 @@ function Invoke-Start([switch]$BackendOnly) {
     }
 
     if ($Https) {
-        # HTTPS 模式：后端提供前端静态文件，无需启动前端
-        Write-PidsFile -backendPid $backend.Id -frontendPid $null
+        # HTTPS 模式：后端使用 HTTPS，前端单独启动在 4173 端口
+        Write-Host "  启动前端..."
+        $frontendEnv = @{
+            PORT = "$FrontendPort"
+            BACKEND_URL = "https://localhost:$BackendPort"
+            HOST = "0.0.0.0"
+        }
+        $frontend = Start-ExeWithEnv -FilePath $frontendExe -EnvVars $frontendEnv  `
+            -OutFile "$logDir/frontend.log" -ErrFile "$logDir/frontend.err.log"
+
+        Write-PidsFile -backendPid $backend.Id -frontendPid $frontend.Id
         Write-Host "  后端 PID: $($backend.Id)"
-        Write-Host "  HTTPS 访问: https://localhost:$BackendPort   （后端统一提供前端页面）"
-        Write-Host "  日志: $logDir/"
+        Write-Host "  前端 PID: $($frontend.Id)"
+        Write-Host "  HTTPS 后端: https://localhost:$BackendPort"
+        Write-Host "  访问  : http://localhost:$FrontendPort"
+        Write-Host "  日志  : $logDir/"
     } elseif ($BackendOnly) {
         # 仅后端模式：不启动前端
         Write-PidsFile -backendPid $backend.Id -frontendPid $null
@@ -267,9 +279,7 @@ function Invoke-Stop {
     # 兜底：按端口清理
     Set-Ports
     Stop-ProcessByPort $BackendPort
-    if (-not $Https) {
-        Stop-ProcessByPort $FrontendPort
-    }
+    Stop-ProcessByPort $FrontendPort
     Write-Host "  已停止"
 }
 
@@ -347,12 +357,12 @@ function Show-Help {
     Write-Host "  status             查看运行状态"
     Write-Host "  logs [backend|frontend]  查看日志（默认 backend）"
     Write-Host "  cert [host]        一键签发 SSL 证书（localhost / 域名(Let's Encrypt) / 公网 IP）"
-    Write-Host "  https [host]       签发证书后以 HTTPS 启动（仅后端，统一提供前端页面）"
+    Write-Host "  https [host]       签发证书后以 HTTPS 启动（后端 HTTPS，前端 4173）"
     Write-Host "  help               显示此帮助"
     Write-Host "  menu               交互菜单（无参数时自动进入）"
     Write-Host ""
     Write-Host "start/restart/cert/https 选项:"
-    Write-Host "  -Https                    start 时使用 HTTPS"
+    Write-Host "  -Https                    start 时使用 HTTPS（后端 HTTPS，前端仍为 4173）"
     Write-Host "  -Force                    证书强制重新签发"
     Write-Host ""
     Write-Host "端口: 后端 3333，前端 4173"
@@ -362,7 +372,7 @@ function Show-Help {
     Write-Host "  start.bat start            # HTTP 启动（前后端）"
     Write-Host "  start.bat backend          # 仅启动后端"
     Write-Host "  start.bat https example.com  # 申请 Let's Encrypt 证书后 HTTPS 启动"
-    Write-Host "  start.bat cert 1.2.3.4 -Force  # 为公网 IP 强制重新签发自签证书"
+    Write-Host "  start.bat cert 1.2.3.4 -Force  # 为公网 IP 强制重新签发 Let's Encrypt 证书"
 }
 
 function Show-Menu {
@@ -379,7 +389,7 @@ function Show-Menu {
         Write-Host "  5) 查看状态"
         Write-Host "  6) 查看日志"
         Write-Host "  7) 一键签发 SSL 证书"
-        Write-Host "  8) HTTPS 启动（自动签发证书）"
+        Write-Host "  8) HTTPS 启动（自动签发证书，前后端分离）"
         Write-Host "  0) 退出"
         Write-Host ""
         $choice = Read-Host "  请输入编号 (0-8)"

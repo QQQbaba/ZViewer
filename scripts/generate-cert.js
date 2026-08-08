@@ -12,10 +12,10 @@
  *
  * 用法：node scripts/generate-cert.js [host] [选项]
  *   host       域名、公网 IP 或 localhost。
- *              域名（DNS）默认走 Let's Encrypt 申请可信 CA 证书；
- *              localhost / IP 使用自签证书。
+ *              域名（DNS）和公网 IP 默认走 Let's Encrypt 申请可信 CA 证书；
+ *              localhost / 内网 IP 使用自签证书。
  *   --force    强制重新生成，不检查证书是否已存在
- *   --selfsigned  强制使用自签证书（即使指定的是域名）
+ *   --selfsigned  强制使用自签证书（即使指定的是域名或公网 IP）
  *   --staging  使用 Let's Encrypt 测试环境（staging，无速率限制）
  *   --email <邮箱>  ACME 账号邮箱（可选）
  *   --directory <url> 自定义 ACME 目录 URL（高级选项）
@@ -23,7 +23,8 @@
  * 示例：
  *   node scripts/generate-cert.js                     # localhost 自签
  *   node scripts/generate-cert.js example.com         # 域名 → Let's Encrypt 可信证书
- *   node scripts/generate-cert.js 1.2.3.4 --force     # 公网 IP 自签
+ *   node scripts/generate-cert.js 1.2.3.4             # 公网 IP → Let's Encrypt 可信证书
+ *   node scripts/generate-cert.js 192.168.1.1         # 内网 IP → 自签证书
  *   node scripts/generate-cert.js example.com --selfsigned  # 域名强制自签
  */
 
@@ -50,17 +51,18 @@ const args = process.argv.slice(2);
 function printUsage() {
   console.log('用法: zviewer-cert [host] [选项]');
   console.log('  host       域名、公网 IP 或 localhost');
-  console.log('             域名默认通过 Let\'s Encrypt 申请可信 CA 证书；');
-  console.log('             localhost / IP 使用自签证书');
+  console.log('             域名和公网 IP 默认通过 Let\'s Encrypt 申请可信 CA 证书；');
+  console.log('             localhost / 内网 IP 使用自签证书');
   console.log('  --force    强制重新生成，不检查证书是否已存在');
-  console.log('  --selfsigned  强制使用自签证书（即使指定的是域名）');
+  console.log('  --selfsigned  强制使用自签证书（即使指定的是域名或公网 IP）');
   console.log('  --staging  使用 Let\'s Encrypt 测试环境');
   console.log('  --email <邮箱>  ACME 账号邮箱（可选）');
   console.log('  --directory <url> 自定义 ACME 目录 URL（高级选项）');
   console.log('示例:');
   console.log('  zviewer-cert                 # localhost 自签证书');
   console.log('  zviewer-cert example.com     # 域名 → Let\'s Encrypt 可信证书');
-  console.log('  zviewer-cert 1.2.3.4 --force # 公网 IP 自签证书');
+  console.log('  zviewer-cert 1.2.3.4         # 公网 IP → Let\'s Encrypt 可信证书');
+  console.log('  zviewer-cert 192.168.1.1     # 内网 IP → 自签证书');
   console.log('  zviewer-cert example.com --selfsigned  # 域名强制自签');
 }
 
@@ -134,9 +136,45 @@ if (host && host.toLowerCase() !== 'localhost') {
   }
 }
 
-// 该次签发是否走 ACME 可信 CA（单标签主机名按内网主机处理，走自签）
+/**
+ * 判断 IP 地址是否为公网地址（非私有/环回/链路本地）。
+ * Let's Encrypt 自 2025 年起支持为公网 IP 签发可信证书。
+ */
+function isPublicIP(ip) {
+  const v = net.isIP(ip);
+  if (v === 4) {
+    const parts = ip.split('.').map(Number);
+    // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8,
+    // 169.254.0.0/16, 0.0.0.0/8, 100.64.0.0/10 (CGNAT)
+    if (parts[0] === 10) return false;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
+    if (parts[0] === 192 && parts[1] === 168) return false;
+    if (parts[0] === 127) return false;
+    if (parts[0] === 169 && parts[1] === 254) return false;
+    if (parts[0] === 0) return false;
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return false;
+    return true;
+  }
+  if (v === 6) {
+    const lower = ip.toLowerCase();
+    // ::1/128 (loopback), fc00::/7 (unique local), fe80::/10 (link-local)
+    if (lower === '::1') return false;
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return false;
+    if (lower.startsWith('fe8') || lower.startsWith('fe9') ||
+        lower.startsWith('fea') || lower.startsWith('feb')) return false;
+    return true;
+  }
+  return false;
+}
+
+// 该次签发是否走 ACME 可信 CA
+// - 域名（含点）→ Let's Encrypt
+// - 公网 IP → Let's Encrypt（2025 年起支持）
+// - localhost / 内网 IP / 单标签主机名 → 自签
 const useAcme =
-  host !== null && hostKind === 'dns' && !selfsigned && host.includes('.');
+  host !== null && !selfsigned &&
+  ((hostKind === 'dns' && host.includes('.')) ||
+   (hostKind === 'ip' && isPublicIP(host)));
 
 // ==================== 证书读取工具 ====================
 function readCertSanHosts(certFile) {
@@ -183,7 +221,7 @@ if (!force && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE)) {
   const selfSigned = isSelfSignedCert(CERT_FILE);
 
   if (useAcme) {
-    // CA 模式：要求已有证书是 CA 签发的、含该域名且未过期
+    // CA 模式：要求已有证书是 CA 签发的、含该主机且未过期
     if (hostExists && notExpired && !selfSigned) {
       console.log(`  可信证书已存在（已包含 ${host}），跳过申请（如需重新申请请加 --force）`);
       process.exit(0);
@@ -297,10 +335,12 @@ async function requestCaCert() {
   const directoryUrl =
     directoryOverride || (staging ? DIRECTORY_STAGING : DIRECTORY_LETSENCRYPT);
   const envName = staging ? 'Let\'s Encrypt 测试环境(staging)' : 'Let\'s Encrypt';
+  const idType = hostKind === 'ip' ? 'ip' : 'dns';
+  const idLabel = idType === 'ip' ? 'IP 地址' : '域名';
 
-  console.log(`  通过 ${envName} 申请可信 CA 证书（域名: ${host}）...`);
+  console.log(`  通过 ${envName} 申请可信 CA 证书（${idLabel}: ${host}）...`);
   console.log('  提示: 需满足以下条件才能成功：');
-  console.log('        1) 域名已解析到本机公网 IP');
+  console.log(`        1) ${idLabel}已指向本机且公网可达`);
   console.log('        2) 80 端口空闲且防火墙/安全组已放行（HTTP-01 验证）');
 
   const { fullchainPem, keyPem } = await acme.requestCertificate({
@@ -308,6 +348,7 @@ async function requestCaCert() {
     directoryUrl,
     accountKeyFile: ACCOUNT_KEY_FILE,
     email: email || undefined,
+    identifierType: idType,
     challengePort: Number(process.env.ZVIEWER_CERT_CHALLENGE_PORT) || 80,
     log: (msg) => console.log(msg),
   });
@@ -324,10 +365,12 @@ async function requestCaCert() {
 // ==================== 主流程 ====================
 async function main() {
   if (useAcme) {
-    console.log(`  生成 SSL 证书（类型: 域名 ${host}，Let's Encrypt 可信 CA）...`);
+    const idLabel = hostKind === 'ip' ? 'IP 地址' : '域名';
+    console.log(`  生成 SSL 证书（类型: ${idLabel} ${host}，Let's Encrypt 可信 CA）...`);
     await requestCaCert();
   } else if (host && hostKind) {
-    console.log(`  生成 SSL 证书（类型: ${hostKind === 'ip' ? '公网 IP' : '域名'} ${host}，自签）...`);
+    const idLabel = hostKind === 'ip' ? '内网 IP' : '域名';
+    console.log(`  生成 SSL 证书（类型: ${idLabel} ${host}，自签）...`);
     generateSelfSignedCert();
   } else {
     console.log('  生成 SSL 证书（类型: localhost，自签）...');
@@ -341,8 +384,9 @@ main()
     console.error('  [错误] 证书生成失败:', err.message);
     console.error('');
     if (useAcme) {
+      const idLabel = hostKind === 'ip' ? 'IP 地址' : '域名';
       console.error('  常见原因：');
-      console.error('    1. 域名未解析到本机公网 IP');
+      console.error(`    1. ${idLabel}未指向本机或公网不可达`);
       console.error('    2. 80 端口被占用或防火墙/安全组未放行');
       console.error('    3. 申请过于频繁（Let\'s Encrypt 有速率限制，可用 --staging 测试）');
       console.error('  如需继续使用自签证书，请加 --selfsigned 参数');

@@ -44,6 +44,19 @@ port_in_use() {
   fi
 }
 
+kill_port() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    local pids
+    pids=$(lsof -ti:"$port" 2>/dev/null || true)
+    [[ -n "$pids" ]] && kill $pids 2>/dev/null || true
+  elif command -v ss >/dev/null 2>&1; then
+    local pids
+    pids=$(ss -lptn "sport = :$port" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+    [[ -n "$pids" ]] && kill $pids 2>/dev/null || true
+  fi
+}
+
 # 等待端口开始监听（后端初始化需要数秒，避免前端先就绪后页面请求被拒）
 wait_port_ready() {
   local port="$1"
@@ -94,7 +107,7 @@ cmd_start() {
   echo "  后端端口: $BACKEND_PORT"
   if [[ "$HTTPS_MODE" -eq 1 ]]; then
     echo "  模式: HTTPS（自签/可信证书）"
-    echo "  前端: 由后端统一提供"
+    echo "  前端端口: $FRONTEND_PORT"
   elif [[ "$BACKEND_ONLY" -eq 1 ]]; then
     echo "  模式: 仅后端（HTTP）"
   else
@@ -106,7 +119,7 @@ cmd_start() {
     echo "  错误：后端端口 $BACKEND_PORT 已被占用" >&2
     exit 1
   fi
-  if [[ "$HTTPS_MODE" -eq 0 ]] && [[ "$BACKEND_ONLY" -eq 0 ]] && port_in_use "$FRONTEND_PORT"; then
+  if [[ "$BACKEND_ONLY" -eq 0 ]] && port_in_use "$FRONTEND_PORT"; then
     echo "  错误：前端端口 $FRONTEND_PORT 已被占用" >&2
     exit 1
   fi
@@ -125,12 +138,7 @@ cmd_start() {
     echo "  错误：后端构建产物缺失: $backend_artifact" >&2
     exit 1
   fi
-  if [[ "$HTTPS_MODE" -eq 1 ]]; then
-    if [[ ! -f "$frontend_artifact" ]]; then
-      echo "  错误：前端构建产物缺失: $frontend_artifact，HTTPS 模式需要前端构建产物" >&2
-      exit 1
-    fi
-  elif [[ "$BACKEND_ONLY" -eq 0 ]]; then
+  if [[ "$BACKEND_ONLY" -eq 0 ]]; then
     if [[ ! -f "$frontend_artifact" ]]; then
       echo "  错误：前端构建产物缺失: $frontend_artifact" >&2
       exit 1
@@ -151,7 +159,7 @@ cmd_start() {
 
   # 启动前清空旧日志，避免混叠
   : > "$LOG_DIR/backend.log"
-  if [[ "$HTTPS_MODE" -eq 0 ]] && [[ "$BACKEND_ONLY" -eq 0 ]]; then
+  if [[ "$BACKEND_ONLY" -eq 0 ]]; then
     : > "$LOG_DIR/frontend.log"
   fi
 
@@ -174,17 +182,28 @@ cmd_start() {
   fi
 
   if [[ "$HTTPS_MODE" -eq 1 ]]; then
-    # HTTPS 模式：后端提供前端静态文件，无需启动前端预览服务器
+    # HTTPS 模式：后端使用 HTTPS，前端单独启动在 4173 端口
+    # Vite preview 代理通过 VITE_API_TARGET 指向 HTTPS 后端
+    echo "  启动前端..."
+    pushd "$FRONTEND_DIR" >/dev/null
+    VITE_API_TARGET="https://localhost:$BACKEND_PORT" \
+      nohup npx vite preview --port "$FRONTEND_PORT" --host > "$LOG_DIR/frontend.log" 2>&1 &
+    local frontend_pid=$!
+    popd >/dev/null
+
     node -e "
       const fs = require('fs');
       fs.writeFileSync('$PIDS_FILE', JSON.stringify({
         backend: { pid: $backend_pid },
-        frontend: null
+        frontend: { pid: $frontend_pid }
       }, null, 2));
     "
+
     echo "  后端 PID: $backend_pid"
-    echo "  HTTPS 访问: https://localhost:$BACKEND_PORT"
-    echo "  日志: $LOG_DIR/"
+    echo "  前端 PID: $frontend_pid"
+    echo "  HTTPS 后端: https://localhost:$BACKEND_PORT"
+    echo "  访问  : http://localhost:$FRONTEND_PORT"
+    echo "  日志  : $LOG_DIR/"
   elif [[ "$BACKEND_ONLY" -eq 1 ]]; then
     # 仅后端模式：不启动前端
     node -e "
@@ -225,6 +244,7 @@ cmd_build() {
 }
 
 cmd_stop() {
+  set_ports
   if [[ -f "$PIDS_FILE" ]]; then
     local backend_pid frontend_pid
     backend_pid=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PIDS_FILE','utf8')).backend.pid||'')}catch{}" 2>/dev/null || true)
@@ -235,6 +255,7 @@ cmd_stop() {
   fi
   pkill -f "node.*backend/dist" 2>/dev/null || true
   pkill -f "vite preview" 2>/dev/null || true
+  kill_port "$FRONTEND_PORT"
   echo "  已停止"
 }
 
@@ -277,9 +298,9 @@ select_cert_host() {
   echo "  请选择证书签发类型："
   echo "    [1] localhost（本机访问，默认，自签证书）"
   echo "    [2] 域名或公网 IP（如 example.com 或 1.2.3.4）"
-  echo "        - 域名将自动申请 Let's Encrypt 可信 CA 证书"
-  echo "          （需域名已解析到本机且 80 端口可访问）"
-  echo "        - 公网 IP 或内网地址使用自签证书"
+  echo "        - 域名和公网 IP 将自动申请 Let's Encrypt 可信 CA 证书"
+  echo "          （需已指向本机且 80 端口可访问）"
+  echo "        - 内网 IP 使用自签证书"
   printf "  请输入 1 或 2（直接回车默认 1）: "
   read CERT_CHOICE
   if [ "$CERT_CHOICE" = "2" ]; then
@@ -290,8 +311,8 @@ select_cert_host() {
       CERT_HOST="localhost"
     else
       echo ""
-      echo "  [提示] 若输入的是域名，将自动申请 Let's Encrypt 可信 CA 证书；"
-      echo "         若无法申请（域名未解析 / 80 端口不可达），可改输入 IP 或 localhost 使用自签证书。"
+      echo "  [提示] 域名和公网 IP 将自动申请 Let's Encrypt 可信 CA 证书；"
+      echo "         若无法申请（未解析 / 80 端口不可达），可改输入内网 IP 或 localhost 使用自签证书。"
     fi
   else
     CERT_HOST="localhost"
@@ -318,7 +339,7 @@ do_cert() {
   return 0
 }
 
-# HTTPS 启动：交互选择证书类型 → 签发 → 以 HTTPS 启动（仅后端）
+# HTTPS 启动：交互选择证书类型 → 签发 → 以 HTTPS 启动（后端 HTTPS，前端 4173）
 do_https() {
   local cert_script="$ROOT_DIR/scripts/generate-cert.js"
   if [[ ! -f "$cert_script" ]]; then
@@ -351,13 +372,13 @@ usage() {
   status             查看运行状态
   logs [backend|frontend]  查看日志（默认 backend）
   cert               一键签发 SSL 证书（localhost / 域名(Let's Encrypt) / 公网 IP）
-  https              签发证书后以 HTTPS 启动（仅后端，统一提供前端页面）
+  https              签发证书后以 HTTPS 启动（后端 HTTPS，前端 4173）
   menu               交互菜单（无参数时自动进入）
   help               显示此帮助
 
 start/restart/backend 选项:
       --build             启动前执行构建
-      --https             使用 HTTPS（后端统一提供前端页面）
+      --https             使用 HTTPS（后端 HTTPS，前端仍为 4173）
 
 端口: 后端默认取 .env 的 PORT（否则 3333），前端固定 4173
 EOF

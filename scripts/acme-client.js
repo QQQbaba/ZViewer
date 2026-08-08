@@ -11,11 +11,12 @@
  * 用法（由 generate-cert.js 调用）：
  *   const acme = require('./acme-client');
  *   const { fullchainPem, keyPem } = await acme.requestCertificate({
- *     domain: 'example.com',
+ *     domain: 'example.com',            // 域名或公网 IP
  *     directoryUrl: 'https://acme-v02.api.letsencrypt.org/directory',
  *     accountKeyFile: '/path/to/acme-account.key',
  *     email: 'admin@example.com',      // 可选
  *     challengePort: 80,               // HTTP-01 验证端口（必须公网可访问）
+ *     identifierType: 'dns',           // 'dns' 或 'ip'，默认自动检测
  *     log: (msg) => console.log(msg),  // 可选进度回调
  *   });
  */
@@ -25,6 +26,7 @@
 const crypto = require('node:crypto');
 const http = require('node:http');
 const https = require('node:https');
+const net = require('node:net');
 const fs = require('node:fs');
 const forge = require('node-forge');
 
@@ -148,18 +150,28 @@ function loadOrCreateAccountKey(accountKeyFile) {
 
 // ==================== CSR 生成（node-forge） ====================
 
-function generateCsrPem(domain, privateKeyPem) {
+/**
+ * 生成 CSR（PKCS#10）。
+ * @param {string} identifier   域名或 IP 地址
+ * @param {string} privateKeyPem  私钥 PEM
+ * @param {'dns'|'ip'} [identifierType='dns']  标识符类型
+ */
+function generateCsrPem(identifier, privateKeyPem, identifierType = 'dns') {
   const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
   const csr = forge.pki.createCertificationRequest();
   csr.publicKey = forge.pki.setRsaPublicKey(privateKey.n, privateKey.e);
-  csr.setSubject([{ name: 'commonName', value: domain }]);
+  csr.setSubject([{ name: 'commonName', value: identifier }]);
+  // SAN: DNS → type 2, IP → type 7
+  const sanEntry = identifierType === 'ip'
+    ? { type: 7, ip: identifier }
+    : { type: 2, value: identifier };
   csr.setAttributes([
     {
       name: 'extensionRequest',
       extensions: [
         {
           name: 'subjectAltName',
-          altNames: [{ type: 2, value: domain }],
+          altNames: [sanEntry],
         },
       ],
     },
@@ -203,14 +215,15 @@ function startChallengeServer(challengePort) {
 // ==================== ACME 主流程 ====================
 
 /**
- * 通过 ACME HTTP-01 申请域名证书。
+ * 通过 ACME HTTP-01 申请域名或 IP 证书。
  *
  * @param {object} opts
- * @param {string} opts.domain            需要申请证书的域名
+ * @param {string} opts.domain            需要申请证书的域名或 IP 地址
  * @param {string} opts.directoryUrl      ACME 目录 URL（正式/测试环境）
  * @param {string} opts.accountKeyFile    账号密钥文件路径（不存在则自动生成）
  * @param {string} [opts.email]           账号邮箱（可选）
  * @param {number} [opts.challengePort]   HTTP-01 验证端口，默认 80
+ * @param {'dns'|'ip'} [opts.identifierType]  标识符类型，默认自动检测
  * @param {(msg: string) => void} [opts.log] 进度日志回调
  * @returns {Promise<{fullchainPem: string, keyPem: string}>}
  */
@@ -220,6 +233,7 @@ async function requestCertificate({
   accountKeyFile,
   email,
   challengePort = 80,
+  identifierType,
   log = () => {},
 }) {
   const accountKeyPem = loadOrCreateAccountKey(accountKeyFile);
@@ -259,13 +273,16 @@ async function requestCertificate({
   if (!kid) throw new Error('ACME 账号注册失败（无 location）');
 
   // 4. 创建订单
-  log(`  为 ${domain} 创建订单...`);
+  // 自动检测标识符类型（IP 或 DNS），支持 Let's Encrypt IP 证书
+  const acmeIdType = identifierType || (net.isIP(domain) ? 'ip' : 'dns');
+  const idLabel = acmeIdType === 'ip' ? 'IP 地址' : '域名';
+  log(`  为 ${domain}（${idLabel}）创建订单...`);
   const orderSigned = signJws({
     accountKeyPem,
     url: directory.newOrder,
     nonce,
     payload: {
-      identifiers: [{ type: 'dns', value: domain }],
+      identifiers: [{ type: acmeIdType, value: domain }],
     },
     kid,
   });
@@ -308,9 +325,9 @@ async function requestCertificate({
 
       const challenge = (authz.challenges || []).find((c) => c.type === 'http-01');
       if (!challenge) {
-        throw new Error(`域名 ${domain} 的授权不支持 http-01 验证`);
+        throw new Error(`${idLabel} ${domain} 的授权不支持 http-01 验证`);
       }
-      if (authz.status === 'valid') continue; // 该域名已通过验证
+      if (authz.status === 'valid') continue; // 已通过验证
 
       const keyAuthorization = `${challenge.token}.${thumbprint}`;
       challengeServer.set(challenge.token, keyAuthorization);
@@ -332,14 +349,14 @@ async function requestCertificate({
     }
 
     // 6. 轮询订单状态直到 ready/valid / invalid / 超时
-    log('  等待 CA 验证域名所有权...');
+    log(`  等待 CA 验证${idLabel}所有权...`);
     const deadline = Date.now() + ORDER_TIMEOUT_MS;
     let status = order.status;
 
     while (status === 'pending' || status === 'processing') {
       if (Date.now() > deadline) {
         throw new Error(
-          '验证超时（120 秒）。请检查：域名是否已解析到本机公网 IP、防火墙/安全组是否放行 80 端口',
+          `验证超时（120 秒）。请检查：${idLabel}是否指向本机且公网可达、防火墙/安全组是否放行 80 端口`,
         );
       }
       await new Promise((r) => setTimeout(r, ORDER_POLL_INTERVAL_MS));
@@ -364,7 +381,7 @@ async function requestCertificate({
     }
 
     if (status === 'invalid') {
-      throw new Error('域名所有权验证失败。请检查域名解析与 80 端口可达性');
+      throw new Error(`${idLabel}所有权验证失败。请检查${idLabel}解析与 80 端口可达性`);
     }
     if (status !== 'valid' && status !== 'ready') {
       throw new Error(`ACME 订单异常状态: ${status}`);
@@ -373,11 +390,11 @@ async function requestCertificate({
       throw new Error('ACME 订单缺少 finalize URL');
     }
 
-    // 7. 生成域名密钥 + CSR，finalize
-    log('  生成域名密钥与 CSR...');
+    // 7. 生成密钥 + CSR，finalize
+    log(`  生成${idLabel}密钥与 CSR...`);
     const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
     const domainKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' });
-    const csrPem = generateCsrPem(domain, domainKeyPem);
+    const csrPem = generateCsrPem(domain, domainKeyPem, acmeIdType);
     const csrDerB64 = csrPem
       .replace(/-----[^-]+-----/g, '')
       .replace(/\s+/g, '');
