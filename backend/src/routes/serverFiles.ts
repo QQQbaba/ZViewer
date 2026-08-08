@@ -20,6 +20,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import multer from 'multer';
 import { AppDataSource } from '../data-source';
 import { ServerFolder } from '../entities/ServerFolder';
@@ -46,6 +47,7 @@ import { getUserCookie } from '../routes/stream/helpers';
 import {
   checkFfmpeg,
   installFfmpeg,
+  installFfmpegFromZip,
   mergeVideoAudio,
   downloadToFile,
   resolveFfmpegPath,
@@ -892,6 +894,81 @@ router.post('/ffmpeg-install', async (_req: AuthenticatedRequest, res: Response)
       message: err instanceof Error ? err.message : '安装 FFmpeg 失败',
     });
     res.end();
+  }
+});
+
+/**
+ * POST /ffmpeg-upload — 手动上传 zip 文件安装 FFmpeg。
+ *
+ * 接收 multipart/form-data 中的 file 字段（zip 文件），
+ * 解压并提取 ffmpeg 可执行文件到 bin/ 目录。
+ *
+ * 返回 JSON：
+ *   { success: true, message }
+ *   { success: false, message }
+ */
+const ffmpegUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      const tmpDir = path.join(os.tmpdir(), 'ffmpeg-upload');
+      fs.mkdirSync(tmpDir, { recursive: true });
+      cb(null, tmpDir);
+    },
+    filename: (_req, file, cb) => {
+      cb(null, `ffmpeg-${Date.now()}-${file.originalname}`);
+    },
+  }),
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
+  fileFilter: (_req, file, cb) => {
+    if (file.originalname.toLowerCase().endsWith('.zip')) {
+      cb(null, true);
+    } else {
+      cb(new Error('仅支持 .zip 格式的 FFmpeg 压缩包'));
+    }
+  },
+});
+
+router.post('/ffmpeg-upload', ffmpegUpload.single('file'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ success: false, message: '未收到文件' });
+      return;
+    }
+
+    const zipPath = req.file.path;
+    console.log(`[ffmpeg-upload] 收到上传文件: ${req.file.originalname} (${(req.file.size / 1024 / 1024).toFixed(1)}MB)`);
+
+    await installFfmpegFromZip(zipPath);
+
+    // 清理上传的临时文件
+    try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
+
+    // 验证安装结果
+    const status = await checkFfmpeg();
+    const transcodeCapable = status.available
+      ? await isFfmpegTranscodeCapable()
+      : false;
+
+    res.json({
+      success: status.available,
+      message: status.available
+        ? `FFmpeg 安装成功${transcodeCapable ? '（完整版，支持音频转码）' : '（精简版，不支持音频转码）'}`
+        : '安装后仍未检测到 FFmpeg，请检查压缩包内容',
+      available: status.available,
+      source: status.source,
+      version: status.version,
+      transcodeCapable,
+    });
+  } catch (err) {
+    // 清理上传的临时文件
+    if (req.file?.path) {
+      try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
+    }
+    console.error('[ffmpeg-upload] 安装失败:', err);
+    res.status(500).json({
+      success: false,
+      message: err instanceof Error ? err.message : '安装失败',
+    });
   }
 });
 
