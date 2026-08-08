@@ -246,6 +246,23 @@ function DirectWatchPage() {
   const handleFullscreen = () => {
     const video = videoRef.current
     if (!video) return
+    // iOS Safari 不支持标准 Fullscreen API，使用 webkit 前缀的 video 全屏
+    const webkitVideo = video as HTMLVideoElement & {
+      webkitEnterFullscreen?: () => void
+      webkitExitFullscreen?: () => void
+    }
+    if (webkitVideo.webkitEnterFullscreen && !document.fullscreenElement) {
+      webkitVideo.webkitEnterFullscreen()
+      return
+    }
+    if (document.fullscreenElement) {
+      if (document.exitFullscreen) {
+        void document.exitFullscreen().catch(() => {})
+      } else if (webkitVideo.webkitExitFullscreen) {
+        webkitVideo.webkitExitFullscreen()
+      }
+      return
+    }
     video
       .requestFullscreen()
       .then(() => {

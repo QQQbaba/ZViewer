@@ -44,6 +44,14 @@ import { useVideoPlayingState } from '@/modules/art-player/useVideoPlayingState'
 import { SettingsPanel } from '@/components/VideoPlayer/SettingsPanel'
 import { SubtitleOverlay } from '@/components/VideoPlayer/SubtitleOverlay'
 import type { ArtSlots } from './WatchTogetherPanel'
+import {
+  isIOSDevice,
+  supportsContainerFullscreen,
+  getFullscreenElement,
+  exitFullscreen,
+  requestFullscreen,
+  onFullscreenChange,
+} from '@/lib/fullscreen-utils'
 
 // 格式化跳转时间用于提示信息（mm:ss 或 h:mm:ss）
 function formatSeekTime(seconds: number): string {
@@ -305,23 +313,34 @@ export function WatchTogetherCore({
   )
 
   // ── 原生全屏状态跟踪 ────────────────────────────────
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  // iOS 不支持容器全屏，全屏状态由 isWebFullscreen 提供；
+  // 非 iOS 使用跨平台 Fullscreen API 监听原生全屏状态变化。
+  const iosDevice = useMemo(() => isIOSDevice(), [])
+  const [isNativeFs, setIsNativeFs] = useState(false)
 
   useEffect(() => {
+    if (iosDevice) return
     const onFsChange = () => {
-      const active = Boolean(document.fullscreenElement)
-      setIsFullscreen(active)
+      const active = Boolean(getFullscreenElement())
+      setIsNativeFs(active)
       // 容器全屏切换后触发全局 resize，帮助 ArtPlayer / 浏览器
       // 重新计算 video 容器尺寸，避免某些浏览器下 MSE video 黑屏。
       window.dispatchEvent(new Event('resize'))
     }
-    document.addEventListener('fullscreenchange', onFsChange)
-    return () => {
-      document.removeEventListener('fullscreenchange', onFsChange)
-    }
-  }, [])
+    const dispose = onFullscreenChange(onFsChange)
+    return dispose
+  }, [iosDevice])
+
+  // iOS 降级：原生全屏状态等同于网页全屏状态
+  const isFullscreen = iosDevice ? Boolean(isWebFullscreen) : isNativeFs
 
   const handleToggleFullscreen = useCallback(() => {
+    // iOS 不支持对 div 容器的原生全屏，降级为网页全屏（CSS 模拟全屏）。
+    // 网页全屏保留自定义控制栏、弹幕层等所有 UI。
+    if (iosDevice || !supportsContainerFullscreen()) {
+      onToggleWebFullscreen?.()
+      return
+    }
     // 对 .zart-stage 容器全屏，而非 video 元素本身。
     // 原因：对 video 全屏后，ArtPlayer 的控制栏、弹幕层、设置面板等 UI
     // 都在 video 的祖先容器上，全屏后被 video 遮挡导致用户无法操作（卡死）。
@@ -330,12 +349,15 @@ export function WatchTogetherCore({
     // backdrop-filter / will-change: transform 影响。
     const stage = stageRef.current
     if (!stage) return
-    if (document.fullscreenElement) {
-      void document.exitFullscreen()
+    if (getFullscreenElement()) {
+      void exitFullscreen()
     } else {
-      void stage.requestFullscreen()
+      void requestFullscreen(stage).catch(() => {
+        // 原生全屏失败时降级为网页全屏
+        onToggleWebFullscreen?.()
+      })
     }
-  }, [stageRef])
+  }, [stageRef, iosDevice, onToggleWebFullscreen])
 
   // ── 控制栏显隐逻辑 ────────────────────────────────────
   // 桌面端：鼠标 2s 内无移动即自动隐藏，暂停时不强制显示。
@@ -613,8 +635,12 @@ export function WatchTogetherCore({
       return false
     }
 
-    const handleLoadedMetadata = () => { detectDuration() }
-    const handleProgress = () => { detectDuration() }
+    const handleLoadedMetadata = () => {
+      detectDuration()
+    }
+    const handleProgress = () => {
+      detectDuration()
+    }
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata)
     video.addEventListener('progress', handleProgress)
@@ -630,7 +656,7 @@ export function WatchTogetherCore({
   // 用 HTML/CSS 直接渲染，保留各字幕格式的完整样式。
   const activeSubtitleCues =
     subtitles.subtitleEnabled && subtitles.activeTrackIndex >= 0
-      ? subtitles.subtitleTracks[subtitles.activeTrackIndex]?.cues ?? []
+      ? (subtitles.subtitleTracks[subtitles.activeTrackIndex]?.cues ?? [])
       : []
 
   // ── 观众申请处理（socket 逻辑与重构前一致）─────────────────

@@ -22,6 +22,13 @@ import {
   installViewerGuards,
 } from '@/modules/art-player'
 import { cn } from '@/lib/utils'
+import {
+  isIOSDevice,
+  supportsContainerFullscreen,
+  getFullscreenElement,
+  exitFullscreen,
+  requestFullscreen,
+} from '@/lib/fullscreen-utils'
 import { WatchTogetherCore } from './WatchTogetherCore'
 import '@/modules/art-player/art-overrides.css'
 
@@ -194,15 +201,25 @@ export function WatchTogetherPanel({
     // 观众端只读化处理：阻断视频区域单击/双击，由自定义控制栏负责申请交互
     let disposeGuards: (() => void) | null = null
     if (!isHost) {
+      const iosDevice = isIOSDevice()
       disposeGuards = installViewerGuards(art, {
         onVideoDblClick: () => {
+          // iOS 不支持容器全屏，双击时降级为网页全屏
+          if (iosDevice || !supportsContainerFullscreen()) {
+            if (controlledWebFullscreen) {
+              controlledToggleWebFullscreen?.()
+            } else {
+              setInternalWebFullscreen((prev) => !prev)
+            }
+            return
+          }
           // 对 .zart-stage 容器全屏，让控制栏/弹幕层等 UI 在全屏下可见可操作
           const stage = stageRef.current
           if (!stage) return
-          if (document.fullscreenElement) {
-            void document.exitFullscreen()
+          if (getFullscreenElement()) {
+            void exitFullscreen()
           } else {
-            void stage.requestFullscreen()
+            void requestFullscreen(stage).catch(() => {})
           }
         },
       })
