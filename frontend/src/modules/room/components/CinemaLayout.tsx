@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
+import { cn } from '@/lib/utils'
 
 interface CinemaLayoutProps {
   children: ReactNode
@@ -15,6 +16,12 @@ interface CinemaLayoutProps {
    */
   statsPanel?: ReactNode
   chatPanel: ReactNode
+  /**
+   * CSS 模拟的网页全屏状态。
+   * 为 true 时整个布局变为 fixed 铺满视口，隐藏底部面板和聊天区，
+   * 并移除 Card 的 backdrop-filter 以避免成为 fixed 定位的包含块。
+   */
+  webFullscreen?: boolean
 }
 
 export function CinemaLayout({
@@ -24,6 +31,7 @@ export function CinemaLayout({
   moviePushPanel,
   statsPanel,
   chatPanel,
+  webFullscreen = false,
 }: CinemaLayoutProps) {
   // 底部卡片容器统一样式
   const cardContainerClass = 'glass-card rounded-2xl p-4'
@@ -47,33 +55,60 @@ export function CinemaLayout({
 
   return (
     <div
-      className="min-h-[calc(100vh-64px)] p-4 lg:p-6"
+      className={cn(
+        'p-4 lg:p-6',
+        webFullscreen
+          ? 'fixed inset-0 z-[100] h-screen overflow-hidden p-0'
+          : 'min-h-[calc(100vh-64px)]'
+      )}
       style={{ backgroundColor: 'transparent' }}
     >
-      <Card className="relative mx-auto flex w-full max-w-[1600px] flex-col overflow-hidden bg-transparent">
-        <div className="flex flex-col gap-4 p-4 lg:flex-row">
+      <Card
+        disableAnimation={webFullscreen}
+        className={cn(
+          'relative mx-auto flex w-full flex-col overflow-hidden bg-transparent',
+          webFullscreen
+            ? 'h-full w-full max-w-none !rounded-none !border-0 !bg-black !p-0 !shadow-none !backdrop-filter-none'
+            : 'max-w-[1600px]'
+        )}
+      >
+        <div
+          className={cn(
+            'gap-4 p-4 lg:flex-row',
+            webFullscreen ? 'flex h-full flex-col p-0' : 'flex flex-col'
+          )}
+        >
           {/* 主区域 */}
           <div className="flex min-w-0 flex-1 flex-col gap-4">
             {/* 播放器区域 */}
             <div
-              className="relative w-full overflow-hidden rounded-2xl"
-              style={{
-                aspectRatio: '16 / 9',
-                backgroundColor: '#000',
-                borderColor: 'var(--md-sys-color-outline-variant)',
-              }}
+              className={cn(
+                'relative w-full overflow-hidden rounded-2xl',
+                !webFullscreen && 'rounded-2xl'
+              )}
+              style={
+                webFullscreen
+                  ? { height: '100%', backgroundColor: '#000' }
+                  : {
+                      aspectRatio: '16 / 9',
+                      backgroundColor: '#000',
+                      borderColor: 'var(--md-sys-color-outline-variant)',
+                    }
+              }
             >
               {children}
             </div>
 
-            {/* 底部信息/控制/添加区（或投屏状态面板） */}
-            {bottomContent}
+            {/* 底部信息/控制/添加区（或投屏状态面板）—— 网页全屏时隐藏 */}
+            {!webFullscreen && bottomContent}
           </div>
 
-          {/* 右侧聊天区 */}
-          <div className="glass-card w-full flex-shrink-0 rounded-2xl lg:w-[340px]">
-            <div className="p-4">{chatPanel}</div>
-          </div>
+          {/* 右侧聊天区 —— 网页全屏时隐藏 */}
+          {!webFullscreen && (
+            <div className="glass-card w-full flex-shrink-0 rounded-2xl lg:w-[340px]">
+              <div className="p-4">{chatPanel}</div>
+            </div>
+          )}
         </div>
       </Card>
     </div>
