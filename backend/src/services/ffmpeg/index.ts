@@ -15,6 +15,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { createWriteStream } from 'node:fs'
+import AdmZip from 'adm-zip'
 
 /** 项目内置 bin 目录（存放 ffmpeg 二进制） */
 export const FFMPEG_BIN_DIR = path.resolve(process.cwd(), 'bin')
@@ -270,26 +271,12 @@ export async function installFfmpeg(
 
 /** 解压 Windows zip 并提取 ffmpeg.exe 到 bin/ */
 async function extractZipAndFindFfmpeg(zipPath: string, _tmpDir: string): Promise<void> {
-  // 使用 PowerShell Expand-Archive
+  // 使用 adm-zip（纯 JavaScript）解压，不依赖系统 PowerShell
   const extractDir = path.join(path.dirname(zipPath), 'extracted')
   fs.mkdirSync(extractDir, { recursive: true })
 
-  await new Promise<void>((resolve, reject) => {
-    const ps = spawn(
-      'powershell',
-      [
-        '-NoProfile',
-        '-Command',
-        `Expand-Archive -Path "${zipPath}" -DestinationPath "${extractDir}" -Force`,
-      ],
-      { stdio: 'ignore' }
-    )
-    ps.on('error', reject)
-    ps.on('exit', (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(`PowerShell 解压失败，退出码 ${code}`))
-    })
-  })
+  const zip = new AdmZip(zipPath)
+  zip.extractAllTo(extractDir, true)
 
   // 递归查找 ffmpeg.exe
   const ffmpegExe = findFileRecursive(extractDir, 'ffmpeg.exe')

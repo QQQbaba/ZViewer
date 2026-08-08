@@ -561,7 +561,7 @@ export default function ProfilePage() {
                     onClick={handleLogoutBilibili}
                     className="shrink-0"
                   >
-                    退出 B站 登录
+                    退登
                   </Button>
                 </div>
               </div>
