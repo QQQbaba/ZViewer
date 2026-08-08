@@ -14,6 +14,9 @@ import {
   Download,
   UserCheck,
   Upload,
+  Check,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react'
 import { PageBackButton } from '@/components/PageBackButton'
 import { Button } from '@/components/ui/Button'
@@ -33,6 +36,8 @@ import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import { apiFetch, getApiUrl } from '@/lib/api'
+import { checkFfmpeg, installFfmpeg } from '@/modules/server-files/serverFilesApi'
+import type { FfmpegStatus, FfmpegInstallProgress } from '@/modules/server-files/types'
 
 interface AdminUser {
   id: number
@@ -170,6 +175,13 @@ export default function AdminPage() {
     () => localStorage.getItem('update-include-prerelease') === 'true'
   )
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // FFmpeg 状态
+  const [ffmpegStatus, setFfmpegStatus] = useState<FfmpegStatus | null>(null)
+  const [ffmpegChecking, setFfmpegChecking] = useState(false)
+  const [ffmpegInstalling, setFfmpegInstalling] = useState(false)
+  const [ffmpegInstallStage, setFfmpegInstallStage] = useState('')
+  const [ffmpegInstallPercent, setFfmpegInstallPercent] = useState(0)
 
   const authHeaders = {
     'Content-Type': 'application/json',
@@ -577,12 +589,60 @@ export default function AdminPage() {
     }
   }
 
+  // FFmpeg 状态检测
+  const refreshFfmpegStatus = async (force: boolean = false) => {
+    setFfmpegChecking(true)
+    try {
+      const status = await checkFfmpeg(force)
+      setFfmpegStatus(status)
+    } catch (err) {
+      setFfmpegStatus({
+        available: false,
+        source: null,
+        path: null,
+        version: null,
+        transcodeCapable: false,
+        error: err instanceof Error ? err.message : '检测失败',
+      })
+    } finally {
+      setFfmpegChecking(false)
+    }
+  }
+
+  // FFmpeg 在线安装
+  const handleInstallFfmpeg = async () => {
+    setFfmpegInstalling(true)
+    setFfmpegInstallStage('正在下载 FFmpeg...')
+    setFfmpegInstallPercent(0)
+    try {
+      await installFfmpeg((p: FfmpegInstallProgress) => {
+        if (p.status === 'downloading') {
+          setFfmpegInstallStage('下载中')
+          setFfmpegInstallPercent(p.percent ?? 0)
+        } else if (p.status === 'extracting') {
+          setFfmpegInstallStage('解压中')
+          setFfmpegInstallPercent(100)
+        }
+      })
+      message.success('FFmpeg 安装完成')
+      // 安装后强制刷新，绕过缓存重新检测
+      await refreshFfmpegStatus(true)
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '安装失败')
+    } finally {
+      setFfmpegInstalling(false)
+      setFfmpegInstallStage('')
+      setFfmpegInstallPercent(0)
+    }
+  }
+
   useEffect(() => {
     if (!isAuthenticated) return
     /* eslint-disable react-hooks/set-state-in-effect -- tab 切换时加载对应数据 */
     if (activeTab === 'settings') {
       void loadSettings()
       void checkUpdate()
+      if (!ffmpegStatus && !ffmpegChecking) void refreshFfmpegStatus()
     } else if (activeTab === 'users') {
       void loadData()
       void loadSettings()
@@ -1480,6 +1540,107 @@ export default function AdminPage() {
                     开启后，服务器端 B站 解析将强制使用 MP4 模式，不再返回 DASH
                     流。仅影响服务器端解析，不影响 CLI 代理的 DASH 模式。
                   </p>
+                </div>
+
+                <Title level={5} className="mb-4 mt-6">
+                  FFmpeg 引擎
+                </Title>
+                <div
+                  className="mb-6 flex flex-col gap-2 rounded-[var(--md-sys-shape-corner)] p-3"
+                  style={{
+                    backgroundColor: 'var(--md-sys-color-surface-container-high)',
+                  }}
+                >
+                  {(() => {
+                    const available = !!ffmpegStatus?.available
+                    const capable = !!ffmpegStatus?.transcodeCapable
+                    const needFullVersion = available && !capable
+                    return (
+                      <>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="flex h-7 w-7 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
+                              style={{
+                                backgroundColor: available && capable
+                                  ? 'var(--md-sys-color-primary-container)'
+                                  : needFullVersion
+                                    ? 'var(--md-sys-color-tertiary-container)'
+                                    : 'var(--md-sys-color-surface-container-highest)',
+                                color: available && capable
+                                  ? 'var(--md-sys-color-on-primary-container)'
+                                  : needFullVersion
+                                    ? 'var(--md-sys-color-on-tertiary-container)'
+                                    : 'var(--md-sys-color-on-surface-variant)',
+                              }}
+                            >
+                              {ffmpegChecking ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : available && capable ? (
+                                <Check className="h-3.5 w-3.5" />
+                              ) : (
+                                <AlertCircle className="h-3.5 w-3.5" />
+                              )}
+                            </div>
+                            <div className="flex flex-col">
+                              <Text className="text-xs font-medium text-[var(--md-sys-color-on-surface)]">
+                                FFmpeg {!available ? '未安装' : capable ? '完整版' : '精简版'}
+                              </Text>
+                              <Text className="text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
+                                {available
+                                  ? `${ffmpegStatus?.source === 'builtin' ? '内置' : '系统'} · v${ffmpegStatus?.version ?? ''}${!capable ? ' · 不支持音频转码' : ''}`
+                                  : '高画质下载与音频转码需要 FFmpeg'}
+                              </Text>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {(!available || needFullVersion) && !ffmpegInstalling && (
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                icon={<Download className="h-3.5 w-3.5" />}
+                                onClick={handleInstallFfmpeg}
+                              >
+                                {needFullVersion ? '下载完整版' : '下载 FFmpeg'}
+                              </Button>
+                            )}
+                            {!ffmpegInstalling && (
+                              <button
+                                onClick={() => refreshFfmpegStatus(true)}
+                                disabled={ffmpegChecking}
+                                className="rounded-[var(--md-sys-shape-corner)] p-1.5 text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)] disabled:opacity-40"
+                                title="重新检测"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {needFullVersion && !ffmpegInstalling && (
+                          <Text className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                            当前 FFmpeg 缺少 AAC 编码器，无法转码 DTS/AC3 等音频。点击「下载完整版」安装支持全部功能的 FFmpeg。
+                          </Text>
+                        )}
+                        {ffmpegInstalling && (
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                              <span>{ffmpegInstallStage}</span>
+                              <span>{ffmpegInstallPercent}%</span>
+                            </div>
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container)]">
+                              <div
+                                className="h-full rounded-full transition-all"
+                                style={{
+                                  width: `${ffmpegInstallPercent}%`,
+                                  backgroundColor: 'var(--md-sys-color-primary)',
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()}
                 </div>
 
                 <Title level={5} className="mb-4 mt-6">

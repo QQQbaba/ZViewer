@@ -326,13 +326,7 @@ async function bootstrap() {
     if (fs.existsSync(frontendDist)) {
       console.log(`[HTTPS] 提供前端静态文件: ${frontendDist}`);
       app.use(express.static(frontendDist));
-
-      // SPA 回退：所有非 API 路由返回 index.html
-      // 必须放在所有 API 路由之后，否则会覆盖 API 路由
-      // 使用 app.use 处理通配路由，避免 path-to-regexp v8+ 不支持 '*' 的问题
-      app.use((_req, res) => {
-        res.sendFile(path.join(frontendDist, 'index.html'));
-      });
+      // SPA 回退延迟到所有 API 路由注册之后（见文件末尾）
     } else {
       console.warn(`[HTTPS] 警告：前端构建产物不存在: ${frontendDist}`);
       console.warn('[HTTPS] HTTPS 模式下无法提供前端页面，请先构建前端');
@@ -436,6 +430,14 @@ async function bootstrap() {
 
   // 挂载新模块的 REST 路由
   app.use('/api/rooms', createMovieRouter(io));
+
+  // SPA 回退：必须在所有 API 路由注册之后，否则会拦截 /api/ 请求返回 HTML
+  if (useHttps && fs.existsSync(path.resolve(PROJECT_ROOT, 'frontend/dist'))) {
+    const frontendDist = path.resolve(PROJECT_ROOT, 'frontend/dist');
+    app.use((_req, res) => {
+      res.sendFile(path.join(frontendDist, 'index.html'));
+    });
+  }
 
   // 启动播放记忆定时广播服务（房主断开期间由服务器接管广播）
   playbackBroadcasterService.start(io);

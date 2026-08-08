@@ -20,6 +20,8 @@ export interface SubtitleState {
   subtitleTracks: SubtitleTrack[]
   activeTrackIndex: number
   subtitleFontSize: number
+  /** 字幕时间偏移（秒），正值延迟显示，负值提前显示 */
+  subtitleOffset: number
 }
 
 interface SubtitleBroadcastPayload {
@@ -27,6 +29,7 @@ interface SubtitleBroadcastPayload {
   tracks: SubtitleTrack[]
   activeIndex: number
   fontSize: number
+  offset: number
 }
 
 export interface UseSubtitlesOptions {
@@ -39,6 +42,7 @@ const DEFAULT_SUBTITLE_STATE: SubtitleState = {
   subtitleTracks: [],
   activeTrackIndex: -1,
   subtitleFontSize: 20,
+  subtitleOffset: 0,
 }
 
 /**
@@ -74,6 +78,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         tracks: next.subtitleTracks,
         activeIndex: next.activeTrackIndex,
         fontSize: next.subtitleFontSize,
+        offset: next.subtitleOffset,
       }
       socket.emit('subtitle-update', { roomId, ...payload })
     },
@@ -249,6 +254,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         subtitleTracks: [],
         subtitleEnabled: false,
         activeTrackIndex: -1,
+        subtitleOffset: 0,
       }
       broadcast(next)
       return next
@@ -323,6 +329,17 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     [broadcast]
   )
 
+  const setOffset = useCallback(
+    (offset: number) => {
+      setState((prev) => {
+        const next: SubtitleState = { ...prev, subtitleOffset: offset }
+        broadcast(next)
+        return next
+      })
+    },
+    [broadcast]
+  )
+
   // 观众：接收房主的字幕广播
   useEffect(() => {
     if (!socket || isHost) return
@@ -335,6 +352,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         subtitleTracks: payload.tracks ?? prev.subtitleTracks,
         activeTrackIndex: payload.activeIndex ?? prev.activeTrackIndex,
         subtitleFontSize: payload.fontSize ?? prev.subtitleFontSize,
+        subtitleOffset: payload.offset ?? prev.subtitleOffset,
       }))
     }
     socket.on('subtitle-update', handler)
@@ -353,5 +371,6 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     clearTracks,
     searchAutoSubtitles,
     setFontSize,
+    setOffset,
   }
 }

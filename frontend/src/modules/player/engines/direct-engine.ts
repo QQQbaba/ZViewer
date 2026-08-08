@@ -10,10 +10,15 @@
  *
  * attach 在 metadata 就绪后 resolve，cleanup 无需额外操作
  * （video 元素本身由调用方管理）。
+ *
+ * 对于转码流（fragmented MP4），video.duration 可能为 Infinity。
+ * 引擎会先发 HEAD 请求获取 X-Content-Duration header，
+ * 并存储到 video.dataset.serverDuration 供 useVideoDuration 回退使用。
  */
 import type { PlayerEngine, PlayerSource, EngineAttachResult } from '../types'
 import { resetVideoElement, waitForMetadata } from '../utils'
 import { resolveProxyUrl } from '../services/url-proxy'
+import { getApiUrl } from '@/lib/api'
 
 export const directEngine: PlayerEngine = {
   type: 'direct',
@@ -25,9 +30,28 @@ export const directEngine: PlayerEngine = {
     resetVideoElement(video)
     // 统一代理策略：由 url-proxy.ts 根据 URL 特征与源格式决定
     const targetUrl = resolveProxyUrl(source.url, source.headers, source.format)
+
+    // 先发 HEAD 请求尝试获取 X-Content-Duration（转码流场景）
+    // 不阻塞播放，失败时静默跳过
+    try {
+      const headUrl = targetUrl.startsWith('/')
+        ? `${getApiUrl()}${targetUrl}`
+        : targetUrl
+      const headRes = await fetch(headUrl, { method: 'HEAD' })
+      const contentDuration = headRes.headers.get('X-Content-Duration')
+      if (contentDuration) {
+        const d = parseFloat(contentDuration)
+        if (Number.isFinite(d) && d > 0) {
+          video.dataset.serverDuration = d.toString()
+        }
+      }
+    } catch {
+      // HEAD 请求失败（如 CORS 限制），静默跳过
+    }
+
     video.src = targetUrl
     video.load()
     await waitForMetadata(video)
-    return { cleanup: () => {} }
+    return { cleanup: () => { delete video.dataset.serverDuration } }
   },
 }

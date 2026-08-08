@@ -895,6 +895,8 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           source: 'server-files',
           format: resolved.format as MediaFormat,
           path: serverFilePath.trim(),
+          duration: resolved.duration ?? undefined,
+          audioCodec: resolved.audioCodec ?? undefined,
         })
         resetForm()
         message.success('影片已添加')

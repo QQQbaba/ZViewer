@@ -23,6 +23,10 @@ export interface ServerFileResolved {
   videoUrl: string
   format: string
   size: number
+  /** 音频编码（用于判断是否需要转码） */
+  audioCodec?: string | null
+  /** 视频时长（秒），由 ffprobe 探测 */
+  duration?: number | null
 }
 
 /** 上传成功的文件信息。 */
@@ -116,6 +120,8 @@ export interface FfmpegStatus {
   source: 'builtin' | 'system' | null
   path: string | null
   version: string | null
+  /** 是否具备 AAC 编码能力（精简版 FFmpeg 可能为 false） */
+  transcodeCapable?: boolean
   error?: string
 }
 

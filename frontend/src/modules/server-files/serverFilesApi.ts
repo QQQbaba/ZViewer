@@ -149,6 +149,8 @@ export async function resolveServerFile(
     videoUrl?: string
     format?: string
     size?: number
+    audioCodec?: string | null
+    duration?: number | null
   }
   if (!res.ok || !data.success || !data.videoUrl) {
     throw new Error(data.message || '解析服务器文件失败')
@@ -158,6 +160,8 @@ export async function resolveServerFile(
     videoUrl: data.videoUrl,
     format: data.format || 'mp4',
     size: data.size ?? 0,
+    audioCodec: data.audioCodec,
+    duration: data.duration,
   }
 }
 
@@ -377,8 +381,9 @@ export async function downloadBilibiliVideo(
 // ============ FFmpeg 状态检测与在线安装 ============
 
 /** 检测服务器 FFmpeg 状态。 */
-export async function checkFfmpeg(): Promise<FfmpegStatus> {
-  const res = await apiFetch('/api/server-files/ffmpeg-status')
+export async function checkFfmpeg(force: boolean = false): Promise<FfmpegStatus> {
+  const query = force ? '?force=true' : ''
+  const res = await apiFetch(`/api/server-files/ffmpeg-status${query}`)
   const data = (await res.json()) as FfmpegStatus & { success?: boolean }
   if (!res.ok || data.success === false) {
     return {
@@ -386,6 +391,7 @@ export async function checkFfmpeg(): Promise<FfmpegStatus> {
       source: null,
       path: null,
       version: null,
+      transcodeCapable: false,
       error: data.error || '检测失败',
     }
   }
@@ -394,6 +400,7 @@ export async function checkFfmpeg(): Promise<FfmpegStatus> {
     source: data.source,
     path: data.path,
     version: data.version,
+    transcodeCapable: data.transcodeCapable,
   }
 }
 

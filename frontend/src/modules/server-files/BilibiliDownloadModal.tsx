@@ -29,8 +29,6 @@ import {
   ChevronLeft,
   Folder,
   Check,
-  AlertCircle,
-  Loader2,
   Wand2,
   Search,
   Film,
@@ -50,11 +48,9 @@ import {
   checkFfmpeg,
   downloadBilibiliVideo,
   extractRootKey,
-  installFfmpeg,
   listServerRoots,
 } from './serverFilesApi'
 import type {
-  FfmpegInstallProgress,
   FfmpegStatus,
   ServerFileEntry,
   ServerFileRoot,
@@ -108,9 +104,6 @@ export function BilibiliDownloadModal({
   // FFmpeg 状态
   const [ffmpegStatus, setFfmpegStatus] = useState<FfmpegStatus | null>(null)
   const [ffmpegChecking, setFfmpegChecking] = useState(false)
-  const [ffmpegInstalling, setFfmpegInstalling] = useState(false)
-  const [ffmpegInstallStage, setFfmpegInstallStage] = useState('')
-  const [ffmpegInstallPercent, setFfmpegInstallPercent] = useState(0)
 
   // 下载状态
   const [stage, setStage] = useState<
@@ -175,6 +168,7 @@ export function BilibiliDownloadModal({
         source: null,
         path: null,
         version: null,
+        transcodeCapable: false,
         error: err instanceof Error ? err.message : '检测失败',
       })
     } finally {
@@ -245,8 +239,7 @@ export function BilibiliDownloadModal({
     if (
       stage === 'parsing' ||
       stage === 'downloading' ||
-      stage === 'merging' ||
-      ffmpegInstalling
+      stage === 'merging'
     )
       return
     resetToInput()
@@ -292,32 +285,6 @@ export function BilibiliDownloadModal({
     } finally {
       setParsing(false)
       setParseMessage('')
-    }
-  }
-
-  // 在线安装 FFmpeg
-  const handleInstallFfmpeg = async () => {
-    setFfmpegInstalling(true)
-    setFfmpegInstallStage('正在下载 FFmpeg...')
-    setFfmpegInstallPercent(0)
-    try {
-      await installFfmpeg((p: FfmpegInstallProgress) => {
-        if (p.status === 'downloading') {
-          setFfmpegInstallStage('下载中')
-          setFfmpegInstallPercent(p.percent ?? 0)
-        } else if (p.status === 'extracting') {
-          setFfmpegInstallStage('解压中')
-          setFfmpegInstallPercent(100)
-        }
-      })
-      message.success('FFmpeg 安装完成')
-      await refreshFfmpegStatus()
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '安装失败')
-    } finally {
-      setFfmpegInstalling(false)
-      setFfmpegInstallStage('')
-      setFfmpegInstallPercent(0)
     }
   }
 
@@ -459,7 +426,7 @@ export function BilibiliDownloadModal({
             </div>
             <button
               onClick={handleClose}
-              disabled={!!stage || ffmpegInstalling}
+              disabled={!!stage}
               className="rounded-[var(--md-sys-shape-corner)] p-1 text-[var(--md-sys-color-on-surface-variant)] transition-all hover:bg-[var(--md-sys-color-surface-container)] hover:text-[var(--md-sys-color-on-surface)] disabled:opacity-40"
             >
               <X className="h-4 w-4" />
@@ -574,7 +541,6 @@ export function BilibiliDownloadModal({
                   acceptQuality={resolved.acceptQuality}
                   selectedQn={selectedQn}
                   canUseDash={canUseDash}
-                  ffmpegInstalling={ffmpegInstalling}
                   disabled={!!stage}
                   vipStatus={resolved.vipStatus ?? 0}
                   onSelect={setSelectedQn}
@@ -594,7 +560,7 @@ export function BilibiliDownloadModal({
                     {requiresDash
                       ? canUseDash
                         ? `DASH 模式 · FFmpeg 合并 · ${ffmpegStatus?.version ?? ''}`
-                        : 'DASH 模式 · 需要安装 FFmpeg'
+                        : 'DASH 模式 · 需要在权限管理 → 基础设置中安装 FFmpeg'
                       : 'MP4 直链模式 · 无需 FFmpeg'}
                   </Text>
                 </div>
@@ -612,17 +578,6 @@ export function BilibiliDownloadModal({
                     size="sm"
                   />
                 </div>
-
-                {/* FFmpeg 状态卡片 */}
-                <FfmpegStatusCard
-                  status={ffmpegStatus}
-                  checking={ffmpegChecking}
-                  installing={ffmpegInstalling}
-                  installStage={ffmpegInstallStage}
-                  installPercent={ffmpegInstallPercent}
-                  onRefresh={() => void refreshFfmpegStatus()}
-                  onInstall={() => void handleInstallFfmpeg()}
-                />
 
                 {/* 保存目录 */}
                 <div className="flex flex-col gap-1.5">
@@ -788,7 +743,7 @@ export function BilibiliDownloadModal({
               variant="secondary"
               size="sm"
               onClick={handleClose}
-              disabled={!!stage || ffmpegInstalling}
+              disabled={!!stage}
             >
               取消
             </Button>
@@ -800,7 +755,6 @@ export function BilibiliDownloadModal({
                 onClick={() => void handleDownload()}
                 disabled={
                   !!stage ||
-                  ffmpegInstalling ||
                   readonly ||
                   (requiresDash && !canUseDash)
                 }
@@ -912,7 +866,6 @@ interface QualitySelectorProps {
   acceptQuality: QualityOption[] | undefined
   selectedQn: number
   canUseDash: boolean
-  ffmpegInstalling: boolean
   disabled: boolean
   vipStatus: number
   onSelect: (qn: number) => void
@@ -922,7 +875,6 @@ function QualitySelector({
   acceptQuality,
   selectedQn,
   canUseDash,
-  ffmpegInstalling,
   disabled,
   vipStatus,
   onSelect,
@@ -971,8 +923,7 @@ function QualitySelector({
         {list.map((opt) => {
           const active = selectedQn === opt.id
           const requiresDash = opt.id > MP4_MAX_QN
-          const disabledByFfmpeg =
-            requiresDash && !canUseDash && !ffmpegInstalling
+          const disabledByFfmpeg = requiresDash && !canUseDash
           const isVipOnly = VIP_ONLY_QNS.includes(opt.id)
           const disabledByVip = isVipOnly && !isVip
           const isDisabled = disabled || disabledByFfmpeg || disabledByVip
@@ -1033,111 +984,6 @@ function QualitySelector({
           />
           标识的清晰度需要大会员账号
         </Text>
-      )}
-    </div>
-  )
-}
-
-// ============ FFmpeg 状态卡片 ============
-
-interface FfmpegStatusCardProps {
-  status: FfmpegStatus | null
-  checking: boolean
-  installing: boolean
-  installStage: string
-  installPercent: number
-  onRefresh: () => void
-  onInstall: () => void
-}
-
-function FfmpegStatusCard({
-  status,
-  checking,
-  installing,
-  installStage,
-  installPercent,
-  onRefresh,
-  onInstall,
-}: FfmpegStatusCardProps) {
-  const available = !!status?.available
-  return (
-    <div
-      className="flex flex-col gap-2 rounded-[var(--md-sys-shape-corner)] p-3"
-      style={{
-        backgroundColor: 'var(--md-sys-color-surface-container-high)',
-      }}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div
-            className="flex h-7 w-7 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
-            style={{
-              backgroundColor: available
-                ? 'var(--md-sys-color-primary-container)'
-                : 'var(--md-sys-color-surface-container-highest)',
-              color: available
-                ? 'var(--md-sys-color-on-primary-container)'
-                : 'var(--md-sys-color-on-surface-variant)',
-            }}
-          >
-            {checking ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : available ? (
-              <Check className="h-3.5 w-3.5" />
-            ) : (
-              <AlertCircle className="h-3.5 w-3.5" />
-            )}
-          </div>
-          <div className="flex flex-col">
-            <Text className="text-xs font-medium text-[var(--md-sys-color-on-surface)]">
-              FFmpeg {available ? '已安装' : '未安装'}
-            </Text>
-            <Text className="text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
-              {available
-                ? `${status?.source === 'builtin' ? '内置' : '系统'} · v${status?.version ?? ''}`
-                : '高画质下载需要 FFmpeg'}
-            </Text>
-          </div>
-        </div>
-        <div className="flex items-center gap-1">
-          {!available && !installing && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<Download className="h-3.5 w-3.5" />}
-              onClick={onInstall}
-            >
-              下载 FFmpeg
-            </Button>
-          )}
-          {!installing && (
-            <button
-              onClick={onRefresh}
-              disabled={checking}
-              className="rounded-[var(--md-sys-shape-corner)] p-1.5 text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)] disabled:opacity-40"
-              title="重新检测"
-            >
-              <ChevronLeft className="h-3.5 w-3.5 rotate-90" />
-            </button>
-          )}
-        </div>
-      </div>
-      {installing && (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-            <span>{installStage}</span>
-            <span>{installPercent}%</span>
-          </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container)]">
-            <div
-              className="h-full rounded-full transition-all"
-              style={{
-                width: `${installPercent}%`,
-                backgroundColor: 'var(--md-sys-color-primary)',
-              }}
-            />
-          </div>
-        </div>
       )}
     </div>
   )

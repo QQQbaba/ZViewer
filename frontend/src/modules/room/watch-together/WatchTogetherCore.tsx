@@ -576,15 +576,40 @@ export function WatchTogetherCore({
     const storeDuration = useRoomStore.getState().watchTogether.duration
     if (Number.isFinite(storeDuration) && storeDuration > 0) return
 
-    const handleLoadedMetadata = () => {
+    const detectDuration = () => {
+      // 1. video.dataset.serverDuration（转码流场景，由 direct-engine HEAD 请求获取）
+      const sd = video.dataset.serverDuration
+      if (sd) {
+        const d = parseFloat(sd)
+        if (Number.isFinite(d) && d > 0) {
+          setWatchTogether({ duration: d })
+          return true
+        }
+      }
+      // 2. video.duration（原生支持的格式）
       if (video.duration && isFinite(video.duration) && video.duration > 0) {
         setWatchTogether({ duration: video.duration })
+        return true
       }
+      // 3. video.seekable 末尾（fragmented MP4 转码流场景，duration=Infinity）
+      if (video.seekable && video.seekable.length > 0) {
+        const end = video.seekable.end(video.seekable.length - 1)
+        if (isFinite(end) && end > 0) {
+          setWatchTogether({ duration: end })
+          return true
+        }
+      }
+      return false
     }
 
+    const handleLoadedMetadata = () => { detectDuration() }
+    const handleProgress = () => { detectDuration() }
+
     video.addEventListener('loadedmetadata', handleLoadedMetadata)
+    video.addEventListener('progress', handleProgress)
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+      video.removeEventListener('progress', handleProgress)
     }
   }, [video, setWatchTogether])
 
@@ -636,6 +661,96 @@ export function WatchTogetherCore({
       video.removeEventListener('loadstart', handleLoadStart)
     }
   }, [video, applySubtitleModes])
+
+  // ── 字幕时间偏移 ────────────────────────────────────────
+  // 存储各轨道的原始 cue 时间，偏移变化时从原始值重新计算避免累积误差
+  const originalCueTimesRef = useRef<
+    Map<number, Array<{ startTime: number; endTime: number }>>
+  >(new Map())
+
+  /** 获取指定 zc 轨道索引对应的 TextTrack */
+  const getZcTextTrack = useCallback(
+    (zcIndex: number): TextTrack | null => {
+      const els = Array.from(video.querySelectorAll('track'))
+      let idx = -1
+      for (let i = 0; i < els.length; i++) {
+        if (!els[i].hasAttribute('data-zc-subtitle')) continue
+        idx++
+        if (idx === zcIndex) return video.textTracks[i] ?? null
+      }
+      return null
+    },
+    [video]
+  )
+
+  /** 对激活轨道应用字幕偏移（从原始 cue 时间 + offset 重新计算） */
+  const applySubtitleOffset = useCallback(() => {
+    const trackIndex = subtitles.activeTrackIndex
+    if (trackIndex < 0) return
+
+    const textTrack = getZcTextTrack(trackIndex)
+    if (!textTrack) return
+
+    // cues 仅在 mode !== 'disabled' 时可用
+    // 激活轨道应为 'showing'，但若尚未设置则临时切到 'hidden' 以访问 cues
+    let restoreMode = false
+    if (textTrack.mode === 'disabled') {
+      textTrack.mode = 'hidden'
+      restoreMode = true
+    }
+
+    const cues = textTrack.cues
+    if (!cues || cues.length === 0) {
+      if (restoreMode) textTrack.mode = 'disabled'
+      return
+    }
+
+    // 首次访问：存储原始 cue 时间（后续偏移变化均从此值重算）
+    if (!originalCueTimesRef.current.has(trackIndex)) {
+      const originals: Array<{ startTime: number; endTime: number }> = []
+      for (let i = 0; i < cues.length; i++) {
+        originals.push({
+          startTime: cues[i].startTime,
+          endTime: cues[i].endTime,
+        })
+      }
+      originalCueTimesRef.current.set(trackIndex, originals)
+    }
+
+    // 从原始值 + 偏移重新计算
+    const offset = subtitles.subtitleOffset || 0
+    const originals = originalCueTimesRef.current.get(trackIndex)!
+    for (let i = 0; i < cues.length && i < originals.length; i++) {
+      cues[i].startTime = Math.max(0, originals[i].startTime + offset)
+      cues[i].endTime = Math.max(0, originals[i].endTime + offset)
+    }
+
+    if (restoreMode) textTrack.mode = 'disabled'
+  }, [getZcTextTrack, subtitles.activeTrackIndex, subtitles.subtitleOffset])
+
+  // 轨道列表变化时清空缓存的原始时间
+  useEffect(() => {
+    originalCueTimesRef.current.clear()
+  }, [subtitles.subtitleTracks])
+
+  // 偏移或激活轨道变化时应用偏移（延迟以等待 cues 加载）
+  useEffect(() => {
+    if (subtitles.activeTrackIndex < 0) return
+    const timer = setTimeout(applySubtitleOffset, 200)
+    return () => clearTimeout(timer)
+  }, [applySubtitleOffset])
+
+  // track 元素 load 事件：资源加载完成后应用偏移
+  useEffect(() => {
+    const handleLoad = () => {
+      setTimeout(applySubtitleOffset, 50)
+    }
+    const tracks = video.querySelectorAll('track[data-zc-subtitle]')
+    tracks.forEach((t) => t.addEventListener('load', handleLoad))
+    return () => {
+      tracks.forEach((t) => t.removeEventListener('load', handleLoad))
+    }
+  }, [video, subtitles.subtitleTracks, applySubtitleOffset])
 
   // ── 观众申请处理（socket 逻辑与重构前一致）─────────────────
   useEffect(() => {
@@ -1461,6 +1576,7 @@ export function WatchTogetherCore({
               subtitleTracks={subtitles.subtitleTracks}
               activeTrackIndex={subtitles.activeTrackIndex}
               subtitleFontSize={subtitles.subtitleFontSize}
+              subtitleOffset={subtitles.subtitleOffset}
               browseMovieId={
                 isHost &&
                 currentMovieId != null &&
@@ -1474,6 +1590,7 @@ export function WatchTogetherCore({
               onAddSubtitleFile={subtitles.addTrackFromFile}
               onAddSubtitleContent={subtitles.addTrackFromContent}
               onChangeSubtitleFontSize={subtitles.setFontSize}
+              onChangeSubtitleOffset={subtitles.setOffset}
               onAutoSearchSubtitles={
                 currentMovieId != null && isHost
                   ? () => subtitles.searchAutoSubtitles(currentMovieId)
