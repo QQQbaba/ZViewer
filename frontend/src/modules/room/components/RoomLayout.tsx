@@ -20,6 +20,10 @@ import { SegmentedToggle } from '@/components/ui/SegmentedToggle'
 import { useRoomStore, type RoomMode } from '@/store/roomStore'
 import { useSocket } from '@/hooks/useSocket'
 import { SharingStatusPanel } from '@/modules/room/components/SharingStatusPanel'
+import {
+  getFullscreenElement,
+  onFullscreenChange,
+} from '@/lib/fullscreen-utils'
 import type { SharingMode } from '@/modules/screen-sharing/hooks/useConnectionStats'
 
 interface RoomLayoutProps {
@@ -114,13 +118,11 @@ export function RoomLayout({
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false)
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsNativeFullscreen(!!document.fullscreenElement)
+      setIsNativeFullscreen(Boolean(getFullscreenElement()))
     }
-    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    const dispose = onFullscreenChange(handleFullscreenChange)
     handleFullscreenChange()
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange)
-    }
+    return dispose
   }, [])
 
   const roomMode = useRoomStore((state) => state.mode)
@@ -538,9 +540,7 @@ export function RoomLayout({
                       </div>
                       <button
                         onClick={toggleRightPanel}
-                        aria-label={
-                          isRightPanelOpen ? '收起侧栏' : '展开侧栏'
-                        }
+                        aria-label={isRightPanelOpen ? '收起侧栏' : '展开侧栏'}
                         aria-expanded={isRightPanelOpen}
                         title={isRightPanelOpen ? '收起侧栏' : '展开侧栏'}
                         className="glass flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 hover:scale-105 active:scale-95"
