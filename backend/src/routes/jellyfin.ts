@@ -7,11 +7,10 @@
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../data-source';
 import { UserMount } from '../entities/UserMount';
-import { Movie } from '../entities/Movie';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { JellyfinClient, JellyfinError } from '../services/jellyfin-client';
 import { detectMediaFormat } from '../services/mediaFormat';
-import { resolveUserMount, proxyHttpUpstream } from '../services/proxy';
+import { resolveUserMount, resolveMovieStream, proxyHttpUpstream } from '../services/proxy';
 import { upgradeToHttpsIfNeeded } from '../services/url-utils';
 
 const router = Router();
@@ -360,28 +359,14 @@ router.get('/stream', async (req: AuthenticatedRequest, res: Response): Promise<
       return;
     }
 
-    const movie = await AppDataSource.getRepository(Movie).findOneBy({ id: movieId });
-    if (!movie) {
-      res.status(404).json({ success: false, message: '影片不存在' });
-      return;
-    }
-    if (!movie.serverUrl || !movie.path) {
-      res.status(400).json({ success: false, message: '该影片未挂载服务器信息' });
-      return;
-    }
-
-    // 通过 serverUrl + type 查找任何可用的 Jellyfin 挂载（不依赖 userId）
-    const mount = await AppDataSource.getRepository(UserMount).findOneBy({
-      serverUrl: movie.serverUrl,
-      type: 'jellyfin',
-    });
+    const { movie, mount } = await resolveMovieStream(movieId, 'jellyfin');
     if (!mount) {
       res.status(404).json({ success: false, message: '未找到对应的 Jellyfin 挂载配置' });
       return;
     }
 
     const session = await resolveJellyfinSession(mount);
-    const itemId = movie.path;
+    const itemId = movie.path!;
     const upstreamUrl = `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`;
 
     await proxyHttpUpstream(req, res, {

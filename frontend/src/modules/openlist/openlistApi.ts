@@ -1,10 +1,11 @@
 /**
  * OpenList API 层
  *
- * OpenList 通过 WebDAV 协议访问，API 结构与 webdavApi.ts 对齐。
+ * OpenList（AList）兼容 WebDAV 协议，逻辑与 WebDAV 完全同构，
+ * 本文件仅作为薄包装：通过 createMountApi 工厂生成 OpenList 实例，
+ * 只保留 basePath / label / module 三个参数（特殊部分）。
  */
-import { apiFetch } from '@/lib/api'
-import { buildProxyUrl } from '@/modules/direct-link/directLinkApi'
+import { createMountApi } from '@/modules/webdav/webdavApi'
 import type {
   OpenListMount,
   OpenListMountFormPayload,
@@ -12,178 +13,25 @@ import type {
   OpenListDirectoryEntry,
   OpenListResolvedSource,
 } from './types'
-import type { MediaFormat } from '@/lib/mediaFormat'
 
-export interface OpenListTestResult {
-  success: boolean
-  itemCount: number
-}
+const openlistApi = createMountApi<
+  OpenListMount,
+  OpenListMountFormPayload,
+  OpenListConnectionParams,
+  OpenListDirectoryEntry,
+  OpenListResolvedSource
+>({
+  basePath: '/api/openlist',
+  label: 'OpenList',
+  module: 'openlist',
+})
 
-function jsonHeaders(): Record<string, string> {
-  return { 'Content-Type': 'application/json' }
-}
-
-export async function getOpenListMounts(): Promise<OpenListMount[]> {
-  const res = await apiFetch('/api/openlist/mounts')
-  const data = (await res.json()) as {
-    success: boolean
-    mounts?: OpenListMount[]
-    message?: string
-  }
-  if (!res.ok || !data.success) {
-    throw new Error(data.message || '获取 OpenList 挂载列表失败')
-  }
-  return data.mounts || []
-}
-
-export async function createOpenListMount(
-  payload: OpenListMountFormPayload
-): Promise<OpenListMount> {
-  const res = await apiFetch('/api/openlist/mounts', {
-    method: 'POST',
-    headers: jsonHeaders(),
-    body: JSON.stringify(payload),
-  })
-  const data = (await res.json()) as {
-    success: boolean
-    mount?: OpenListMount
-    message?: string
-  }
-  if (!res.ok || !data.success || !data.mount) {
-    throw new Error(data.message || '创建 OpenList 挂载失败')
-  }
-  return data.mount
-}
-
-export async function updateOpenListMount(
-  id: number,
-  payload: OpenListMountFormPayload
-): Promise<OpenListMount> {
-  const res = await apiFetch(`/api/openlist/mounts/${id}`, {
-    method: 'PUT',
-    headers: jsonHeaders(),
-    body: JSON.stringify(payload),
-  })
-  const data = (await res.json()) as {
-    success: boolean
-    mount?: OpenListMount
-    message?: string
-  }
-  if (!res.ok || !data.success || !data.mount) {
-    throw new Error(data.message || '更新 OpenList 挂载失败')
-  }
-  return data.mount
-}
-
-export async function deleteOpenListMount(id: number): Promise<void> {
-  const res = await apiFetch(`/api/openlist/mounts/${id}`, {
-    method: 'DELETE',
-  })
-  const data = (await res.json()) as { success: boolean; message?: string }
-  if (!res.ok || !data.success) {
-    throw new Error(data.message || '删除 OpenList 挂载失败')
-  }
-}
-
-export async function testOpenListMount(
-  params: OpenListConnectionParams
-): Promise<OpenListTestResult> {
-  const res = await apiFetch('/api/openlist/mounts/test', {
-    method: 'POST',
-    headers: jsonHeaders(),
-    body: JSON.stringify(params),
-  })
-  const data = (await res.json()) as {
-    success: boolean
-    itemCount?: number
-    message?: string
-    code?: string
-  }
-  if (!res.ok || !data.success) {
-    throw new Error(data.message || '测试 OpenList 连接失败')
-  }
-  return {
-    success: true,
-    itemCount: data.itemCount ?? 0,
-  }
-}
-
-export async function browseOpenListMount(
-  id: number,
-  path?: string
-): Promise<OpenListDirectoryEntry[]> {
-  const query = path ? `?path=${encodeURIComponent(path)}` : ''
-  const res = await apiFetch(`/api/openlist/mounts/${id}/browse${query}`)
-  const data = (await res.json()) as {
-    success: boolean
-    entries?: OpenListDirectoryEntry[]
-    message?: string
-  }
-  if (!res.ok || !data.success) {
-    throw new Error(data.message || '浏览 OpenList 挂载失败')
-  }
-  return data.entries || []
-}
-
-export async function resolveOpenList(
-  mountId: number,
-  path: string
-): Promise<OpenListResolvedSource> {
-  const query = new URLSearchParams({
-    mountId: String(mountId),
-    path,
-  }).toString()
-  const res = await apiFetch(`/api/openlist/resolve?${query}`)
-  const data = (await res.json()) as {
-    success: boolean
-    message?: string
-    title?: string
-    videoUrl?: string
-    format?: MediaFormat
-    duration?: number
-    size?: number
-  }
-  if (!res.ok || !data.success || !data.videoUrl) {
-    throw new Error(data.message || '解析 OpenList 文件失败')
-  }
-  return {
-    title: data.title || '',
-    videoUrl: data.videoUrl,
-    format: data.format || 'mp4',
-    duration: data.duration ?? 0,
-    size: data.size,
-  }
-}
-
-export function buildOpenListProxyUrl(mountId: number, path: string): string {
-  return buildProxyUrl('openlist', { mountId, path })
-}
-
-/**
- * 调用后端 /api/openlist/direct-url 接口获取直链 URL。
- *
- * 后端使用挂载的账号密码：
- * - 调用 OpenList 的 /api/auth/login 获取 token
- * - 调用 /api/fs/get 获取 raw_url（带签名的真实下载直链）
- *
- * 返回可直接作为 movie.url 保存的字符串，浏览器 <video> 可直接播放。
- */
-export async function fetchOpenListDirectUrl(
-  mountId: number,
-  path: string
-): Promise<string> {
-  const query = new URLSearchParams({
-    mountId: String(mountId),
-    path,
-  }).toString()
-  const res = await apiFetch(`/api/openlist/direct-url?${query}`)
-  const data = (await res.json()) as {
-    success: boolean
-    message?: string
-    directUrl?: string
-  }
-  if (!res.ok || !data.success || !data.directUrl) {
-    throw new Error(data.message || '获取 OpenList 直链失败')
-  }
-  return data.directUrl
-}
+export const getOpenListMounts = openlistApi.getMounts
+export const createOpenListMount = openlistApi.createMount
+export const updateOpenListMount = openlistApi.updateMount
+export const deleteOpenListMount = openlistApi.deleteMount
+export const testOpenListMount = openlistApi.testMount
+export const browseOpenListMount = openlistApi.browseMount
+export const resolveOpenList = openlistApi.resolveMount
+export const buildOpenListProxyUrl = openlistApi.buildProxyUrl
+export const fetchOpenListDirectUrl = openlistApi.fetchDirectUrl

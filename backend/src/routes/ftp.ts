@@ -10,7 +10,12 @@ import {
   type FTPConnectionParams,
 } from '../services/ftp';
 import { detectMediaFormat, getContentType } from '../services/mediaFormat';
-import { resolveUserMount, parseRangeHeader, pipeRangeStream } from '../services/proxy';
+import {
+  resolveUserMount,
+  resolveMovieStream,
+  parseRangeHeader,
+  pipeRangeStream,
+} from '../services/proxy';
 
 const router = Router();
 
@@ -355,7 +360,7 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
 
     try {
       const info = await statFTPFile(params);
-      const proxyUrl = `${req.protocol}://${req.get('host')}/api/ftp/proxy?mountId=${mountId}&path=${encodeURIComponent(targetPath)}`;
+      const proxyUrl = `/api/ftp/proxy?mountId=${mountId}&path=${encodeURIComponent(targetPath)}`;
       const format = detectMediaFormat(info.name || targetPath);
       res.json({
         success: true,
@@ -424,6 +429,73 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
   } catch (err) {
     console.error('[ftp] proxy error:', err);
     res.status(500).json({ success: false, message: '代理 FTP 流失败' });
+  }
+});
+
+// 基于影片 ID 的流代理 - GET /stream?movieId=
+// 与 /proxy 的区别：/stream 不依赖 userId 查挂载，而是直接从 Movie 表读取凭证，
+// 这样房间内任何成员（含观众）都能通过 movieId 访问影片流。
+router.get('/stream', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const movieIdRaw = req.query.movieId;
+    if (movieIdRaw === undefined) {
+      res.status(400).json({ success: false, message: '缺少 movieId 参数' });
+      return;
+    }
+    const movieId = Number(movieIdRaw);
+    if (Number.isNaN(movieId)) {
+      res.status(400).json({ success: false, message: 'movieId 不正确' });
+      return;
+    }
+
+    const { movie, username, password, mount } = await resolveMovieStream(movieId, 'ftp');
+
+    const params: FTPConnectionParams = {
+      serverUrl: movie.serverUrl!,
+      path: movie.path!,
+      port: mount?.port || undefined,
+      username,
+      password,
+    };
+
+    try {
+      const info = await statFTPFileCached(params);
+      const fileSize = info.size;
+
+      const rangeHeader = req.headers.range;
+      const parsed = parseRangeHeader(rangeHeader, fileSize);
+      const start = parsed && parsed !== 'invalid' ? parsed.start : 0;
+      const endByte =
+        parsed && parsed !== 'invalid' ? parsed.end : fileSize - 1;
+
+      const stream = createFTPReadStream(params, start);
+      pipeRangeStream(res, {
+        stream,
+        contentType: getContentType(detectMediaFormat(movie.path!)),
+        fileSize,
+        start,
+        end: endByte,
+        ranged: !!rangeHeader,
+        logTag: 'ftp-stream',
+        errorMessage: 'FTP 影片流错误',
+        softDestroy: true,
+      });
+    } catch (err) {
+      res.status(400).json({
+        success: false,
+        message: extractErrorMessage(err, '代理 FTP 影片流失败'),
+      });
+    }
+  } catch (err) {
+    console.error('[ftp] stream error:', err);
+    if (!res.headersSent) {
+      res.status(502).json({
+        success: false,
+        message: extractErrorMessage(err, '代理 FTP 影片失败'),
+      });
+    } else {
+      res.destroy();
+    }
   }
 });
 

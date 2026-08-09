@@ -29,8 +29,11 @@ import animeSourcesRoutes from './routes/animeSources';
 import anisubsRoutes from './routes/anisubs';
 import kazumiRoutes from './routes/kazumi';
 import serverFilesRoutes from './routes/serverFiles';
-import openlistRoutes from './routes/openlist';
-import webdavRoutes from './routes/webdav';
+import { createMountRouter } from './routes/webdav';
+import {
+  normalizeOpenListServerUrl,
+  mountToOpenListParams,
+} from './services/openlist';
 import ftpRoutes from './routes/ftp';
 import embyRoutes from './routes/emby';
 import jellyfinRoutes from './routes/jellyfin';
@@ -279,8 +282,23 @@ async function bootstrap() {
   app.use('/api/stream', streamRoutes);
   // CLI 本地代理端点：供 zcontrol-cli 使用，使用用户自己的 Cookie 解析高画质
   app.use('/api/cli', cliRoutes);
-  app.use('/api/openlist', openlistRoutes);
-  app.use('/api/webdav', webdavRoutes);
+  app.use('/api/openlist', createMountRouter({
+    type: 'openlist',
+    normalizeServerUrl: normalizeOpenListServerUrl,
+    mountToParams: mountToOpenListParams,
+    includeSize: true,
+    directUrlFallback: false,
+    proxyPrefix: '/api/openlist',
+    logTag: 'openlist',
+    displayName: 'OpenList',
+    normalizeMovieServerUrl: true,
+  }));
+  app.use('/api/webdav', createMountRouter({
+    type: 'webdav',
+    proxyPrefix: '/api/webdav',
+    logTag: 'webdav',
+    displayName: 'WebDAV',
+  }));
   app.use('/api/emby', embyRoutes);
   app.use('/api/jellyfin', jellyfinRoutes);
   app.use('/api/ftp', ftpRoutes);

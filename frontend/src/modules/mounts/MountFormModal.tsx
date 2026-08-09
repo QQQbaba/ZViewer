@@ -181,21 +181,18 @@ export default function MountFormModal({
       const trimmedUser = username.trim() || undefined
       const trimmedPwd = password || undefined
 
-      if (type === 'webdav') {
-        const result = await testWebDAVMount({
+      if (type === 'webdav' || type === 'openlist') {
+        // WebDAV 与 OpenList 共用同一套协议与表单，仅 API 前缀不同
+        const params = {
           serverUrl: trimmedUrl,
           path: trimmedPath,
           username: trimmedUser,
           password: trimmedPwd,
-        })
-        message.success(`连接成功，共 ${result.itemCount} 条目`)
-      } else if (type === 'openlist') {
-        const result = await testOpenListMount({
-          serverUrl: trimmedUrl,
-          path: trimmedPath,
-          username: trimmedUser,
-          password: trimmedPwd,
-        })
+        }
+        const result =
+          type === 'webdav'
+            ? await testWebDAVMount(params)
+            : await testOpenListMount(params)
         message.success(`连接成功，共 ${result.itemCount} 条目`)
       } else if (type === 'emby') {
         const result = await testEmbyMount({
@@ -262,27 +259,10 @@ export default function MountFormModal({
       } = formValues
       const portNum = port.trim() ? Number(port.trim()) : null
 
-      if (type === 'webdav') {
+      if (type === 'webdav' || type === 'openlist') {
+        // WebDAV 与 OpenList 共用同一套协议与表单，仅 API 前缀与 type 不同
         const payload = {
-          type: 'webdav' as const,
-          name: name.trim(),
-          serverUrl: serverUrl.trim() || null,
-          port: portNum !== null && Number.isFinite(portNum) ? portNum : null,
-          path: path.trim() || null,
-          username: username.trim() || null,
-          password: password || null,
-          directLink,
-        }
-        if (editingMount) {
-          await updateWebDAVMount(editingMount.id, payload)
-          message.success('WebDAV 挂载更新成功')
-        } else {
-          await createWebDAVMount(payload)
-          message.success('WebDAV 挂载添加成功')
-        }
-      } else if (type === 'openlist') {
-        const payload = {
-          type: 'openlist' as const,
+          type: type as 'webdav' | 'openlist',
           name: name.trim(),
           serverUrl: serverUrl.trim() || null,
           path: path.trim() || null,
@@ -290,12 +270,31 @@ export default function MountFormModal({
           password: password || null,
           directLink,
         }
+        const label = type === 'webdav' ? 'WebDAV' : 'OpenList'
         if (editingMount) {
-          await updateOpenListMount(editingMount.id, payload)
-          message.success('OpenList 挂载更新成功')
+          if (type === 'webdav') {
+            await updateWebDAVMount(editingMount.id, {
+              ...payload,
+              type: 'webdav',
+              port:
+                portNum !== null && Number.isFinite(portNum) ? portNum : null,
+            })
+          } else {
+            await updateOpenListMount(editingMount.id, payload)
+          }
+          message.success(`${label} 挂载更新成功`)
         } else {
-          await createOpenListMount(payload)
-          message.success('OpenList 挂载添加成功')
+          if (type === 'webdav') {
+            await createWebDAVMount({
+              ...payload,
+              type: 'webdav',
+              port:
+                portNum !== null && Number.isFinite(portNum) ? portNum : null,
+            })
+          } else {
+            await createOpenListMount(payload)
+          }
+          message.success(`${label} 挂载添加成功`)
         }
       } else if (type === 'emby') {
         const payload = {

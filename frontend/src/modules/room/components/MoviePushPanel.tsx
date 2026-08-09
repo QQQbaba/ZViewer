@@ -57,17 +57,12 @@ import {
 } from '@/modules/bilibili/bilibiliApi'
 import {
   resolveOpenList,
-  buildOpenListProxyUrl,
   fetchOpenListDirectUrl,
 } from '@/modules/openlist/openlistApi'
 import OpenListBrowser from '@/modules/openlist/OpenListBrowser'
 import { resolveEmby } from '@/modules/emby/embyApi'
 import { resolveJellyfin } from '@/modules/jellyfin/jellyfinApi'
-import {
-  resolveWebDAV,
-  buildWebDAVProxyUrl,
-  fetchWebDAVDirectUrl,
-} from '@/modules/webdav/webdavApi'
+import { resolveWebDAV, fetchWebDAVDirectUrl } from '@/modules/webdav/webdavApi'
 import MountBrowser from '@/modules/mounts/MountBrowser'
 import WebDAVBrowser from '@/modules/webdav/WebDAVBrowser'
 import { resolveFTP as resolveFTPNew } from '@/modules/ftp/ftpApi'
@@ -558,34 +553,46 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         let added = 0
         for (const path of paths) {
           const normalizedPath = normalizeMountPath(path)
-          if (sourceType === 'webdav') {
-            if (webdavDirectLink) {
-              // 直链模式：后端通过挂载凭证获取直链 URL（WebDAV 协议不支持获取真实直链，仅拼接）
-              const movieUrl = await fetchWebDAVDirectUrl(
-                mountId,
-                normalizedPath
-              )
+          if (sourceType === 'webdav' || sourceType === 'openlist') {
+            // WebDAV 与 OpenList 共用同一套协议逻辑，仅 API 前缀与直链获取不同
+            const isDirect =
+              sourceType === 'webdav' ? webdavDirectLink : openlistDirectLink
+            const serverUrl =
+              (sourceType === 'webdav'
+                ? webdav.serverUrl
+                : openlist.serverUrl
+              ).trim() || undefined
+            const resolveMount =
+              sourceType === 'webdav' ? resolveWebDAV : resolveOpenList
+            const fetchDirect =
+              sourceType === 'webdav'
+                ? fetchWebDAVDirectUrl
+                : fetchOpenListDirectUrl
+
+            if (isDirect) {
+              // 直链模式：后端通过挂载凭证获取直链 URL（OpenList 为 AList 签名直链，WebDAV 为拼接）
+              const movieUrl = await fetchDirect(mountId, normalizedPath)
               const title = extractTitleFromUrl(normalizedPath)
               await addMovie(roomId, {
                 url: movieUrl,
                 title,
-                source: 'webdav',
-                serverUrl: webdav.serverUrl.trim() || undefined,
+                source: sourceType,
+                serverUrl,
                 path: normalizedPath,
                 directLink: true,
               })
             } else {
-              // 代理模式：后端会自动用 movieId 构造 stream URL
-              const resolved = await resolveWebDAV(mountId, normalizedPath)
+              // 代理模式：resolve 返回相对 proxy URL，后端随后用 movieId 重写为 stream URL
+              const resolved = await resolveMount(mountId, normalizedPath)
               const title =
                 resolved.title || extractTitleFromUrl(normalizedPath)
               await addMovie(roomId, {
-                url: buildWebDAVProxyUrl(mountId, normalizedPath),
+                url: resolved.videoUrl,
                 title,
-                source: 'webdav',
+                source: sourceType,
                 format: resolved.format,
                 duration: resolved.duration,
-                serverUrl: webdav.serverUrl.trim() || undefined,
+                serverUrl,
                 path: normalizedPath,
                 directLink: false,
               })
@@ -604,39 +611,6 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
               username: ftp.username || undefined,
               password: ftp.password || undefined,
             })
-            added++
-          } else if (sourceType === 'openlist') {
-            if (openlistDirectLink) {
-              // 直链模式：后端通过 OpenList API 获取带签名的真实下载直链
-              const movieUrl = await fetchOpenListDirectUrl(
-                mountId,
-                normalizedPath
-              )
-              const title = extractTitleFromUrl(normalizedPath)
-              await addMovie(roomId, {
-                url: movieUrl,
-                title,
-                source: 'openlist',
-                serverUrl: openlist.serverUrl.trim() || undefined,
-                path: normalizedPath,
-                directLink: true,
-              })
-            } else {
-              // 代理模式：后端会自动用 movieId 构造 stream URL
-              const resolved = await resolveOpenList(mountId, normalizedPath)
-              const title =
-                resolved.title || extractTitleFromUrl(normalizedPath)
-              await addMovie(roomId, {
-                url: buildOpenListProxyUrl(mountId, normalizedPath),
-                title,
-                source: 'openlist',
-                format: resolved.format,
-                duration: resolved.duration,
-                serverUrl: openlist.serverUrl.trim() || undefined,
-                path: normalizedPath,
-                directLink: false,
-              })
-            }
             added++
           } else if (sourceType === 'emby') {
             // Emby：解析播放信息，支持服务器转发（默认）或直链直连
@@ -700,6 +674,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
       openlistDirectLink,
       embyDirectLink,
       jellyfinDirectLink,
+      mounts,
       addMovie,
     ]
   )
@@ -820,14 +795,33 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         await addMovie(roomId, { url: movieUrl, title, source: 'mp4' })
         resetForm()
         message.success('影片已添加')
-      } else if (sourceType === 'webdav') {
-        if (!webdav.path.trim()) {
+      } else if (sourceType === 'webdav' || sourceType === 'openlist') {
+        // WebDAV 与 OpenList 共用同一套协议逻辑，仅 API 前缀与直链获取不同
+        const isDirect =
+          sourceType === 'webdav' ? webdavDirectLink : openlistDirectLink
+        const mountPath = (
+          sourceType === 'webdav' ? webdav.path : openlist.path
+        ).trim()
+        const mountServerUrl =
+          (sourceType === 'webdav'
+            ? webdav.serverUrl
+            : openlist.serverUrl
+          ).trim() || undefined
+        const label = sourceType === 'webdav' ? 'WebDAV' : 'OpenList'
+        const resolveMount =
+          sourceType === 'webdav' ? resolveWebDAV : resolveOpenList
+        const fetchDirect =
+          sourceType === 'webdav'
+            ? fetchWebDAVDirectUrl
+            : fetchOpenListDirectUrl
+
+        if (!mountPath) {
           message.warning('请填写文件路径')
           return
         }
         const mountId = Number(selectedMountId)
         if (!mountId) {
-          message.warning('请选择已保存的 WebDAV 挂载')
+          message.warning(`请选择已保存的 ${label} 挂载`)
           return
         }
         let title: string
@@ -835,29 +829,29 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         let format: MediaFormat = 'mp4'
         let duration: number | undefined
 
-        if (webdavDirectLink) {
-          // 直链模式：后端通过挂载凭证获取直链 URL（WebDAV 协议不支持获取真实直链，仅拼接）
-          setResolveProgress('正在获取 WebDAV 直链...')
-          movieUrl = await fetchWebDAVDirectUrl(mountId, webdav.path.trim())
-          title = extractTitleFromUrl(webdav.path.trim())
+        if (isDirect) {
+          // 直链模式：后端通过挂载凭证获取直链 URL（OpenList 为 AList 签名直链，WebDAV 为拼接）
+          setResolveProgress(`正在获取 ${label} 直链...`)
+          movieUrl = await fetchDirect(mountId, mountPath)
+          title = extractTitleFromUrl(mountPath)
         } else {
-          // 代理模式：后端会自动用 movieId 构造 stream URL
-          setResolveProgress('正在解析 WebDAV 文件...')
-          const resolved = await resolveWebDAV(mountId, webdav.path.trim())
-          title = resolved.title || extractTitleFromUrl(webdav.path.trim())
-          movieUrl = buildWebDAVProxyUrl(mountId, webdav.path.trim())
+          // 代理模式：resolve 返回相对 proxy URL，后端随后用 movieId 重写为 stream URL
+          setResolveProgress(`正在解析 ${label} 文件...`)
+          const resolved = await resolveMount(mountId, mountPath)
+          title = resolved.title || extractTitleFromUrl(mountPath)
+          movieUrl = resolved.videoUrl
           format = resolved.format
           duration = resolved.duration
         }
         await addMovie(roomId, {
           url: movieUrl,
           title,
-          source: 'webdav',
+          source: sourceType,
           format,
           duration,
-          serverUrl: webdav.serverUrl.trim() || undefined,
-          path: webdav.path.trim(),
-          directLink: webdavDirectLink,
+          serverUrl: mountServerUrl,
+          path: mountPath,
+          directLink: isDirect,
         })
         resetForm()
         message.success('影片已添加')
@@ -899,47 +893,6 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           path: ftp.path.trim(),
           username: ftp.username || undefined,
           password: ftp.password || undefined,
-        })
-        resetForm()
-        message.success('影片已添加')
-      } else if (sourceType === 'openlist') {
-        if (!openlist.path.trim()) {
-          message.warning('请填写文件路径')
-          return
-        }
-        const mountId = Number(selectedMountId)
-        if (!mountId) {
-          message.warning('请选择已保存的 OpenList 挂载')
-          return
-        }
-        let title: string
-        let movieUrl: string
-        let format: MediaFormat = 'mp4'
-        let duration: number | undefined
-
-        if (openlistDirectLink) {
-          // 直链模式：后端通过 OpenList API 获取带签名的真实下载直链
-          setResolveProgress('正在获取 OpenList 直链...')
-          movieUrl = await fetchOpenListDirectUrl(mountId, openlist.path.trim())
-          title = extractTitleFromUrl(openlist.path.trim())
-        } else {
-          // 代理模式：后端会自动用 movieId 构造 stream URL
-          setResolveProgress('正在解析 OpenList 文件...')
-          const resolved = await resolveOpenList(mountId, openlist.path.trim())
-          title = resolved.title || extractTitleFromUrl(openlist.path.trim())
-          movieUrl = buildOpenListProxyUrl(mountId, openlist.path.trim())
-          format = resolved.format
-          duration = resolved.duration
-        }
-        await addMovie(roomId, {
-          url: movieUrl,
-          title,
-          source: 'openlist',
-          format,
-          duration,
-          serverUrl: openlist.serverUrl.trim() || undefined,
-          path: openlist.path.trim(),
-          directLink: openlistDirectLink,
         })
         resetForm()
         message.success('影片已添加')
@@ -1536,8 +1489,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
                 !(
                   ['webdav', 'ftp', 'openlist', 'emby', 'jellyfin'].includes(
                     opt.value
-                  ) &&
-                  mounts.filter((m) => m.type === opt.value).length === 0
+                  ) && mounts.filter((m) => m.type === opt.value).length === 0
                 )
             )}
             onChange={(value) => setSourceType(value as SourceType)}
