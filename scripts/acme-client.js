@@ -128,7 +128,12 @@ function signJws({ accountKeyPem, url, nonce, payload, kid }) {
   }
 
   const protectedB64 = b64urlJson(header);
-  const payloadB64 = payload === undefined ? '' : b64url(Buffer.from(JSON.stringify(payload), 'utf8'));
+  // RFC 8555 §6.3：POST-as-GET 的 payload 必须是 zero-length octet string（空字符串）
+  // 而非 JSON 对象 {}——否则 Boulder 会将 authz 的 POST-as-GET 解析为停用请求而报错。
+  const payloadB64 =
+    payload === undefined || payload === ''
+      ? ''
+      : b64url(Buffer.from(JSON.stringify(payload), 'utf8'));
   const signingInput = `${protectedB64}.${payloadB64}`;
   const signature = crypto.sign('RSA-SHA256', Buffer.from(signingInput, 'utf8'), privateKey);
 
@@ -317,7 +322,7 @@ async function requestCertificate({
         accountKeyPem,
         url: authzUrl,
         nonce,
-        payload: {},
+        payload: '',
         kid,
       });
       const authzRes = await apiRequest(authzUrl, {
@@ -342,7 +347,7 @@ async function requestCertificate({
         accountKeyPem,
         url: challenge.url,
         nonce,
-        payload: {},
+        payload: '',
         kid,
       });
       const chalRes = await apiRequest(challenge.url, {
@@ -368,7 +373,7 @@ async function requestCertificate({
         accountKeyPem,
         url: orderUrl,
         nonce,
-        payload: {},
+        payload: '',
         kid,
       });
       const pollRes = await apiRequest(orderUrl, {
@@ -430,7 +435,7 @@ async function requestCertificate({
         accountKeyPem,
         url: orderUrl,
         nonce,
-        payload: {},
+        payload: '',
         kid,
       });
       const pollRes = await apiRequest(orderUrl, {
@@ -451,7 +456,7 @@ async function requestCertificate({
       accountKeyPem,
       url: certificateUrl,
       nonce,
-      payload: {},
+      payload: '',
       kid,
     });
     const certRes = await apiRequest(certificateUrl, {
