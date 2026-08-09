@@ -18,7 +18,6 @@
 import type { PlayerEngine, PlayerSource, EngineAttachResult } from '../types'
 import { resetVideoElement, waitForMetadata } from '../utils'
 import { resolveProxyUrl } from '../services/url-proxy'
-import { getApiUrl } from '@/lib/api'
 
 export const directEngine: PlayerEngine = {
   type: 'direct',
@@ -33,11 +32,9 @@ export const directEngine: PlayerEngine = {
 
     // 先发 HEAD 请求尝试获取 X-Content-Duration（转码流场景）
     // 不阻塞播放，失败时静默跳过
+    // 相对路径直接使用（浏览器用当前页面 origin 解析，同域请求携带 cookie）
     try {
-      const headUrl = targetUrl.startsWith('/')
-        ? `${getApiUrl()}${targetUrl}`
-        : targetUrl
-      const headRes = await fetch(headUrl, { method: 'HEAD' })
+      const headRes = await fetch(targetUrl, { method: 'HEAD' })
       const contentDuration = headRes.headers.get('X-Content-Duration')
       if (contentDuration) {
         const d = parseFloat(contentDuration)

@@ -111,6 +111,13 @@ export function pipeRangeStream(
     }
   }
 
+  // HEAD 请求：只返回响应头，不 pipe 流体（避免 socket hang up）
+  if (res.req?.method === 'HEAD') {
+    stream.destroy();
+    res.end();
+    return;
+  }
+
   // 客户端断连：销毁上游流，停止无用读取
   res.on('close', () => {
     if (!res.writableFinished && !stream.destroyed) {

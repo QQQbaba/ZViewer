@@ -642,6 +642,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
             // Emby：解析播放信息，支持服务器转发（默认）或直链直连
             const resolved = await resolveEmby(mountId, normalizedPath)
             const title = resolved.title || extractTitleFromUrl(normalizedPath)
+            const mount = mounts.find((m) => m.id === mountId)
             await addMovie(roomId, {
               url:
                 embyDirectLink && resolved.directUrl
@@ -651,6 +652,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
               source: 'emby',
               format: resolved.format,
               duration: resolved.duration,
+              serverUrl: mount?.serverUrl,
               path: normalizedPath,
               directLink: embyDirectLink,
             })
@@ -658,6 +660,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           } else if (sourceType === 'jellyfin') {
             const resolved = await resolveJellyfin(mountId, normalizedPath)
             const title = resolved.title || extractTitleFromUrl(normalizedPath)
+            const mount = mounts.find((m) => m.id === mountId)
             await addMovie(roomId, {
               url:
                 jellyfinDirectLink && resolved.directUrl
@@ -667,6 +670,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
               source: 'jellyfin',
               format: resolved.format,
               duration: resolved.duration,
+              serverUrl: mount?.serverUrl,
               path: normalizedPath,
               directLink: jellyfinDirectLink,
             })
@@ -954,6 +958,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         }
         setResolveProgress('正在解析 Emby 条目...')
         const resolved = await resolveEmby(mountId, itemId)
+        const mount = mounts.find((m) => m.id === mountId)
         await addMovie(roomId, {
           url:
             embyDirectLink && resolved.directUrl
@@ -963,6 +968,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           source: 'emby',
           format: resolved.format,
           duration: resolved.duration,
+          serverUrl: mount?.serverUrl,
           path: itemId,
           directLink: embyDirectLink,
         })
@@ -983,6 +989,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         }
         setResolveProgress('正在解析 Jellyfin 条目...')
         const resolved = await resolveJellyfin(mountId, itemId)
+        const mount = mounts.find((m) => m.id === mountId)
         await addMovie(roomId, {
           url:
             jellyfinDirectLink && resolved.directUrl
@@ -992,6 +999,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           source: 'jellyfin',
           format: resolved.format,
           duration: resolved.duration,
+          serverUrl: mount?.serverUrl,
           path: itemId,
           directLink: jellyfinDirectLink,
         })

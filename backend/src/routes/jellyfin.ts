@@ -7,10 +7,12 @@
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../data-source';
 import { UserMount } from '../entities/UserMount';
+import { Movie } from '../entities/Movie';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { JellyfinClient, JellyfinError } from '../services/jellyfin-client';
 import { detectMediaFormat } from '../services/mediaFormat';
 import { resolveUserMount, proxyHttpUpstream } from '../services/proxy';
+import { upgradeToHttpsIfNeeded } from '../services/url-utils';
 
 const router = Router();
 
@@ -301,7 +303,7 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
     }
     const title = source.Path?.split(/[\\/]/).pop() || `item-${itemId}`;
     const proxyUrl = `/api/jellyfin/proxy?mountId=${mountId}&path=${encodeURIComponent(itemId)}`;
-    const directUrl = `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`;
+    const directUrl = upgradeToHttpsIfNeeded(req, `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`);
     const format = detectMediaFormat(source.Path ?? title);
     res.json({
       success: true,
@@ -338,6 +340,66 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
     console.error('[jellyfin] proxy error:', err);
     const status = extractErrorCode(err) === 'AUTH_FAILED' ? 401 : 502;
     res.status(status).json({ success: false, message: extractErrorMessage(err, '代理 Jellyfin 视频流失败'), code: extractErrorCode(err) });
+  }
+});
+
+// 基于影片 ID 的流代理 - GET /stream?movieId=
+// 与 /proxy 的区别：/stream 不依赖 userId 查挂载，而是直接从 Movie 表读取 serverUrl，
+// 再通过 serverUrl + type='jellyfin' 在 UserMount 表中查找挂载凭证，
+// 这样房间内任何成员（含观众）都能通过 movieId 访问影片流。
+router.get('/stream', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const movieIdRaw = req.query.movieId;
+    if (movieIdRaw === undefined) {
+      res.status(400).json({ success: false, message: '缺少 movieId 参数' });
+      return;
+    }
+    const movieId = Number(movieIdRaw);
+    if (Number.isNaN(movieId)) {
+      res.status(400).json({ success: false, message: 'movieId 不正确' });
+      return;
+    }
+
+    const movie = await AppDataSource.getRepository(Movie).findOneBy({ id: movieId });
+    if (!movie) {
+      res.status(404).json({ success: false, message: '影片不存在' });
+      return;
+    }
+    if (!movie.serverUrl || !movie.path) {
+      res.status(400).json({ success: false, message: '该影片未挂载服务器信息' });
+      return;
+    }
+
+    // 通过 serverUrl + type 查找任何可用的 Jellyfin 挂载（不依赖 userId）
+    const mount = await AppDataSource.getRepository(UserMount).findOneBy({
+      serverUrl: movie.serverUrl,
+      type: 'jellyfin',
+    });
+    if (!mount) {
+      res.status(404).json({ success: false, message: '未找到对应的 Jellyfin 挂载配置' });
+      return;
+    }
+
+    const session = await resolveJellyfinSession(mount);
+    const itemId = movie.path;
+    const upstreamUrl = `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`;
+
+    await proxyHttpUpstream(req, res, {
+      url: upstreamUrl,
+      headers: { extra: { 'X-Emby-Token': session.token, Referer: session.client.baseUrl } },
+      cors: 'wildcard',
+      defaultContentType: 'video/mp4',
+      logTag: 'jellyfin-stream',
+      errorMessage: 'Jellyfin 视频流代理失败',
+    });
+  } catch (err) {
+    console.error('[jellyfin] stream error:', err);
+    if (!res.headersSent) {
+      const status = extractErrorCode(err) === 'AUTH_FAILED' ? 401 : 502;
+      res.status(status).json({ success: false, message: extractErrorMessage(err, 'Jellyfin 视频流代理失败'), code: extractErrorCode(err) });
+    } else {
+      res.destroy();
+    }
   }
 });
 

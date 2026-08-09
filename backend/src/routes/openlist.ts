@@ -25,6 +25,7 @@ import {
 } from '../services/openlist';
 import { detectMediaFormat, getContentType } from '../services/mediaFormat';
 import { resolveUserMount, pipeRangeStream } from '../services/proxy';
+import { upgradeToHttpsIfNeeded } from '../services/url-utils';
 
 const router = Router();
 
@@ -474,7 +475,7 @@ router.get('/direct-url', async (req: AuthenticatedRequest, res: Response): Prom
         mount.password || undefined,
         targetPath,
       );
-      res.json({ success: true, directUrl });
+      res.json({ success: true, directUrl: upgradeToHttpsIfNeeded(req, directUrl) });
     } catch (err) {
       const code = err instanceof OpenListError ? err.code : 'UNREACHABLE';
       const status = code === 'AUTH_FAILED' ? 401 : code === 'NOT_FOUND' ? 404 : 400;
