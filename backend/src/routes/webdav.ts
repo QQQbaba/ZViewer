@@ -19,6 +19,7 @@ import {
 } from '../services/openlist';
 import { detectMediaFormat, getContentType } from '../services/mediaFormat';
 import { resolveUserMount, pipeRangeStream } from '../services/proxy';
+import { upgradeToHttpsIfNeeded } from '../services/url-utils';
 
 const router = Router();
 
@@ -483,7 +484,7 @@ router.get('/direct-url', async (req: AuthenticatedRequest, res: Response): Prom
         mount.password || undefined,
         targetPath,
       );
-      res.json({ success: true, directUrl: alistDirectUrl });
+      res.json({ success: true, directUrl: upgradeToHttpsIfNeeded(req, alistDirectUrl) });
       return;
     } catch (err) {
       // AList API 调用失败，可能是非 AList 服务器或路径不存在
@@ -512,7 +513,7 @@ router.get('/direct-url', async (req: AuthenticatedRequest, res: Response): Prom
       mount.username || undefined,
       mount.password || undefined,
     );
-    res.json({ success: true, directUrl });
+    res.json({ success: true, directUrl: upgradeToHttpsIfNeeded(req, directUrl) });
   } catch (err) {
     console.error('[webdav] direct-url error:', err);
     res.status(500).json({ success: false, message: '获取 WebDAV 直链失败' });

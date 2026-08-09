@@ -16,7 +16,7 @@
  * 且只有 B站 一种代理场景。集中到本模块后，引擎只需调用 `resolveProxyUrl(url, headers, format)`，
  * 策略变更只改本文件。
  */
-import { getApiUrl } from '@/lib/api'
+
 
 /**
  * 判断 URL 是否为 B站 CDN 媒体地址。
@@ -84,11 +84,13 @@ export function isCliProxyUrl(url: string): boolean {
 }
 
 /**
- * 将 URL 包装为后端代理 URL。
+ * 将 URL 包装为后端代理 URL（相对路径）。
  * 后端代理会自动添加 Referer/User-Agent 头绕过防盗链，并透传 Range 请求支持断点续传。
+ *
+ * 使用相对路径确保 video 标签的请求通过 Nginx 代理转发到后端（同域请求携带 cookie）。
  */
 export function buildProxyUrl(url: string): string {
-  return `${getApiUrl()}/api/stream/proxy?url=${encodeURIComponent(url)}`
+  return `/api/stream/proxy?url=${encodeURIComponent(url)}`
 }
 
 /**

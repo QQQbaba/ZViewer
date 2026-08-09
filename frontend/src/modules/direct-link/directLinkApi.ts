@@ -1,8 +1,13 @@
-import { getApiUrl } from '@/lib/api'
 import type { ProxyModule } from './types'
 
 /**
- * 构建代理播放 URL
+ * 构建代理播放 URL（相对路径）
+ *
+ * 使用相对路径而非完整 URL，确保：
+ * 1. video 标签的请求通过 Nginx 代理转发到后端（同域请求携带 cookie）
+ * 2. 避免开发环境 getApiUrl() 返回的 localhost:5174 等地址出现在数据库中
+ * 3. 代理模式下 movie.service.ts 会进一步将 URL 重写为 /api/{source}/stream?movieId={id}
+ *
  * @param module 模块类型（openlist / webdav）
  * @param params 查询参数（如 { url: 'xxx' } 或 { mountId: 1, path: '/video.mp4' }）
  */
@@ -19,7 +24,7 @@ export function buildProxyUrl(
       {} as Record<string, string>
     )
   ).toString()
-  return `${getApiUrl()}/api/${module}/proxy?${query}`
+  return `/api/${module}/proxy?${query}`
 }
 
 /**
