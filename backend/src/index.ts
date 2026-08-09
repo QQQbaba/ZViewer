@@ -32,6 +32,8 @@ import serverFilesRoutes from './routes/serverFiles';
 import openlistRoutes from './routes/openlist';
 import webdavRoutes from './routes/webdav';
 import ftpRoutes from './routes/ftp';
+import embyRoutes from './routes/emby';
+import jellyfinRoutes from './routes/jellyfin';
 import subtitlesRoutes from './routes/subtitles';
 import updaterRoutes from './routes/updater';
 import clientLogsRoutes from './routes/client-logs';
@@ -279,6 +281,8 @@ async function bootstrap() {
   app.use('/api/cli', cliRoutes);
   app.use('/api/openlist', openlistRoutes);
   app.use('/api/webdav', webdavRoutes);
+  app.use('/api/emby', embyRoutes);
+  app.use('/api/jellyfin', jellyfinRoutes);
   app.use('/api/ftp', ftpRoutes);
   app.use('/api/subtitles', subtitlesRoutes);
   app.use('/api/system/update', updaterRoutes);

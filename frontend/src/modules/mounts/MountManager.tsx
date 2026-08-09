@@ -10,6 +10,7 @@ import {
   Plus,
   Server,
   Trash2,
+  Clapperboard,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { ConfirmModal } from '@/components/ui/Modal'
@@ -20,6 +21,8 @@ import { message } from '@/components/ui/message'
 import { deleteWebDAVMount } from '@/modules/webdav/webdavApi'
 import { deleteOpenListMount } from '@/modules/openlist/openlistApi'
 import { deleteFTPMount } from '@/modules/ftp/ftpApi'
+import { deleteEmbyMount } from '@/modules/emby/embyApi'
+import { deleteJellyfinMount } from '@/modules/jellyfin/jellyfinApi'
 import { fetchAllMounts } from './mountsApi'
 import MountFormModal from './MountFormModal'
 import MountBrowser from './MountBrowser'
@@ -29,18 +32,24 @@ const TYPE_LABELS: Record<MountType, string> = {
   webdav: 'WebDAV',
   ftp: 'FTP',
   openlist: 'OpenList',
+  emby: 'Emby',
+  jellyfin: 'Jellyfin',
 }
 
 const TYPE_COLORS: Record<MountType, 'primary' | 'warning' | 'success'> = {
   webdav: 'primary',
   ftp: 'warning',
   openlist: 'success',
+  emby: 'primary',
+  jellyfin: 'primary',
 }
 
 const TYPE_ICONS: Record<MountType, React.ReactNode> = {
   webdav: <Server className="h-4 w-4" />,
   ftp: <HardDrive className="h-4 w-4" />,
   openlist: <Globe className="h-4 w-4" />,
+  emby: <Clapperboard className="h-4 w-4" />,
+  jellyfin: <Clapperboard className="h-4 w-4" />,
 }
 
 export default function MountManager() {
@@ -89,6 +98,10 @@ export default function MountManager() {
         await deleteWebDAVMount(deleteTarget.id)
       } else if (deleteTarget.type === 'openlist') {
         await deleteOpenListMount(deleteTarget.id)
+      } else if (deleteTarget.type === 'emby') {
+        await deleteEmbyMount(deleteTarget.id)
+      } else if (deleteTarget.type === 'jellyfin') {
+        await deleteJellyfinMount(deleteTarget.id)
       } else {
         await deleteFTPMount(deleteTarget.id)
       }
@@ -141,7 +154,9 @@ export default function MountManager() {
         <div className="space-y-3">
           {mounts.map((mount) => {
             const subtitle =
-              [mount.serverUrl, mount.path].filter(Boolean).join(' / ') || null
+              [mount.serverUrl, 'path' in mount ? mount.path : null]
+                .filter(Boolean)
+                .join(' / ') || null
             return (
               <div
                 key={`${mount.type}-${mount.id}`}
@@ -171,12 +186,15 @@ export default function MountManager() {
                       <span className="truncate">{subtitle}</span>
                     </div>
                   )}
-                  {mount.port && (
+                  {'port' in mount && mount.port && (
                     <div className="mt-1 text-xs text-[var(--md-sys-color-on-surface-variant)]">
                       端口：{mount.port}
                     </div>
                   )}
-                  {(mount.type === 'openlist' || mount.type === 'webdav') && (
+                  {(mount.type === 'openlist' ||
+                    mount.type === 'webdav' ||
+                    mount.type === 'emby' ||
+                    mount.type === 'jellyfin') && (
                     <div className="mt-1 text-xs text-[var(--md-sys-color-on-surface-variant)]">
                       播放模式：{mount.directLink ? '直链' : '转发'}
                     </div>

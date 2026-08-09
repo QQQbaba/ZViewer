@@ -146,7 +146,10 @@ export async function proxyHttpUpstream(
   });
 
   try {
+    // 转发原始 HTTP 方法：HEAD 请求转发为 HEAD（避免上游下载整个视频体），
+    // GET 请求转发为 GET（含 Range 头时上游返回 206 部分内容）。
     const upstream = await fetch(url, {
+      method: req.method,
       headers: buildUpstreamHeaders(req, h),
       signal: controller.signal,
     });
@@ -189,6 +192,13 @@ export async function proxyHttpUpstream(
       const value = upstream.headers.get(name);
       if (value) res.setHeader(name, value);
     }
+    // 确保浏览器知道支持 Range 请求：代理透传 Range 头到上游，
+    // 上游返回 206 时代理也转发 206，因此始终支持分段请求。
+    // 若上游未返回 Accept-Ranges（部分服务器不默认返回），
+    // 浏览器不会发起 Range 请求，导致整文件下载而非流式播放。
+    if (!res.getHeader('accept-ranges')) {
+      res.setHeader('Accept-Ranges', 'bytes');
+    }
     // 视频/媒体流代理：提示反向代理不要缓冲整个响应体。
     // Nginx 默认会先把上游响应缓冲到临时文件再发给客户端，对于大体积、
     // 长连接的 Range 流会导致延迟、超时或内存/磁盘耗尽。
@@ -203,10 +213,13 @@ export async function proxyHttpUpstream(
     res.setHeader('Cache-Control', finalCacheControl);
 
     if (!upstream.body) {
+      // HEAD 请求：上游 body 为 null，status 已由上游设置（200/206），
+      // 仅返回头信息，不传输 body。
+      // 非 HEAD 的无 body 响应（如 204）：保持上游状态码。
       console.log(
-        `[${logTag}] proxy 204 ${formatBytes(0)} ${Date.now() - startTime}ms range=${rangeHeader || '-'} ${url.slice(0, 100)}`,
+        `[${logTag}] proxy ${res.statusCode} ${formatBytes(0)} ${Date.now() - startTime}ms range=${rangeHeader || '-'} ${url.slice(0, 100)}`,
       );
-      res.status(204).end();
+      res.end();
       return;
     }
 

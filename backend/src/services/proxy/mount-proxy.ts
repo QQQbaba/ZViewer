@@ -10,7 +10,7 @@ import { AppDataSource } from '../../data-source';
 import { UserMount } from '../../entities/UserMount';
 import { AuthenticatedRequest } from '../../middleware/auth';
 
-export type MountType = 'webdav' | 'openlist' | 'ftp';
+export type MountType = 'webdav' | 'openlist' | 'ftp' | 'emby' | 'jellyfin';
 
 export interface ResolvedMount {
   mount: UserMount;
