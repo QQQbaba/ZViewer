@@ -1,1 +1,1 @@
-export type ProxyModule = 'openlist' | 'webdav'
+export type ProxyModule = 'openlist' | 'webdav' | 'emby' | 'jellyfin'

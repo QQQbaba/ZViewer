@@ -24,6 +24,16 @@ import {
   updateFTPMount,
   testFTPMount,
 } from '@/modules/ftp/ftpApi'
+import {
+  createEmbyMount,
+  updateEmbyMount,
+  testEmbyMount,
+} from '@/modules/emby/embyApi'
+import {
+  createJellyfinMount,
+  updateJellyfinMount,
+  testJellyfinMount,
+} from '@/modules/jellyfin/jellyfinApi'
 import type { UnionMount, MountType } from './types'
 
 interface MountFormModalProps {
@@ -44,6 +54,7 @@ interface FormValues {
   path: string
   username: string
   password: string
+  apiKey: string
   directLink: boolean
 }
 
@@ -55,6 +66,7 @@ const EMPTY_FORM: FormValues = {
   path: '',
   username: '',
   password: '',
+  apiKey: '',
   directLink: false,
 }
 
@@ -63,11 +75,12 @@ function mountToFormValues(mount: UnionMount): FormValues {
     type: mount.type,
     name: mount.name,
     serverUrl: mount.serverUrl || '',
-    port: mount.port ? String(mount.port) : '',
-    path: mount.path || '',
+    port: 'port' in mount && mount.port ? String(mount.port) : '',
+    path: 'path' in mount && mount.path ? mount.path || '' : '',
     username: mount.username || '',
     password: '',
-    directLink: mount.directLink,
+    apiKey: 'apiKey' in mount ? mount.apiKey || '' : '',
+    directLink: 'directLink' in mount ? mount.directLink : false,
   }
 }
 
@@ -89,6 +102,14 @@ function validateForm(values: FormValues): Record<string, string> {
       }
     }
   }
+  if (values.type === 'emby') {
+    if (
+      !values.apiKey.trim() &&
+      (!values.username.trim() || !values.password)
+    ) {
+      errors.apiKey = '请填写 API Key，或用户名与密码'
+    }
+  }
   return errors
 }
 
@@ -96,6 +117,8 @@ const TYPE_OPTIONS = [
   { label: 'WebDAV', value: 'webdav' as MountType },
   { label: 'FTP', value: 'ftp' as MountType },
   { label: 'OpenList', value: 'openlist' as MountType },
+  { label: 'Emby', value: 'emby' as MountType },
+  { label: 'Jellyfin', value: 'jellyfin' as MountType },
 ]
 
 export default function MountFormModal({
@@ -174,6 +197,30 @@ export default function MountFormModal({
           password: trimmedPwd,
         })
         message.success(`连接成功，共 ${result.itemCount} 条目`)
+      } else if (type === 'emby') {
+        const result = await testEmbyMount({
+          name: formValues.name.trim(),
+          serverUrl: trimmedUrl,
+          apiKey: formValues.apiKey.trim() || null,
+          username: trimmedUser,
+          password: trimmedPwd,
+          directLink: formValues.directLink,
+        })
+        message.success(
+          `连接成功${result.userName ? `，用户：${result.userName}` : ''}`
+        )
+      } else if (type === 'jellyfin') {
+        const result = await testJellyfinMount({
+          name: formValues.name.trim(),
+          serverUrl: trimmedUrl,
+          apiKey: formValues.apiKey.trim() || null,
+          username: trimmedUser,
+          password: trimmedPwd,
+          directLink: formValues.directLink,
+        })
+        message.success(
+          `连接成功${result.userName ? `，用户：${result.userName}` : ''}`
+        )
       } else {
         const portNum = port.trim() ? Number(port.trim()) : undefined
         const result = await testFTPMount({
@@ -210,6 +257,7 @@ export default function MountFormModal({
         path,
         username,
         password,
+        apiKey,
         directLink,
       } = formValues
       const portNum = port.trim() ? Number(port.trim()) : null
@@ -249,6 +297,38 @@ export default function MountFormModal({
           await createOpenListMount(payload)
           message.success('OpenList 挂载添加成功')
         }
+      } else if (type === 'emby') {
+        const payload = {
+          name: name.trim(),
+          serverUrl: serverUrl.trim() || null,
+          apiKey: apiKey.trim() || null,
+          username: username.trim() || null,
+          password: password || null,
+          directLink,
+        }
+        if (editingMount) {
+          await updateEmbyMount(editingMount.id, payload)
+          message.success('Emby 挂载更新成功')
+        } else {
+          await createEmbyMount(payload)
+          message.success('Emby 挂载添加成功')
+        }
+      } else if (type === 'jellyfin') {
+        const payload = {
+          name: name.trim(),
+          serverUrl: serverUrl.trim() || null,
+          apiKey: apiKey.trim() || null,
+          username: username.trim() || null,
+          password: password || null,
+          directLink,
+        }
+        if (editingMount) {
+          await updateJellyfinMount(editingMount.id, payload)
+          message.success('Jellyfin 挂载更新成功')
+        } else {
+          await createJellyfinMount(payload)
+          message.success('Jellyfin 挂载添加成功')
+        }
       } else {
         const payload = {
           type: 'ftp' as const,
@@ -284,7 +364,8 @@ export default function MountFormModal({
   const isFtp = formValues.type === 'ftp'
   const isWebdav = formValues.type === 'webdav'
   const isOpenlist = formValues.type === 'openlist'
-  const showDirectLink = isWebdav || isOpenlist
+  const isEmby = formValues.type === 'emby'
+  const showDirectLink = isWebdav || isOpenlist || isEmby
 
   return (
     <Modal
@@ -333,16 +414,27 @@ export default function MountFormModal({
         <Input
           label="服务器地址"
           placeholder={
-            isOpenlist
-              ? '例如：openlist.example.com（无需填 /dav，自动补全）'
-              : isWebdav
-                ? '例如：https://dav.example.com'
-                : '例如：ftp.example.com'
+            isEmby
+              ? '例如：http://192.168.1.100:8096'
+              : isOpenlist
+                ? '例如：openlist.example.com（无需填 /dav，自动补全）'
+                : isWebdav
+                  ? '例如：https://dav.example.com'
+                  : '例如：ftp.example.com'
           }
           value={formValues.serverUrl}
           onChange={(e) => updateField('serverUrl', e.target.value)}
           error={errors.serverUrl}
         />
+        {isEmby && (
+          <Input
+            label="API Key（推荐）"
+            placeholder="Emby 控制台 → 高级 → API 密钥"
+            value={formValues.apiKey}
+            onChange={(e) => updateField('apiKey', e.target.value)}
+            error={errors.apiKey}
+          />
+        )}
         {isFtp && (
           <InputNumber
             label="端口"
@@ -356,14 +448,16 @@ export default function MountFormModal({
             error={errors.port}
           />
         )}
+        {!isEmby && (
+          <Input
+            label="路径"
+            placeholder="例如：/videos"
+            value={formValues.path}
+            onChange={(e) => updateField('path', e.target.value)}
+          />
+        )}
         <Input
-          label="路径"
-          placeholder="例如：/videos"
-          value={formValues.path}
-          onChange={(e) => updateField('path', e.target.value)}
-        />
-        <Input
-          label="用户名"
+          label={isEmby ? '用户名（与 API Key 二选一）' : '用户名'}
           placeholder="可选"
           value={formValues.username}
           onChange={(e) => updateField('username', e.target.value)}

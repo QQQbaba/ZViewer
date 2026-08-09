@@ -3,10 +3,12 @@
 import { getWebDAVMounts } from '@/modules/webdav/webdavApi'
 import { getOpenListMounts } from '@/modules/openlist/openlistApi'
 import { getFTPMounts } from '@/modules/ftp/ftpApi'
+import { getEmbyMounts } from '@/modules/emby/embyApi'
+import { getJellyfinMounts } from '@/modules/jellyfin/jellyfinApi'
 import type { UnionMount } from './types'
 
 /**
- * 获取当前用户的所有挂载（聚合 webdav/openlist/ftp）
+ * 获取当前用户的所有挂载（聚合 webdav/openlist/ftp/emby）
  * 任一模块失败时记录错误但不影响其他模块返回
  */
 export async function fetchAllMounts(): Promise<UnionMount[]> {
@@ -14,13 +16,15 @@ export async function fetchAllMounts(): Promise<UnionMount[]> {
     getWebDAVMounts(),
     getOpenListMounts(),
     getFTPMounts(),
+    getEmbyMounts(),
+    getJellyfinMounts(),
   ])
 
   const mounts: UnionMount[] = []
   const errors: string[] = []
 
   results.forEach((result, index) => {
-    const type = ['webdav', 'openlist', 'ftp'][index]
+    const type = ['webdav', 'openlist', 'ftp', 'emby', 'jellyfin'][index]
     if (result.status === 'fulfilled') {
       mounts.push(...result.value)
     } else {
