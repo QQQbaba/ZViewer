@@ -17,3 +17,8 @@ export {
   type MountType,
   type ResolvedMount,
 } from './mount-proxy';
+export {
+  resolveMovieStream,
+  StreamMovieError,
+  type ResolvedMovieStream,
+} from './stream-movie';

@@ -186,7 +186,7 @@ export class MovieService {
     // 直链模式下 url 已是真实下载 URL（OpenList 由后端 /direct-url 接口获取，
     // WebDAV 由后端 /direct-url 接口拼接），无需重写。
     const sourceType = typeof data.source === 'string' ? data.source : '';
-    const isProxyMode = data.directLink !== true && ['webdav', 'openlist', 'emby', 'jellyfin'].includes(sourceType);
+    const isProxyMode = data.directLink !== true && ['webdav', 'openlist', 'ftp', 'emby', 'jellyfin'].includes(sourceType);
     if (isProxyMode && movie.id) {
       const streamUrl = `/api/${sourceType}/stream?movieId=${movie.id}`;
       await repo.update({ id: movie.id }, { url: streamUrl });
