@@ -119,7 +119,7 @@ export function useSocket() {
     const onConnect = () => {
       setConnected(true)
     }
-    const onDisconnect = (reason: string, description?: unknown) => {
+    const onDisconnect = (reason: string) => {
       console.warn('[useSocket] disconnected:', reason)
       setConnected(false)
     }
