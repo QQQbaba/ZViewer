@@ -250,6 +250,17 @@ function buildFrontend() {
   const frontendDist = path.join(FRONTEND, 'dist');
   if (!SKIP_BUILD) {
     log('运行 vite build...');
+    // 从 backend/.env（或 .env.example）读取 NMS 端口并透传给前端构建，
+    // 前端 OBS 推流/FLV 拉流地址据此生成（VITE_RTMP_PORT / VITE_HTTP_FLV_PORT）
+    for (const candidate of [path.join(BACKEND, '.env'), path.join(BACKEND, '.env.example')]) {
+      if (!fs.existsSync(candidate)) continue;
+      const envContent = fs.readFileSync(candidate, 'utf8');
+      const rtmpMatch = envContent.match(/^\s*RTMP_PORT\s*=\s*"?(\d+)"?/m);
+      const flvMatch = envContent.match(/^\s*HTTP_FLV_PORT\s*=\s*"?(\d+)"?/m);
+      if (rtmpMatch) process.env.VITE_RTMP_PORT = rtmpMatch[1];
+      if (flvMatch) process.env.VITE_HTTP_FLV_PORT = flvMatch[1];
+      break;
+    }
     execSync('npm run build -w frontend', { cwd: ROOT, stdio: 'inherit' });
     success('前端构建完成');
   } else {
@@ -412,7 +423,8 @@ function packageBackend(targetPlatforms) {
         continue;
       }
 
-      // 复制后端 .env；单文件版端口已固定，过滤掉 PORT 行。
+      // 复制后端 .env；保留 PORT/FRONTEND_PORT 等端口配置，
+      // 由启动脚本（start.sh / start-win.ps1）读取并按需覆盖 exe 的环境变量。
       // CI 环境中 backend/.env 被 .gitignore 排除，回退到 .env.example。
       const envDest = path.join(outputFolder, '.env');
       if (!fs.existsSync(envDest)) {
@@ -423,12 +435,8 @@ function packageBackend(targetPlatforms) {
         const envSrc = envCandidates.find((p) => fs.existsSync(p));
         if (envSrc) {
           const envContent = fs.readFileSync(envSrc, 'utf8');
-          const filtered = envContent
-            .split('\n')
-            .filter((line) => !/^\s*PORT\s*=/.test(line))
-            .join('\n');
-          fs.writeFileSync(envDest, filtered, 'utf8');
-          log(`已复制 .env 配置（来源: ${path.basename(envSrc)}，已移除 PORT）`);
+          fs.writeFileSync(envDest, envContent, 'utf8');
+          log(`已复制 .env 配置（来源: ${path.basename(envSrc)}）`);
         } else {
           // 兜底：创建空文件，避免后续 Docker COPY 失败
           fs.writeFileSync(envDest, '', 'utf8');

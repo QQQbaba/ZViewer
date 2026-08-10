@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
-import { useAuthStore } from '@/store/authStore'
-import { getSocketUrl } from '@/lib/api'
+import { useAuthStore, type User } from '@/store/authStore'
+import {
+  apiFetch,
+  getSocketUrl,
+  getRefreshToken,
+  saveAuthTokens,
+  resetSessionExpired,
+} from '@/lib/api'
+import { buildSocketAuth } from '@/lib/authTransport'
 
 let globalSocket: Socket | null = null
 let refCount = 0
@@ -13,19 +20,29 @@ let disconnectTimer: ReturnType<typeof setTimeout> | null = null
  * 关键点：
  * 1. `withCredentials: true`：让浏览器携带 httpOnly cookie（access_token）
  *    socket.io 中间件会从 handshake.headers.cookie 读取 access_token 进行认证
- * 2. 不再通过 auth.token 显式传递 token（前端无法读取 httpOnly cookie）
+ * 2. `auth.token`：跨站 HTTP / 直连场景 cookie 不可用时，携带本地 Bearer token
+ *    （后端 socket.io 中间件兼容 auth.token 字段）
  * 3. autoConnect: false，由调用方控制连接时机
  */
 function getSocket(): Socket {
-  if (globalSocket) {
-    return globalSocket
-  }
+  if (globalSocket) return globalSocket
 
-  globalSocket = io(getSocketUrl(), {
+  const socketUrl = getSocketUrl()
+  globalSocket = io(socketUrl, {
     transports: ['websocket', 'polling'],
     autoConnect: false,
     withCredentials: true,
+    // 分离式鉴权：HTTPS 走 cookie（自动携带），HTTP 走 auth.token（每次握手取最新）
+    // socket.io v4 的 auth 函数使用回调风格：cb(payload) 而非 return payload
+    auth: (cb: (data: Record<string, string>) => void) => {
+      cb(buildSocketAuth())
+    },
   })
+
+  // 调试钩子：暴露 socket 到 window 以便检查内部状态
+  if (typeof window !== 'undefined') {
+    ;(window as unknown as { __debugSocket?: Socket }).__debugSocket = globalSocket
+  }
 
   return globalSocket
 }
@@ -81,7 +98,7 @@ export function useSocket() {
   const socket = useMemo(() => {
     if (!shouldCreateSocket) return null
     return getSocket()
-  }, [shouldCreateSocket])
+  }, [shouldCreateSocket, autoLoginStatus])
 
   const [connected, setConnected] = useState(() => socket?.connected ?? false)
 
@@ -99,13 +116,16 @@ export function useSocket() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 初始化连接状态
     setConnected(socket.connected)
 
-    const onConnect = () => setConnected(true)
-    const onDisconnect = () => setConnected(false)
+    const onConnect = () => {
+      setConnected(true)
+    }
+    const onDisconnect = (reason: string, description?: unknown) => {
+      console.warn('[useSocket] disconnected:', reason)
+      setConnected(false)
+    }
     const onConnectError = async (err: Error) => {
-      console.error('[useSocket] connection error:', err.message)
-
-      // 认证类错误（access token 过期）：调 /api/auth/refresh，成功后重连
-      // 失败才 logout。socket.io 的认证错误消息由后端中间件返回。
+      console.warn('[useSocket] connect_error:', err.message)
+      // 认证类错误（access token 过期）：尝试 refresh → guest token → logout 三级降级
       const msg = err.message || ''
       const isAuthError =
         msg.includes('未提供认证令牌') ||
@@ -115,31 +135,69 @@ export function useSocket() {
         msg.includes('unauthorized') ||
         msg.includes('not authenticated')
 
-      if (isAuthError && !isRefreshingRef.current) {
-        isRefreshingRef.current = true
-        try {
-          const res = await fetch(`${getSocketUrl()}/api/auth/refresh`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-          })
-          if (res.ok) {
-            const data = (await res.json()) as { success?: boolean }
-            if (data.success) {
-              // refresh 成功：cookie 已更新，断开重连让 socket 重新握手
-              console.log('[useSocket] token refreshed, reconnecting socket')
-              reconnectSocket()
-              return
-            }
+      if (!isAuthError || isRefreshingRef.current) {
+        setConnected(false)
+        return
+      }
+
+      isRefreshingRef.current = true
+      try {
+        // Step 1: 尝试 refresh access token
+        const res = await apiFetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: getRefreshToken() }),
+        })
+        if (res.ok) {
+          const data = (await res.json()) as {
+            success?: boolean
+            accessToken?: string
           }
-          // refresh 失败：refresh token 也过期/无效，登出
-          console.warn('[useSocket] refresh failed, logging out')
-          logout()
-        } catch (refreshErr) {
-          console.warn('[useSocket] refresh network error:', refreshErr)
-        } finally {
-          isRefreshingRef.current = false
+          if (data.success) {
+            if (data.accessToken) saveAuthTokens(data.accessToken)
+            reconnectSocket()
+            return
+          }
         }
+
+        // Step 2: refresh 失败 → 获取 guest token 作为降级身份
+        const guestRes = await apiFetch('/api/auth/guest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        })
+        if (guestRes.ok) {
+          const guestData = (await guestRes.json()) as {
+            success?: boolean
+            user?: {
+              id: string
+              username: string
+              role: string
+              status?: 'active' | 'pending'
+              avatar?: string | null
+            }
+            accessToken?: string
+          }
+          if (guestData.success && guestData.user) {
+            if (guestData.accessToken) saveAuthTokens(guestData.accessToken)
+            resetSessionExpired()
+            useAuthStore.getState().setUser({
+              id: guestData.user.id,
+              username: guestData.user.username,
+              role: guestData.user.role as User['role'],
+              status: guestData.user.status,
+              avatar: guestData.user.avatar,
+            })
+            reconnectSocket()
+            return
+          }
+        }
+
+        // Step 3: guest token 也失败 → 登出作为最后手段
+        logout()
+      } catch {
+        // 网络错误 → 不登出，等待 socket.io 自动重试
+      } finally {
+        isRefreshingRef.current = false
       }
       setConnected(false)
     }
