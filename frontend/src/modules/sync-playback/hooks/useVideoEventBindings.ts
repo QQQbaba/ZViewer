@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { RefObject, MutableRefObject } from 'react'
 import { useRoomStore } from '@/store/roomStore'
 import type { WatchTogetherState, ControlAction } from '../types'
-import { SEEK_DEBOUNCE_MS } from '../constants'
+import { SEEK_DEBOUNCE_MS, PLAY_PAUSE_DEBOUNCE_MS } from '../constants'
 import { buildStateFromVideo } from '../services'
 
 export interface UseVideoEventBindingsOptions {
@@ -51,6 +51,9 @@ export function useVideoEventBindings({
   sendControl,
 }: UseVideoEventBindingsOptions): UseVideoEventBindingsReturn {
   const seekDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const playPauseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
 
   useEffect(() => {
     const video = videoRef.current
@@ -78,13 +81,23 @@ export function useVideoEventBindings({
 
     const handlePlay = () => {
       if (suppressEventsRef.current) return
-      sendControl('play')
-      updateAndBroadcast(true)
+      if (playPauseDebounceRef.current) {
+        clearTimeout(playPauseDebounceRef.current)
+      }
+      playPauseDebounceRef.current = setTimeout(() => {
+        sendControl('play')
+        updateAndBroadcast(true)
+      }, PLAY_PAUSE_DEBOUNCE_MS)
     }
     const handlePause = () => {
       if (suppressEventsRef.current) return
-      sendControl('pause')
-      updateAndBroadcast(true)
+      if (playPauseDebounceRef.current) {
+        clearTimeout(playPauseDebounceRef.current)
+      }
+      playPauseDebounceRef.current = setTimeout(() => {
+        sendControl('pause')
+        updateAndBroadcast(true)
+      }, PLAY_PAUSE_DEBOUNCE_MS)
     }
     const handleSeeked = () => {
       if (suppressEventsRef.current) return
@@ -137,6 +150,9 @@ export function useVideoEventBindings({
       video.removeEventListener('timeupdate', handleTimeUpdate)
       if (seekDebounceRef.current) {
         clearTimeout(seekDebounceRef.current)
+      }
+      if (playPauseDebounceRef.current) {
+        clearTimeout(playPauseDebounceRef.current)
       }
     }
   }, [

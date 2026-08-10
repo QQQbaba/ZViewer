@@ -5,7 +5,11 @@ import { useRoomStore } from '@/store/roomStore'
 import { getBilibiliParseOptions } from '@/modules/bilibili/parseOptions'
 import type { WatchTogetherState, ControlAction } from '../types'
 import { SOCKET_EVENT } from '../constants'
-import { buildStateFromVideo, isStateEqual } from '../services'
+import {
+  buildStateFromVideo,
+  isStateEqual,
+  computeStateDiff,
+} from '../services'
 
 export interface UseHostBroadcastOptions {
   roomId: string
@@ -55,8 +59,10 @@ export function useHostBroadcast({
       }
       // 浅比较跳过等价状态：房主正常播放时 currentTime 增长 < 0.5s 不广播
       if (isStateEqual(lastStateRef.current, stateWithCli)) return
+      // 计算增量（P1-Opt#7）：观众端合并 diff 到现有 state，减少全量替换
+      const diff = computeStateDiff(lastStateRef.current, stateWithCli)
       lastStateRef.current = stateWithCli
-      socket.emit(SOCKET_EVENT.STATE, { roomId, state: stateWithCli })
+      socket.emit(SOCKET_EVENT.STATE, { roomId, state: stateWithCli, diff })
     },
     [socket, roomId, isHostRef]
   )

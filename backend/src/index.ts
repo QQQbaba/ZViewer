@@ -72,6 +72,7 @@ import {
 import {
   PlaybackMemoryHandler,
   playbackBroadcasterService,
+  playbackMemoryService,
 } from './modules/playback-memory';
 import { CommentHandler } from './modules/comment';
 import { CliHandler } from './modules/cli';
@@ -214,6 +215,9 @@ async function bootstrap() {
   console.log('TypeORM Data Source has been initialized.');
   await seedRootAdmin();
   ensureUploadsRoot();
+
+  // P3-Opt#13：从 DB 恢复所有活跃房间的运行时状态（movies、currentMovieId、播放记忆）
+  await roomStateService.initFromDb();
 
   // 头像目录已在 ensureDataDirs() 中创建（config/uploads/avatars），
   // 此处保留防御性检查以兼容旧版手动部署场景
@@ -500,8 +504,14 @@ async function bootstrap() {
     }
   });
 
-  // 主进程退出时停止 NMS
-  const gracefulShutdown = () => {
+  // 主进程退出时停止 NMS 并刷新脏数据
+  const gracefulShutdown = async () => {
+    // 先刷新所有脏数据到 DB，避免最多 2s 的播放进度丢失
+    try {
+      await playbackMemoryService.flushAllDirty();
+    } catch (err) {
+      console.error('[flushAllDirty] error:', err);
+    }
     try {
       stopNms();
     } catch (err) {

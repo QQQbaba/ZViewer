@@ -24,9 +24,10 @@ const SERVER_HEARTBEAT_INTERVAL_MS = 2000;
 
 export class PlaybackBroadcasterService {
   private intervalId: NodeJS.Timeout | null = null;
+  private cleanupIntervalId: NodeJS.Timeout | null = null;
   private io: SocketIOServer | null = null;
 
-  /** 启动定时广播 */
+  /** 启动定时广播与缓存清理 */
   start(io: SocketIOServer): void {
     if (this.intervalId) {
       return; // 已启动
@@ -35,13 +36,25 @@ export class PlaybackBroadcasterService {
     this.intervalId = setInterval(() => {
       void this.broadcastAll();
     }, SERVER_HEARTBEAT_INTERVAL_MS);
+
+    // 每 30s 清理一次陈旧缓存（playback-memory + room-state）
+    this.cleanupIntervalId = setInterval(() => {
+      void playbackMemoryService.cleanupStaleCache();
+      void import('../room/room-state.service').then(({ roomStateService }) => {
+        roomStateService.cleanupStaleStates();
+      });
+    }, 30000);
   }
 
-  /** 停止定时广播 */
+  /** 停止定时广播与缓存清理 */
   stop(): void {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
+    }
+    if (this.cleanupIntervalId) {
+      clearInterval(this.cleanupIntervalId);
+      this.cleanupIntervalId = null;
     }
     this.io = null;
   }
@@ -55,9 +68,14 @@ export class PlaybackBroadcasterService {
     const roomIds = playbackMemoryService.getActiveRoomIds();
     for (const roomId of roomIds) {
       try {
-        // 仅在房主离线时由服务器接管广播
-        // 房主在线时由房主的 watch-together-state 事件驱动
+        // 只在房主离线时由服务器接管广播
         if (playbackMemoryService.isHostOnline(roomId)) {
+          continue;
+        }
+
+        // 检查房间是否有在线成员（socket），无观众时跳过广播
+        const roomSockets = this.io.sockets.adapter.rooms.get(roomId);
+        if (!roomSockets || roomSockets.size === 0) {
           continue;
         }
 
@@ -66,6 +84,11 @@ export class PlaybackBroadcasterService {
 
         this.io.to(roomId).emit('server-heartbeat', {
           roomId,
+          state,
+        });
+        // 统一心跳协议（#14）：新增 sync-heartbeat 事件（source: 'server'）
+        this.io.to(roomId).emit('sync-heartbeat', {
+          source: 'server',
           state,
         });
       } catch (err) {

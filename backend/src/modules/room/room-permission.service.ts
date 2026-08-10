@@ -3,6 +3,10 @@
  *
  * 消除旧架构中 12+ 处重复的 sharer 查询逻辑。
  * 所有权限校验统一通过此服务，禁止在 handler 中直接查询 Session 表。
+ *
+ * 性能优化（P1-Opt#5）：
+ * - isRoomHost / isInRoom 结果缓存 5s，避免高频事件（心跳 2s）重复查 DB
+ * - 缓存 key = socketId:roomId:method，TTL 5s；socket 重连时 socketId 变更缓存自动失效
  */
 import type { Socket } from 'socket.io';
 import { IsNull } from 'typeorm';
@@ -12,12 +16,69 @@ import { Room } from '../../entities/Room';
 import { SystemSettings } from '../../entities/SystemSettings';
 import type { UserRole } from '../../entities/User';
 
+/** 权限校验缓存条目 */
+interface PermissionCacheEntry {
+  result: boolean;
+  expiresAt: number;
+}
+
+/** 权限校验缓存 TTL（毫秒） */
+const PERMISSION_CACHE_TTL_MS = 5000;
+
 /**
  * 房间权限服务。
  *
  * 封装所有基于 Session 表的权限校验逻辑。
  */
 export class RoomPermissionService {
+  /** 权限校验缓存（P1-Opt#5）：key = socketId:roomId:method，TTL 5s */
+  private readonly permissionCache = new Map<string, PermissionCacheEntry>();
+
+  private cacheKey(socketId: string, roomId: string, method: string): string {
+    return `${socketId}:${roomId}:${method}`;
+  }
+
+  private getCached(key: string): boolean | null {
+    const entry = this.permissionCache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      this.permissionCache.delete(key);
+      return null;
+    }
+    return entry.result;
+  }
+
+  private setCache(key: string, result: boolean): void {
+    this.permissionCache.set(key, {
+      result,
+      expiresAt: Date.now() + PERMISSION_CACHE_TTL_MS,
+    });
+  }
+
+  /**
+   * 失效权限缓存（安全加固）。
+   *
+   * 当 sharer 权限因踢出、房主替换、session 结束等被吊销时调用，
+   * 主动清除对应 socketId:roomId 的缓存，避免旧 socket 在 TTL 窗口内继续广播/控制。
+   *
+   * @param socketId socket ID（可选，缺省时按 roomId 清除该房间全部缓存）
+   * @param roomId 房间 ID（可选，缺省时清除该 socket 全部缓存）
+   */
+  invalidatePermissionCache(socketId?: string, roomId?: string): void {
+    if (socketId && roomId) {
+      this.permissionCache.delete(this.cacheKey(socketId, roomId, 'isRoomHost'));
+      this.permissionCache.delete(this.cacheKey(socketId, roomId, 'isInRoom'));
+      return;
+    }
+    for (const key of this.permissionCache.keys()) {
+      const [sid, rid] = key.split(':');
+      if (socketId && sid === socketId) this.permissionCache.delete(key);
+      else if (roomId && rid === roomId) this.permissionCache.delete(key);
+    }
+  }
+
+  /**
+
   /**
    * 判断给定角色是否可以创建房间。
    *
@@ -42,6 +103,10 @@ export class RoomPermissionService {
    * @param roomId 房间 ID
    */
   async isRoomHost(socket: Socket, roomId: string): Promise<boolean> {
+    const key = this.cacheKey(socket.id, roomId, 'isRoomHost');
+    const cached = this.getCached(key);
+    if (cached !== null) return cached;
+
     const sessionRepo = AppDataSource.getRepository(Session);
     const sharer = await sessionRepo.findOneBy({
       socketId: socket.id,
@@ -49,7 +114,9 @@ export class RoomPermissionService {
       role: 'sharer',
       endedAt: IsNull(),
     });
-    return !!sharer;
+    const result = !!sharer;
+    this.setCache(key, result);
+    return result;
   }
 
   /**
@@ -137,13 +204,19 @@ export class RoomPermissionService {
    * 检查 socket 是否在指定房间内（任意角色）。
    */
   async isInRoom(socket: Socket, roomId: string): Promise<boolean> {
+    const key = this.cacheKey(socket.id, roomId, 'isInRoom');
+    const cached = this.getCached(key);
+    if (cached !== null) return cached;
+
     const sessionRepo = AppDataSource.getRepository(Session);
     const session = await sessionRepo.findOneBy({
       socketId: socket.id,
       roomId,
       endedAt: IsNull(),
     });
-    return !!session;
+    const result = !!session;
+    this.setCache(key, result);
+    return result;
   }
 
   /**

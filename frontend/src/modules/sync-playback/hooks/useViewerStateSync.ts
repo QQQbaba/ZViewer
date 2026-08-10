@@ -3,10 +3,21 @@ import type { RefObject, MutableRefObject } from 'react'
 import { useSocket } from '@/hooks/useSocket'
 import { message } from '@/components/ui/message'
 import { useRoomStore } from '@/store/roomStore'
-import type { WatchTogetherState, StatePayload, ControlPayload } from '../types'
+import type {
+  WatchTogetherState,
+  StatePayload,
+  ControlPayload,
+  SyncHeartbeatPayload,
+} from '../types'
 import { SOCKET_EVENT } from '../constants'
 import { safePlay } from '../safePlay'
-import { shouldSeekToHost, executeSeek } from '../services'
+import {
+  executeSeek,
+  mergeStateDiff,
+  shouldSoftSync,
+  getCatchUpRate,
+  getAdaptiveSeekThreshold,
+} from '../services'
 import type { SeekToResult } from '../services'
 import {
   fetchBlobsForBufferMode,
@@ -178,7 +189,10 @@ export function useViewerStateSync({
             // ignore
           }
         }
-        if (currentVideo.playbackRate !== state.playbackRate) {
+        if (
+          state.playbackRate > 0 &&
+          currentVideo.playbackRate !== state.playbackRate
+        ) {
           currentVideo.playbackRate = state.playbackRate
         }
         if (state.isPlaying && currentVideo.paused) {
@@ -190,7 +204,9 @@ export function useViewerStateSync({
         // 更新缓存
         lastAppliedSourceUrlRef.current = state.sourceUrl
         lastAppliedIsPlayingRef.current = state.isPlaying
-        lastAppliedPlaybackRateRef.current = state.playbackRate
+        if (state.playbackRate > 0) {
+          lastAppliedPlaybackRateRef.current = state.playbackRate
+        }
         return
       }
 
@@ -212,10 +228,12 @@ export function useViewerStateSync({
           (lastAppliedPlaybackRateRef.current as number) - state.playbackRate
         ) > 0.01
       ) {
-        if (video.playbackRate !== state.playbackRate) {
-          video.playbackRate = state.playbackRate
+        if (state.playbackRate > 0) {
+          if (video.playbackRate !== state.playbackRate) {
+            video.playbackRate = state.playbackRate
+          }
+          lastAppliedPlaybackRateRef.current = state.playbackRate
         }
-        lastAppliedPlaybackRateRef.current = state.playbackRate
       }
 
       // 2.3 currentTime 不再单独设置（由 host-heartbeat 校正）
@@ -223,7 +241,13 @@ export function useViewerStateSync({
     }
 
     const handleState = (payload: StatePayload) => {
-      const state = payload.state
+      // P1-Opt#7：增量状态合并——优先使用 diff 合并到现有 state，避免全量替换
+      const state = payload.diff
+        ? mergeStateDiff(
+            useRoomStore.getState().watchTogether,
+            payload.diff as Partial<WatchTogetherState>
+          )
+        : payload.state
       suppressEventsRef.current = true
       setWatchTogether(state)
 
@@ -308,7 +332,7 @@ export function useViewerStateSync({
           lastAppliedIsPlayingRef.current = false
           break
         case 'rate':
-          if (typeof payload.value === 'number') {
+          if (typeof payload.value === 'number' && payload.value > 0) {
             video.playbackRate = payload.value
             lastAppliedPlaybackRateRef.current = payload.value
           }
@@ -369,16 +393,31 @@ export function useViewerHeartbeat({
   // 缓存上次应用的 isPlaying，用于判断是否需要 play/pause
   const lastAppliedIsPlayingRef = useRef<boolean | null>(null)
 
+  // P2-Opt#9：软同步追赶状态
+  const catchUpActiveRef = useRef(false)
+  const catchUpBaseRateRef = useRef(1)
+
   useEffect(() => {
     if (!socket || isHostRef.current) return
 
     const handleHeartbeat = (payload: {
       currentTime: number
       isPlaying: boolean
+      playbackRate?: number
+      suppressed?: boolean
     }) => {
       const video = videoRef.current
       if (!video) return
       if (suppressEventsRef.current) return
+
+      // suppressed 标记的心跳仅存活检测，不用于状态同步
+      if (payload.suppressed) return
+
+      // 从心跳提取 playbackRate（兼容旧版本缺失，缺省按 1x）
+      const rate =
+        typeof payload.playbackRate === 'number' && payload.playbackRate > 0
+          ? payload.playbackRate
+          : 1
 
       // isPlaying 变化时同步 play/pause
       if (lastAppliedIsPlayingRef.current !== payload.isPlaying) {
@@ -392,15 +431,34 @@ export function useViewerHeartbeat({
         suppressEventsRef.current = false
       }
 
-      // 进度校正：仅差异 > SEEK_FOLLOW_THRESHOLD 才 seek
-      // 使用 playbackRate=1 计算（心跳不携带 playbackRate，按 1x 倍速阈值）
-      if (
-        shouldSeekToHost(
-          video.currentTime,
-          payload.currentTime,
-          1 // 心跳不携带 playbackRate，使用 1x 倍速阈值（=SEEK_FOLLOW_THRESHOLD=3s）
-        )
-      ) {
+      // 进度校正：软同步 + 硬 seek 两阶段策略（P2-Opt#9）
+      // 软同步区间：差异 > 阈值 但 ≤ HARD_SEEK_THRESHOLD_SEC → 调整 playbackRate 渐进追赶
+      // 硬 seek 区间：差异 > HARD_SEEK_THRESHOLD_SEC → 直接跳转
+      const diff = Math.abs(video.currentTime - payload.currentTime)
+      const threshold = getAdaptiveSeekThreshold(rate)
+
+      if (diff <= threshold) {
+        // 差异已收敛 → 取消软同步，恢复基准倍速
+        if (catchUpActiveRef.current) {
+          catchUpActiveRef.current = false
+          video.playbackRate = catchUpBaseRateRef.current
+        }
+      } else if (shouldSoftSync(video.currentTime, payload.currentTime, rate)) {
+        // 软同步：小幅差异通过微调倍速追赶
+        if (!catchUpActiveRef.current) {
+          catchUpActiveRef.current = true
+          catchUpBaseRateRef.current = video.playbackRate
+        }
+        const catchUpRate = getCatchUpRate(rate)
+        if (video.playbackRate !== catchUpRate) {
+          video.playbackRate = catchUpRate
+        }
+      } else {
+        // 硬 seek：大幅差异（> HARD_SEEK_THRESHOLD_SEC）直接跳转
+        if (catchUpActiveRef.current) {
+          catchUpActiveRef.current = false
+          video.playbackRate = catchUpBaseRateRef.current
+        }
         const state = useRoomStore.getState().watchTogether
         const targetTime = payload.currentTime
         void executeSeek({
@@ -408,8 +466,6 @@ export function useViewerHeartbeat({
           targetTime,
           state,
           seekTo: async (_video, time) => {
-            // 复用 useViewerStateSync 的 seekTo 不便，这里直接用普通 seek
-            // MSE seek 由上层处理，心跳校正通常在缓冲范围内
             try {
               _video.currentTime = time
               return { success: true }
@@ -434,8 +490,24 @@ export function useViewerHeartbeat({
     }
 
     socket.on(SOCKET_EVENT.HOST_HEARTBEAT, handleHeartbeat)
+    // 统一心跳协议（#14）：监听从房主发出的 sync-heartbeat（source='host'）
+    const handleSyncHeartbeat = (payload: SyncHeartbeatPayload) => {
+      if (
+        payload.source === 'host' &&
+        typeof payload.currentTime === 'number'
+      ) {
+        handleHeartbeat({
+          currentTime: payload.currentTime,
+          isPlaying: !!payload.isPlaying,
+          playbackRate: payload.playbackRate,
+          suppressed: payload.suppressed,
+        })
+      }
+    }
+    socket.on(SOCKET_EVENT.SYNC_HEARTBEAT, handleSyncHeartbeat)
     return () => {
       socket.off(SOCKET_EVENT.HOST_HEARTBEAT, handleHeartbeat)
+      socket.off(SOCKET_EVENT.SYNC_HEARTBEAT, handleSyncHeartbeat)
     }
   }, [socket, isHostRef, videoRef, suppressEventsRef])
 }

@@ -40,6 +40,11 @@ export const SOCKET_EVENT = {
    * 观众端据此继续播放，不因房主断开而暂停。
    */
   SERVER_HEARTBEAT: 'server-heartbeat',
+  /**
+   * 统一心跳协议（#14）：房主在线(source='host')与房主离线(source='server')
+   * 共用同一事件，viewer 端按 source 字段区分来源。
+   */
+  SYNC_HEARTBEAT: 'sync-heartbeat',
   /** 观众加入房间通知（后端转发给房主） */
   VIEWER_JOINED: 'viewer-joined',
   /** 观众离开房间通知（后端转发给房主） */
@@ -81,6 +86,9 @@ export const SEEK_FOLLOW_THRESHOLD = 3
  * 避免拖动进度条时频繁广播。
  */
 export const SEEK_DEBOUNCE_MS = 300
+
+/** play/pause 事件防抖间隔（毫秒）。快速切换播放/暂停时避免冗余广播。 */
+export const PLAY_PAUSE_DEBOUNCE_MS = 100
 
 /**
  * 房主心跳广播间隔（毫秒）。

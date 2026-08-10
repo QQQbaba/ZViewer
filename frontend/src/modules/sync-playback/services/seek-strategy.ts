@@ -11,6 +11,43 @@
 import type { WatchTogetherState } from '../types'
 import { SEEK_FOLLOW_THRESHOLD } from '../constants'
 
+/** 硬 seek 阈值（秒）。差异超过此值才执行硬跳转，小幅差异走软同步追赶。 */
+export const HARD_SEEK_THRESHOLD_SEC = 6
+
+/** 软同步追赶倍速增量。基准倍速 + 该增量，渐进追赶差异。 */
+export const CATCH_UP_RATE_DELTA = 0.1
+
+/** 软同步最大倍速（防止过度加速）。 */
+export const CATCH_UP_MAX_RATE = 2.0
+
+/**
+ * 计算软同步追赶倍速。
+ *
+ * P2-Opt#9：观众端进度与房主差异在"阈值以上但未超过硬 seek 阈值"时，
+ * 用略微提高的 playbackRate 渐进追赶，避免频繁硬 seek 打断播放连续性。
+ *
+ * @param baseRate 房主广播的基准倍速
+ * @returns 轻柔的追赶倍速（baseRate + 0.1，封顶 CATCH_UP_MAX_RATE）
+ */
+export function getCatchUpRate(baseRate: number): number {
+  const rate = (baseRate || 1) + CATCH_UP_RATE_DELTA
+  return Math.min(rate, CATCH_UP_MAX_RATE)
+}
+
+/**
+ * 判断差异是否落在软同步区间（threshold < diff ≤ HARD_SEEK_THRESHOLD_SEC）。
+ * 该区间内通过调整 playbackRate 渐进追赶；超出硬 seek 阈值则直接 seek。
+ */
+export function shouldSoftSync(
+  localTime: number,
+  hostTime: number,
+  playbackRate: number
+): boolean {
+  const threshold = getAdaptiveSeekThreshold(playbackRate)
+  const diff = Math.abs(localTime - hostTime)
+  return diff > threshold && diff <= HARD_SEEK_THRESHOLD_SEC
+}
+
 /**
  * 按播放倍速自适应的 seek 跟随阈值。
  *

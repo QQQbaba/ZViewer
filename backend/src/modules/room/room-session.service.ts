@@ -12,6 +12,7 @@ import type { Server as SocketIOServer, Socket } from 'socket.io';
 import { IsNull } from 'typeorm';
 import { AppDataSource } from '../../data-source';
 import { Session } from '../../entities/Session';
+import { roomPermissionService } from './room-permission.service';
 import { Room } from '../../entities/Room';
 import { roomStateService } from './room-state.service';
 import { playbackMemoryService } from '../playback-memory';
@@ -140,6 +141,8 @@ export class RoomSessionService {
 
     session.endedAt = new Date();
     await sessionRepo.save(session);
+    // 失效权限缓存：session 结束后该 socket 的权限应即时清除
+    roomPermissionService.invalidatePermissionCache(socketId, session.roomId);
     return session;
   }
 
@@ -220,6 +223,9 @@ export class RoomSessionService {
       // 更新房间 owner
       await manager.update(Room, { roomId }, { ownerUserId: newOwnerUserId });
     });
+    // 失效权限缓存：新旧房主的权限缓存应即时清除
+    roomPermissionService.invalidatePermissionCache(oldSharerSocketId, roomId);
+    roomPermissionService.invalidatePermissionCache(newSharerSocketId, roomId);
   }
 }
 

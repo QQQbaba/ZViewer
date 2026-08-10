@@ -84,12 +84,42 @@ export interface ControlPayload {
 /** `watch-together-state` 事件 payload */
 export interface StatePayload {
   state: WatchTogetherState
+  /** 增量字段（P1-Opt#7）：存在时观众端合并到现有 state，不存在时用 state 全量覆盖 */
+  diff?: Partial<WatchTogetherState>
 }
 
 /** `host-heartbeat` 事件 payload：房主定时广播的轻量心跳信息 */
 export interface HeartbeatPayload {
   currentTime: number
   isPlaying: boolean
+  /**
+   * 播放倍速，用于观众端计算自适应 seek 阈值。
+   *
+   * v4 新增：旧版心跳不携带 playbackRate，观众端用 rate=1 计算阈值，
+   * 在 2x 倍速下 5s 心跳间隔产生 10s 进度差异，超过 3s 阈值导致每次心跳都 seek。
+   */
+  playbackRate: number
+  /**
+   * 房主事件抑制标记。true 表示房主正在切换源/恢复进度，
+   * 观众端收到时应仅重置离线计时器，不进行进度校正或 isPlaying 同步。
+   *
+   * v4 新增：旧版 suppress 期间完全不发心跳，大文件缓冲下载超过 15s 时
+   * 观众端误判房主离线，进入自主控制模式。
+   */
+  suppressed?: boolean
+}
+
+/** 统一心跳协议（#14）：房主在线 / 房主离线共用同一事件 */
+export interface SyncHeartbeatPayload {
+  /** 来源：'host'（房主在线） | 'server'（房主离线，服务器接管） */
+  source: 'host' | 'server'
+  /** 房主在线时直接携带的字段 */
+  currentTime?: number
+  isPlaying?: boolean
+  playbackRate?: number
+  suppressed?: boolean
+  /** 房主离线时由服务器推算的完整状态 */
+  state?: WatchTogetherState
 }
 
 /** `viewer-joined` 事件 payload：观众加入房间通知 */

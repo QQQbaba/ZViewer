@@ -57,6 +57,7 @@ export class PlaybackMemoryHandler implements SocketEventHandler {
           // 广播给房间内其他成员（不含 roomId，接收端按 socket 所在房间处理）
           socket.to(payload.roomId).emit('watch-together-state', {
             state: payload.state,
+            diff: payload.diff,
           });
           safeAck(callback, { success: true });
         } catch (err) {
@@ -182,13 +183,14 @@ export class PlaybackMemoryHandler implements SocketEventHandler {
         }
         break;
       case 'seek':
-        if (typeof value === 'number') {
+        if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
           newState.currentTime = value;
-          newState.isPlaying = false; // seek 后暂停，等待用户主动播放
+          // 不改变 isPlaying——seek 后房主仍可播放/暂停，实际状态由下一个心跳同步；
+          // 旧实现强制设为 false 导致观众端在 seek 后暂停、收到心跳后才恢复，造成抖动
         }
         break;
       case 'rate':
-        if (typeof value === 'number') {
+        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
           // 先推算当前进度，再更新倍速
           const adv = await playbackMemoryService.getAdvancedPlayback(roomId);
           if (adv) {

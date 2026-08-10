@@ -172,7 +172,10 @@ export function usePlaybackStateRequest({
               }
             }
             // 设置倍速
-            if (currentVideo.playbackRate !== state.playbackRate) {
+            if (
+              state.playbackRate > 0 &&
+              currentVideo.playbackRate !== state.playbackRate
+            ) {
               currentVideo.playbackRate = state.playbackRate
             }
             // 播放/暂停

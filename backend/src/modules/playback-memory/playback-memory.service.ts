@@ -21,9 +21,16 @@ import { AppDataSource } from '../../data-source';
 import { PlaybackState } from '../../entities/PlaybackState';
 import type { PlaybackStateDto, SyncStateDto } from '../shared/dto/sync-state.dto';
 import type { QualityOptionDto } from '../shared/dto/sync-state.dto';
+import type { StorageAdapter } from '../../services/storage';
 
 /** DB 写入节流间隔（毫秒）。房主高频更新时避免每次都写 DB。 */
 const DB_WRITE_THROTTLE_MS = 2000;
+
+/** 缓存清理间隔（毫秒）。每隔 30s 清理一次房主离线且无观众的陈旧缓存。 */
+const CACHE_CLEANUP_INTERVAL_MS = 30000;
+
+/** 房主离线且无在线观众后，缓存保留时间（毫秒）。超过即清理。 */
+const CACHE_STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10 分钟
 
 /** 内存缓存条目 */
 interface CachedPlayback {
@@ -37,6 +44,15 @@ interface CachedPlayback {
 
 export class PlaybackMemoryService {
   private readonly cache = new Map<string, CachedPlayback>();
+  /** 可选的存储适配器（#16）：写穿透到 Redis，用于多实例状态共享 */
+  private storageAdapter: StorageAdapter<PlaybackStateDto> | null = null;
+
+  /**
+   * 设置存储适配器（#16 Redis 多实例支持）。
+   */
+  setStorageAdapter(adapter: StorageAdapter<PlaybackStateDto>): void {
+    this.storageAdapter = adapter;
+  }
 
   /**
    * 更新播放状态（房主调用）。
@@ -80,6 +96,9 @@ export class PlaybackMemoryService {
     if (now - (cached?.lastDbWriteAt ?? 0) > DB_WRITE_THROTTLE_MS) {
       await this.flushToDb(roomId);
     }
+
+    // 写穿透到存储适配器（#16）：同步最新播放状态到 Redis 供多实例共享
+    this.storageAdapter?.set(roomId, playbackState);
   }
 
   /**
@@ -168,15 +187,46 @@ export class PlaybackMemoryService {
   }
 
   /**
+   * 检查指定房间是否有内存缓存条目。
+   * 用于 room-state 清理时判断是否仍有关联的播放记忆。
+   */
+  hasCache(roomId: string): boolean {
+    return this.cache.has(roomId);
+  }
+
+  /**
    * 清除播放状态（房间关闭时调用）。
    */
   async clearPlayback(roomId: string): Promise<void> {
     this.cache.delete(roomId);
+    this.storageAdapter?.delete(roomId);
     try {
       const repo = AppDataSource.getRepository(PlaybackState);
       await repo.delete({ roomId });
     } catch (err) {
       console.error('[PlaybackMemoryService] clearPlayback error:', err);
+    }
+  }
+
+  /**
+   * 从存储适配器初始化播放记忆缓存（#16）。
+   * 在配置了 RedisStorageAdapter 后，启动时调用此方法从 Redis 恢复所有房间的播放状态。
+   */
+  async initFromAdapter(): Promise<void> {
+    if (!this.storageAdapter) return;
+    if (this.storageAdapter.init) {
+      await this.storageAdapter.init();
+    }
+    const entries = Array.from(this.storageAdapter.entries());
+    for (const [roomId, state] of entries) {
+      this.cache.set(roomId, {
+        state,
+        lastDbWriteAt: Date.now(),
+        dirty: false,
+      });
+    }
+    if (entries.length > 0) {
+      console.log(`[PlaybackMemoryService] 已从存储适配器恢复 ${entries.length} 个房间的播放状态`);
     }
   }
 
@@ -295,6 +345,51 @@ export class PlaybackMemoryService {
     const { roomStateService } = await import('../room/room-state.service');
     const id = roomStateService.getCurrentMovieId(roomId);
     return id != null ? Number(id) : undefined;
+  }
+
+  /**
+   * 强制刷新所有脏数据到 DB。
+   * 用于优雅关闭、进程退出信号等场景，确保最多 2s 的脏数据不丢失。
+   */
+  async flushAllDirty(): Promise<void> {
+    const promises: Promise<void>[] = [];
+    for (const roomId of this.cache.keys()) {
+      const cached = this.cache.get(roomId);
+      if (cached && cached.dirty) {
+        promises.push(this.flushToDb(roomId));
+      }
+    }
+    await Promise.allSettled(promises);
+  }
+
+  /**
+   * 清理陈旧缓存条目：房主离线超过 CACHE_STALE_THRESHOLD_MS 且房间无活跃在线观众。
+   * 同时清理 DB 中播放状态。
+   * 由 PlaybackBroadcasterService 的定时任务驱动。
+   */
+  async cleanupStaleCache(): Promise<void> {
+    const now = Date.now();
+    for (const [roomId, cached] of this.cache.entries()) {
+      // 房主在线 → 跳过
+      if (this.isHostOnline(roomId)) continue;
+
+      // 检查最后更新时间是否超过阈值
+      const age = now - cached.state.updatedAt;
+      if (age > CACHE_STALE_THRESHOLD_MS) {
+        // 先 flush 脏数据
+        if (cached.dirty) {
+          await this.flushToDb(roomId);
+        }
+        // 从 DB 清除播放状态
+        this.cache.delete(roomId);
+        try {
+          const repo = AppDataSource.getRepository(PlaybackState);
+          await repo.delete({ roomId });
+        } catch {
+          // 忽略删除错误
+        }
+      }
+    }
   }
 
   /**

@@ -214,22 +214,53 @@ export function WatchTogetherCore({
   const [confirmJoin, setConfirmJoin] = useState<{
     viewerSocketId: string
   } | null>(null)
+  // 合并后的申请状态（P2-Opt#11）：支持多观众合并
   const [seekRequest, setSeekRequest] = useState<{
-    viewerSocketId: string
-    viewerUsername?: string
+    /** 申请者 socket ID 列表 */
+    viewerSocketIds: string[]
+    /** 申请者用户名列表（用于展示） */
+    viewerUsernames: string[]
+    /** 目标时间 */
     time: number
+    /** 合并窗口开始时间戳，用于判断是否在 5s 合并窗口内 */
+    windowStart: number
   } | null>(null)
   const [pauseRequest, setPauseRequest] = useState<{
-    viewerSocketId: string
-    viewerUsername?: string
+    viewerSocketIds: string[]
+    viewerUsernames: string[]
+    windowStart: number
   } | null>(null)
   const [playRequest, setPlayRequest] = useState<{
-    viewerSocketId: string
-    viewerUsername?: string
+    viewerSocketIds: string[]
+    viewerUsernames: string[]
+    windowStart: number
   } | null>(null)
   const [seekPending, setSeekPending] = useState(false)
   const [pausePending, setPausePending] = useState(false)
   const [playPending, setPlayPending] = useState(false)
+  // 申请超时 ref：房主不回应时自动清除 pending，避免永久阻塞
+  const seekPendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
+  const pausePendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
+  const playPendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
+  // 镜像 pending 状态到 ref（response 事件闭包读取最新值，避免 stale closure）
+  const seekPendingRef = useRef(false)
+  const pausePendingRef = useRef(false)
+  const playPendingRef = useRef(false)
+  useEffect(() => {
+    seekPendingRef.current = seekPending
+  }, [seekPending])
+  useEffect(() => {
+    pausePendingRef.current = pausePending
+  }, [pausePending])
+  useEffect(() => {
+    playPendingRef.current = playPending
+  }, [playPending])
 
   // ── 房主离线状态 ──────────────────────────────────────
   // 房主离开后观众进入自主控制模式，可直接 play/pause/seek，无需向房主申请。
@@ -700,10 +731,27 @@ export function WatchTogetherCore({
         )
         return
       }
-      setSeekRequest({
-        viewerSocketId: data.viewerSocketId,
-        viewerUsername: data.viewerUsername,
-        time: data.time,
+      // P2-Opt#11：多观众申请合并——5s 内同目标时间的 seek 合并为一条
+      setSeekRequest((prev) => {
+        if (
+          prev &&
+          prev.time === data.time &&
+          Date.now() - prev.windowStart < 5000
+        ) {
+          return {
+            ...prev,
+            viewerSocketIds: [...prev.viewerSocketIds, data.viewerSocketId],
+            viewerUsernames: data.viewerUsername
+              ? [...prev.viewerUsernames, data.viewerUsername]
+              : prev.viewerUsernames,
+          }
+        }
+        return {
+          viewerSocketIds: [data.viewerSocketId],
+          viewerUsernames: data.viewerUsername ? [data.viewerUsername] : [],
+          time: data.time,
+          windowStart: Date.now(),
+        }
       })
     }
 
@@ -732,9 +780,22 @@ export function WatchTogetherCore({
         )
         return
       }
-      setPauseRequest({
-        viewerSocketId: data.viewerSocketId,
-        viewerUsername: data.viewerUsername,
+      // P2-Opt#11：5s 内合并 pause 申请
+      setPauseRequest((prev) => {
+        if (prev && Date.now() - prev.windowStart < 5000) {
+          return {
+            ...prev,
+            viewerSocketIds: [...prev.viewerSocketIds, data.viewerSocketId],
+            viewerUsernames: data.viewerUsername
+              ? [...prev.viewerUsernames, data.viewerUsername]
+              : prev.viewerUsernames,
+          }
+        }
+        return {
+          viewerSocketIds: [data.viewerSocketId],
+          viewerUsernames: data.viewerUsername ? [data.viewerUsername] : [],
+          windowStart: Date.now(),
+        }
       })
     }
 
@@ -767,9 +828,21 @@ export function WatchTogetherCore({
         )
         return
       }
-      setPlayRequest({
-        viewerSocketId: data.viewerSocketId,
-        viewerUsername: data.viewerUsername,
+      setPlayRequest((prev) => {
+        if (prev && Date.now() - prev.windowStart < 5000) {
+          return {
+            ...prev,
+            viewerSocketIds: [...prev.viewerSocketIds, data.viewerSocketId],
+            viewerUsernames: data.viewerUsername
+              ? [...prev.viewerUsernames, data.viewerUsername]
+              : prev.viewerUsernames,
+          }
+        }
+        return {
+          viewerSocketIds: [data.viewerSocketId],
+          viewerUsernames: data.viewerUsername ? [data.viewerUsername] : [],
+          windowStart: Date.now(),
+        }
       })
     }
 
@@ -784,7 +857,12 @@ export function WatchTogetherCore({
     if (!socket || isHost) return
 
     const handleSeekResponse = (data: { accept: boolean; time?: number }) => {
+      if (!seekPendingRef.current) return
       setSeekPending(false)
+      if (seekPendingTimeoutRef.current) {
+        clearTimeout(seekPendingTimeoutRef.current)
+        seekPendingTimeoutRef.current = null
+      }
       if (data?.accept) {
         // 自动通过模式下申请时已提示“已跳转”，此处不再重复提示
         if (!autoApproveRef.current) {
@@ -798,7 +876,12 @@ export function WatchTogetherCore({
       }
     }
     const handlePauseResponse = (data: { accept: boolean }) => {
+      if (!pausePendingRef.current) return
       setPausePending(false)
+      if (pausePendingTimeoutRef.current) {
+        clearTimeout(pausePendingTimeoutRef.current)
+        pausePendingTimeoutRef.current = null
+      }
       if (data?.accept) {
         // 房主同意暂停：主动暂停 video，确保 isPlaying 状态正确。
         // 房主端 video 可能已经处于暂停状态（如重复申请暂停），
@@ -818,7 +901,12 @@ export function WatchTogetherCore({
       }
     }
     const handlePlayResponse = (data: { accept: boolean }) => {
+      if (!playPendingRef.current) return
       setPlayPending(false)
+      if (playPendingTimeoutRef.current) {
+        clearTimeout(playPendingTimeoutRef.current)
+        playPendingTimeoutRef.current = null
+      }
       if (data?.accept) {
         // 房主同意播放：主动播放 video，确保 isPlaying 状态正确。
         // 房主端 video.play() 可能被浏览器自动播放策略拒绝，
@@ -846,6 +934,16 @@ export function WatchTogetherCore({
       socket.off('seek-response', handleSeekResponse)
       socket.off('pause-response', handlePauseResponse)
       socket.off('play-response', handlePlayResponse)
+      // 组件卸载时清理 pending timeout，避免定时器残留
+      if (seekPendingTimeoutRef.current)
+        clearTimeout(seekPendingTimeoutRef.current)
+      if (pausePendingTimeoutRef.current)
+        clearTimeout(pausePendingTimeoutRef.current)
+      if (playPendingTimeoutRef.current)
+        clearTimeout(playPendingTimeoutRef.current)
+      seekPendingTimeoutRef.current = null
+      pausePendingTimeoutRef.current = null
+      playPendingTimeoutRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, isHost])
@@ -905,80 +1003,92 @@ export function WatchTogetherCore({
 
   const handleAcceptSeek = () => {
     if (!seekRequest) return
-    const { viewerSocketId, time } = seekRequest
-    if (!socket || !viewerSocketId) return
+    const { viewerSocketIds, time } = seekRequest
+    if (!socket || viewerSocketIds.length === 0) return
     if (videoRef.current && Number.isFinite(time)) {
       videoRef.current.currentTime = time
     }
-    socket.emit(
-      'seek-response',
-      { roomId, viewerSocketId, accept: true, time },
-      () => {}
-    )
+    for (const sid of viewerSocketIds) {
+      socket.emit(
+        'seek-response',
+        { roomId, viewerSocketId: sid, accept: true, time },
+        () => {}
+      )
+    }
     setSeekRequest(null)
   }
 
   const handleRejectSeek = () => {
     if (!seekRequest) return
-    const { viewerSocketId } = seekRequest
-    if (!socket || !viewerSocketId) return
-    socket.emit(
-      'seek-response',
-      { roomId, viewerSocketId, accept: false },
-      () => {}
-    )
+    const { viewerSocketIds } = seekRequest
+    if (!socket || viewerSocketIds.length === 0) return
+    for (const sid of viewerSocketIds) {
+      socket.emit(
+        'seek-response',
+        { roomId, viewerSocketId: sid, accept: false },
+        () => {}
+      )
+    }
     setSeekRequest(null)
   }
 
   const handleAcceptPause = () => {
     if (!pauseRequest) return
-    const { viewerSocketId } = pauseRequest
-    if (!socket || !viewerSocketId) return
+    const { viewerSocketIds } = pauseRequest
+    if (!socket || viewerSocketIds.length === 0) return
     videoRef.current?.pause()
-    socket.emit(
-      'pause-response',
-      { roomId, viewerSocketId, accept: true },
-      () => {}
-    )
+    for (const sid of viewerSocketIds) {
+      socket.emit(
+        'pause-response',
+        { roomId, viewerSocketId: sid, accept: true },
+        () => {}
+      )
+    }
     setPauseRequest(null)
   }
 
   const handleRejectPause = () => {
     if (!pauseRequest) return
-    const { viewerSocketId } = pauseRequest
-    if (!socket || !viewerSocketId) return
-    socket.emit(
-      'pause-response',
-      { roomId, viewerSocketId, accept: false },
-      () => {}
-    )
+    const { viewerSocketIds } = pauseRequest
+    if (!socket || viewerSocketIds.length === 0) return
+    for (const sid of viewerSocketIds) {
+      socket.emit(
+        'pause-response',
+        { roomId, viewerSocketId: sid, accept: false },
+        () => {}
+      )
+    }
     setPauseRequest(null)
   }
 
   const handleAcceptPlay = () => {
     if (!playRequest) return
-    const { viewerSocketId } = playRequest
-    if (!socket || !viewerSocketId) return
+    const { viewerSocketIds } = playRequest
+    if (!socket || viewerSocketIds.length === 0) return
     if (videoRef.current) {
       void videoRef.current.play().catch(() => {})
     }
-    socket.emit(
-      'play-response',
-      { roomId, viewerSocketId, accept: true },
-      () => {}
-    )
+    for (const sid of viewerSocketIds) {
+      socket.emit(
+        'play-response',
+        { roomId, viewerSocketId: sid, accept: true },
+        () => {}
+      )
+    }
     setPlayRequest(null)
   }
 
   const handleRejectPlay = () => {
     if (!playRequest) return
-    const { viewerSocketId } = playRequest
-    if (!socket || !viewerSocketId) return
-    socket.emit(
-      'play-response',
-      { roomId, viewerSocketId, accept: false },
-      () => {}
-    )
+    const { viewerSocketIds } = playRequest
+    if (!socket || viewerSocketIds.length === 0) return
+    for (const sid of viewerSocketIds) {
+      socket.emit(
+        'play-response',
+        { roomId, viewerSocketId: sid, accept: false },
+        () => {}
+      )
+    }
     setPlayRequest(null)
   }
 
@@ -988,14 +1098,28 @@ export function WatchTogetherCore({
       if (!socket || isHost || seekPending) return
       if (!Number.isFinite(time)) return
       setSeekPending(true)
+      // 超时机制：房主 15s 内不回应则清除 pending，允许再次申请
+      if (seekPendingTimeoutRef.current)
+        clearTimeout(seekPendingTimeoutRef.current)
+      seekPendingTimeoutRef.current = setTimeout(() => {
+        setSeekPending(false)
+        seekPendingTimeoutRef.current = null
+        addPlayerNotice('跳转申请已超时，房主未回应', 'info')
+      }, 15000)
       socket.emit(
         'seek-request',
         { roomId, time },
         (response: { success: boolean; message?: string }) => {
           if (!response.success) {
+            // 服务器拒绝（如房间非直播模式）：清除 pending 和 timeout
+            if (seekPendingTimeoutRef.current) {
+              clearTimeout(seekPendingTimeoutRef.current)
+              seekPendingTimeoutRef.current = null
+            }
             setSeekPending(false)
             addPlayerNotice(response.message || '申请跳转失败', 'error')
           } else {
+            // 服务器已转发给房主，timeout 保留（由 seek-response 事件或超时回退清除）
             addPlayerNotice(
               autoApproveRef.current
                 ? '已跳转'
@@ -1012,11 +1136,22 @@ export function WatchTogetherCore({
   const handleRequestPause = useCallback(() => {
     if (!socket || isHost || pausePending) return
     setPausePending(true)
+    if (pausePendingTimeoutRef.current)
+      clearTimeout(pausePendingTimeoutRef.current)
+    pausePendingTimeoutRef.current = setTimeout(() => {
+      setPausePending(false)
+      pausePendingTimeoutRef.current = null
+      addPlayerNotice('暂停申请已超时，房主未回应', 'info')
+    }, 15000)
     socket.emit(
       'pause-request',
       { roomId },
       (response: { success: boolean; message?: string }) => {
         if (!response.success) {
+          if (pausePendingTimeoutRef.current) {
+            clearTimeout(pausePendingTimeoutRef.current)
+            pausePendingTimeoutRef.current = null
+          }
           setPausePending(false)
           addPlayerNotice(response.message || '申请暂停失败', 'error')
         } else {
@@ -1032,11 +1167,22 @@ export function WatchTogetherCore({
   const handleRequestPlay = useCallback(() => {
     if (!socket || isHost || playPending) return
     setPlayPending(true)
+    if (playPendingTimeoutRef.current)
+      clearTimeout(playPendingTimeoutRef.current)
+    playPendingTimeoutRef.current = setTimeout(() => {
+      setPlayPending(false)
+      playPendingTimeoutRef.current = null
+      addPlayerNotice('继续播放申请已超时，房主未回应', 'info')
+    }, 15000)
     socket.emit(
       'play-request',
       { roomId },
       (response: { success: boolean; message?: string }) => {
         if (!response.success) {
+          if (playPendingTimeoutRef.current) {
+            clearTimeout(playPendingTimeoutRef.current)
+            playPendingTimeoutRef.current = null
+          }
           setPlayPending(false)
           addPlayerNotice(response.message || '申请继续播放失败', 'error')
         } else {
@@ -1277,8 +1423,11 @@ export function WatchTogetherCore({
         <>
           观众{' '}
           <span style={{ color: 'var(--md-sys-color-primary)' }}>
-            {seekRequest.viewerUsername ||
-              seekRequest.viewerSocketId.slice(0, 8)}
+            {seekRequest.viewerUsernames[0] ||
+              seekRequest.viewerSocketIds[0].slice(0, 8)}
+            {seekRequest.viewerSocketIds.length > 1
+              ? ` 等 ${seekRequest.viewerSocketIds.length} 位观众`
+              : ''}
           </span>{' '}
           申请跳转到{' '}
           <span style={{ color: 'var(--md-sys-color-primary)' }}>
@@ -1301,8 +1450,11 @@ export function WatchTogetherCore({
         <>
           观众{' '}
           <span style={{ color: 'var(--md-sys-color-primary)' }}>
-            {pauseRequest.viewerUsername ||
-              pauseRequest.viewerSocketId.slice(0, 8)}
+            {pauseRequest.viewerUsernames[0] ||
+              pauseRequest.viewerSocketIds[0].slice(0, 8)}
+            {pauseRequest.viewerSocketIds.length > 1
+              ? ` 等 ${pauseRequest.viewerSocketIds.length} 位观众`
+              : ''}
           </span>{' '}
           申请暂停播放
         </>
@@ -1322,8 +1474,11 @@ export function WatchTogetherCore({
         <>
           观众{' '}
           <span style={{ color: 'var(--md-sys-color-primary)' }}>
-            {playRequest.viewerUsername ||
-              playRequest.viewerSocketId.slice(0, 8)}
+            {playRequest.viewerUsernames[0] ||
+              playRequest.viewerSocketIds[0].slice(0, 8)}
+            {playRequest.viewerSocketIds.length > 1
+              ? ` 等 ${playRequest.viewerSocketIds.length} 位观众`
+              : ''}
           </span>{' '}
           申请继续播放
         </>

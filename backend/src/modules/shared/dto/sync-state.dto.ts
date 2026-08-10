@@ -105,6 +105,8 @@ export interface PlaybackStateDto extends SyncStateDto {
 export interface SyncStatePayload {
   roomId: string;
   state: SyncStateDto;
+  /** 增量字段（P1-Opt#7）：观众端合并到现有 state，不存在时用 state 全量覆盖 */
+  diff?: Partial<SyncStateDto>;
 }
 
 /** 控制动作类型 */
@@ -127,6 +129,10 @@ export interface HeartbeatPayload {
   roomId: string;
   currentTime: number;
   isPlaying: boolean;
+  /** 当前播放倍速（观众端据此计算进度校正阈值） */
+  playbackRate: number;
+  /** suppressed 标记：源切换/恢复进度期间的心跳，仅用于存活检测，不用于状态同步 */
+  suppressed?: boolean;
 }
 
 /** 轨道类型 */
