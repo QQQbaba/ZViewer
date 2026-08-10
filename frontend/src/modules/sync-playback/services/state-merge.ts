@@ -61,6 +61,56 @@ export function buildStateFromVideo(
 }
 
 /**
+ * 增量状态合并：将增量 state 的字段合并到当前完整 state 上。
+ *
+ * 用于 P1-Opt#7 增量状态广播：房主端只发送变化的字段，
+ * 观众端将增量合并到现有完整 state 上，避免全量替换。
+ *
+ * @param current 当前完整 state
+ * @param diff 增量 state（部分字段）
+ * @returns 合并后的完整 state（新对象，不修改入参）
+ */
+export function mergeStateDiff(
+  current: WatchTogetherState,
+  diff: Partial<WatchTogetherState>
+): WatchTogetherState {
+  return { ...current, ...diff }
+}
+
+/**
+ * 计算两个状态之间的差异（仅包含变化的字段）。
+ *
+ * 用于 P1-Opt#7 增量状态广播：对比 lastState 与 newState，
+ * 返回一个 Partial<WatchTogetherState> 只包含变化字段。
+ *
+ * 注意：acceptQuality 是数组，只在前述 isStateEqual 判断不一致时才纳入 diff。
+ * 此处不做深度细化，isStateEqual 已将不等价状态筛选出来。
+ *
+ * @param prev 前一个状态（可能为 null）
+ * @param next 当前状态
+ * @returns 增量对象（只包含变化字段）；若无变化返回空对象
+ */
+export function computeStateDiff(
+  prev: WatchTogetherState | null,
+  next: WatchTogetherState
+): Partial<WatchTogetherState> {
+  if (!prev) return next // 首次广播，完整发送
+
+  const diff: Partial<WatchTogetherState> = {}
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]) as Set<
+    keyof WatchTogetherState
+  >
+
+  for (const key of keys) {
+    if (prev[key] !== next[key]) {
+      ;(diff as Record<string, unknown>)[key as string] = next[key]
+    }
+  }
+
+  return diff
+}
+
+/**
  * 浅比较两个 WatchTogetherState 是否等价。
  *
  * 用于房主广播前跳过等价状态，避免正常播放时（currentTime 自然增长）

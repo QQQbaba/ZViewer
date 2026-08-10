@@ -18,6 +18,7 @@ import { useSocket } from '@/hooks/useSocket'
 import { message } from '@/components/ui/message'
 import type { WatchTogetherState } from '@/modules/sync-playback/types'
 import { SOCKET_EVENT } from '@/modules/sync-playback/constants'
+import type { SyncHeartbeatPayload } from '@/modules/sync-playback/types'
 import { safePlay } from '@/modules/sync-playback/safePlay'
 import { shouldSeekToHost } from '@/modules/sync-playback/services'
 import type { ServerHeartbeatPayload } from '../types'
@@ -49,6 +50,12 @@ export function useServerHeartbeat({
   const hostLeftNotifiedRef = useRef(false)
   // 房主离线标记：房主离开后观众进入自主控制模式，不再应用服务器心跳
   const hostOfflineRef = useRef(false)
+  // 房主重连过渡标记：重连后首次心跳判断是否需平滑同步（P3-Opt#15）
+  const reconnectTransitionRef = useRef(false)
+  // 重连后延迟 seek 的定时器 ref
+  const reconnectSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
   // URL 过期状态标记
   const urlExpiredRef = useRef(false)
   // 已处理的 video error 签名，避免同一个 error 重复触发过期提示
@@ -73,10 +80,47 @@ export function useServerHeartbeat({
       if (hostOfflineRef.current) return
 
       const state = payload.state
+      const video = videoRef.current
+
+      // P3-Opt#15：房主重连过渡——对比差异决定是否平滑同步
+      if (reconnectTransitionRef.current) {
+        reconnectTransitionRef.current = false
+        if (video && !Number.isNaN(video.currentTime) && video.currentSrc) {
+          const diff = Math.abs(video.currentTime - state.currentTime)
+          if (diff > 10) {
+            // 大幅差异：显示提示并延迟 2s 后 seek，避免突兀跳转
+            message.info('房主已重连，即将同步进度，2 秒后自动同步')
+            if (reconnectSyncTimerRef.current) {
+              clearTimeout(reconnectSyncTimerRef.current)
+            }
+            reconnectSyncTimerRef.current = setTimeout(() => {
+              try {
+                video.currentTime = state.currentTime
+              } catch {
+                // ignore
+              }
+            }, 2000)
+            // 放行其他状态同步（play/pause/rate），但跳过 currentTime seek
+            suppressEventsRef.current = true
+            setWatchTogether(state)
+            if (state.isPlaying && video.paused) {
+              void safePlay(video)
+            } else if (!state.isPlaying && !video.paused) {
+              video.pause()
+            }
+            if (video.playbackRate !== state.playbackRate) {
+              video.playbackRate = state.playbackRate
+            }
+            suppressEventsRef.current = false
+            return
+          }
+          // 小幅差异（≤10s）：走软同步逻辑，让余下代码自然处理
+        }
+      }
+
       suppressEventsRef.current = true
       setWatchTogether(state)
 
-      const video = videoRef.current
       if (!video) {
         suppressEventsRef.current = false
         return
@@ -138,9 +182,17 @@ export function useServerHeartbeat({
     if (!socket || isHostRef.current) return
 
     socket.on(SOCKET_EVENT.SERVER_HEARTBEAT, handleServerHeartbeat)
+    // 统一心跳协议（#14）：监听从服务器发出的 sync-heartbeat（source='server'）
+    const handleSyncHeartbeat = (payload: SyncHeartbeatPayload) => {
+      if (payload.source === 'server' && payload.state) {
+        handleServerHeartbeat({ roomId: '', state: payload.state })
+      }
+    }
+    socket.on(SOCKET_EVENT.SYNC_HEARTBEAT, handleSyncHeartbeat)
 
     return () => {
       socket.off(SOCKET_EVENT.SERVER_HEARTBEAT, handleServerHeartbeat)
+      socket.off(SOCKET_EVENT.SYNC_HEARTBEAT, handleSyncHeartbeat)
     }
   }, [socket, isHostRef, handleServerHeartbeat])
 
@@ -161,6 +213,8 @@ export function useServerHeartbeat({
       hostOfflineRef.current = false
       hostLeftNotifiedRef.current = false
       urlExpiredRef.current = false
+      // P3-Opt#15：设置重连过渡标记，下次心跳判断是否需平滑同步
+      reconnectTransitionRef.current = true
     }
 
     socket.on(SOCKET_EVENT.HOST_DISCONNECTED, handleHostDisconnected)
@@ -169,6 +223,10 @@ export function useServerHeartbeat({
     return () => {
       socket.off(SOCKET_EVENT.HOST_DISCONNECTED, handleHostDisconnected)
       socket.off('sharer-ready', handleHostReconnect)
+      // 清理重连延迟定时器
+      if (reconnectSyncTimerRef.current) {
+        clearTimeout(reconnectSyncTimerRef.current)
+      }
     }
   }, [socket, isHostRef])
 

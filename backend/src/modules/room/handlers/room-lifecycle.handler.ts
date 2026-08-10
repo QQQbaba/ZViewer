@@ -85,6 +85,8 @@ export class RoomLifecycleHandler implements SocketEventHandler {
             // 结束旧 session，避免旧房间的状态残留
             oldSharer.endedAt = new Date();
             await AppDataSource.getRepository(Session).save(oldSharer);
+            // 失效权限缓存：旧 socket 的 isRoomHost 缓存应立即清除
+            roomPermissionService.invalidatePermissionCache(oldSharer.socketId, oldSharer.roomId);
             // 通知旧房间（如有观众）房主已离开
             roomStateService.cancelReconnectTimer(oldSharer.roomId);
           }

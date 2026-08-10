@@ -1,8 +1,8 @@
 /**
  * 心跳事件处理器。
  *
- * 处理 host-heartbeat：房主定时广播的轻量心跳（仅 currentTime + isPlaying），
- * 后端转发给房间内其他成员，观众端据此重置"房主离线"计时器。
+ * 处理 host-heartbeat：房主定时广播的轻量心跳（currentTime + isPlaying + playbackRate + suppressed），
+ * 后端转发给房间内其他成员，观众端据此重置"房主离线"计时器、同步倍速与存活检测。
  *
  * 修复说明：前端 useHostHeartbeat 每 2s emit 'host-heartbeat'，观众端
  * useViewerHeartbeat 监听该事件重置离线计时器。若后端不转发，观众 6s 内
@@ -36,9 +36,20 @@ export class HeartbeatHandler implements SocketEventHandler {
           }
 
           // 转发心跳给房间内其他成员（不含发送者、不含 roomId）
+          // 保留旧事件兼容已连接客户端
           socket.to(payload.roomId).emit('host-heartbeat', {
             currentTime: payload.currentTime,
             isPlaying: payload.isPlaying,
+            playbackRate: payload.playbackRate,
+            suppressed: payload.suppressed,
+          });
+          // 统一心跳协议（#14）：新增 sync-heartbeat 事件，viewer 端按 source 字段区分
+          socket.to(payload.roomId).emit('sync-heartbeat', {
+            source: 'host',
+            currentTime: payload.currentTime,
+            isPlaying: payload.isPlaying,
+            playbackRate: payload.playbackRate,
+            suppressed: payload.suppressed,
           });
           safeAck(callback, { success: true });
         } catch (err) {

@@ -46,16 +46,32 @@ export function useHostHeartbeat({
     if (!socket || !isHostRef.current) return
 
     const intervalId = setInterval(() => {
-      // 源切换 / 恢复进度期间不广播心跳，避免发送错误状态
-      if (suppressEventsRef.current) return
       const video = videoRef.current
       const storeState = useRoomStore.getState().watchTogether
       // 使用 buildStateFromVideo 构建完整 state，但心跳仅发送轻量字段
       // 完整 state 通过离散事件 + watch-together-state 广播
       const built = buildStateFromVideo(video, storeState)
+
+      if (suppressEventsRef.current) {
+        // suppress 期间（源切换/恢复进度）仍发送存活心跳（带 suppressed 标记），
+        // 让观众端能重置"房主离线"计时器，避免误报离线。
+        // 观众端收到 suppressed 标记时不会同步状态，仅更新离线计时。
+        const alivePayload: HeartbeatPayload = {
+          currentTime: built.currentTime,
+          isPlaying: built.isPlaying,
+          playbackRate: built.playbackRate,
+        }
+        socket.emit(SOCKET_EVENT.HOST_HEARTBEAT, {
+          roomId,
+          ...alivePayload,
+          suppressed: true,
+        })
+        return
+      }
       const payload: HeartbeatPayload = {
         currentTime: built.currentTime,
         isPlaying: built.isPlaying,
+        playbackRate: built.playbackRate,
       }
       socket.emit(SOCKET_EVENT.HOST_HEARTBEAT, { roomId, ...payload })
     }, HEARTBEAT_INTERVAL_MS)
