@@ -15,8 +15,10 @@ ENV_FILE="$ROOT_DIR/.env"
 
 DEFAULT_PORT=3333
 DEFAULT_FRONTEND_PORT=4173
-BACKEND_PORT=""
-FRONTEND_PORT=""
+DEFAULT_RTMP_PORT=3334
+DEFAULT_FLV_PORT=3335
+BACKEND_PORT="${BACKEND_PORT:-}"
+FRONTEND_PORT="${FRONTEND_PORT:-}"
 BACKEND_ONLY=0
 HTTPS_MODE=0
 CERT_HOST=""
@@ -24,15 +26,30 @@ CERT_FORCE=""
 
 # ==================== 工具函数 ====================
 
-# 从 .env 读取 PORT
-# 端口固定：后端 3333，前端 4173
+# 从 .env / 环境变量读取端口，优先级：环境变量 > .env > 默认值
+# 后端 PORT（默认 3333）、前端 FRONTEND_PORT（默认 4173）、RTMP/HTTP-FLV（默认 3334/3335）
+env_port_value() {
+  local key="$1"
+  local default="$2"
+  local val="${!key:-}"
+  if [ -z "$val" ] && [ -f "$ENV_FILE" ]; then
+    val=$(grep -E "^${key}=" "$ENV_FILE" | head -n 1 | cut -d= -f2- | tr -d '"' | xargs)
+  fi
+  if [ -z "$val" ]; then
+    val="$default"
+  fi
+  echo "$val"
+}
+
 resolve_ports() {
   if [ -z "$BACKEND_PORT" ]; then
-    BACKEND_PORT="$DEFAULT_PORT"
+    BACKEND_PORT="$(env_port_value PORT "$DEFAULT_PORT")"
   fi
   if [ -z "$FRONTEND_PORT" ]; then
-    FRONTEND_PORT="$DEFAULT_FRONTEND_PORT"
+    FRONTEND_PORT="$(env_port_value FRONTEND_PORT "$DEFAULT_FRONTEND_PORT")"
   fi
+  RTMP_PORT="$(env_port_value RTMP_PORT "$DEFAULT_RTMP_PORT")"
+  HTTP_FLV_PORT="$(env_port_value HTTP_FLV_PORT "$DEFAULT_FLV_PORT")"
 }
 
 write_pids() {
@@ -219,10 +236,10 @@ do_start() {
 
   echo "  启动后端..."
   if [ "$HTTPS_MODE" -eq 1 ]; then
-    PORT="$BACKEND_PORT" NODE_ENV=production HTTPS=true \
+    PORT="$BACKEND_PORT" NODE_ENV=production RTMP_PORT="$RTMP_PORT" HTTP_FLV_PORT="$HTTP_FLV_PORT" HTTPS=true \
       nohup "$BACKEND_BIN" >> "$LOG_DIR/backend.log" 2>> "$LOG_DIR/backend.err.log" &
   else
-    PORT="$BACKEND_PORT" NODE_ENV=production \
+    PORT="$BACKEND_PORT" NODE_ENV=production RTMP_PORT="$RTMP_PORT" HTTP_FLV_PORT="$HTTP_FLV_PORT" \
       nohup "$BACKEND_BIN" >> "$LOG_DIR/backend.log" 2>> "$LOG_DIR/backend.err.log" &
   fi
   local_backend_pid=$!

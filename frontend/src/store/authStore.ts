@@ -76,11 +76,14 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'zcontrol-auth-storage',
       partialize: (state) => ({
-        // 只持久化 user / 认证状态 / 登出标记
+        // 持久化 user / 认证状态 / 登出标记 / autoLoginStatus
+        // autoLoginStatus 必须持久化：页面刷新后 useSocket 依赖它决定是否创建 socket，
+        // 未持久化会导致刷新后 autoLoginStatus 重置为 'idle'，socket 不创建，应用无法使用
         // token 不再持久化（cookie 是真正的存储介质）
         user: state.user,
         isAuthenticated: state.isAuthenticated,
         hasLoggedOut: state.hasLoggedOut,
+        autoLoginStatus: state.autoLoginStatus,
       }),
     }
   )

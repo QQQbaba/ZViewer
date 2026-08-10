@@ -67,23 +67,48 @@ function isRequestSecure(req: Request): boolean {
 }
 
 /**
- * 判断当前请求是否为跨站请求（前端 Origin 与后端 Host 不同）。
+ * 判断当前请求是否为跨站请求（schemeful same-site 判定）。
  *
- * sameSite cookie 规则：
- * - 同站请求：sameSite: 'lax' 即可，cookie 正常携带
- * - 跨站请求：sameSite: 'lax' 会导致 cookie 不被发送（fetch/XHR 场景）
- *   需要 sameSite: 'none' + secure: true 才能在跨站请求中携带 cookie
+ * 浏览器 SameSite 同站判定规则（MDN：SameSite cookies）：
+ * - 同站 = 相同 scheme（http/https）+ 相同 registrable domain（域名或 IP），**端口不影响同站**
+ * - 例：http://example.com:4173 与 http://example.com:3333 是【同站】
+ *   （同 scheme、同域名，仅端口不同，SameSite=Lax 的 cookie 可正常携带）
+ *   https://example.com 与 http://example.com 则是【跨站】（scheme 不同）
  *
- * 判断依据：比较请求 Origin 头的 host（含端口）与请求 Host 头。
- * 两者不同即为跨站（不同域名或不同端口均算跨站）。
+ * 为什么必须忽略端口：
+ * 前端（4173）与后端（3333）同域名不同端口是常见部署（Nginx 反代或直连）。
+ * 若按"端口不同即跨站"判定，会错误地把同站请求标记为跨站：
+ * - HTTPS 下会错误设置 SameSite=None（同站不需要，且部分代理/浏览器对 None 敏感）
+ * - HTTP 下虽因浏览器同站判定忽略端口而侥幸可用，但逻辑错误
+ *
+ * 兼容反向代理：
+ * - Nginx 反代时请求 Host 可能被改写为内网地址（localhost:3333），
+ *   优先读取 X-Forwarded-Host（Nginx 常用 proxy_set_header X-Forwarded-Host $host）
+ *   或直接比较 X-Forwarded-Proto 与 Origin 的 scheme。
  */
 function isCrossSiteRequest(req: Request): boolean {
   const origin = req.headers.origin;
   if (!origin || typeof origin !== 'string') return false;
+
+  // 请求方视角的 scheme（优先 X-Forwarded-Proto，其次 req.secure / 直连协议）
+  const xfp = req.headers['x-forwarded-proto'];
+  const reqScheme =
+    (typeof xfp === 'string' ? xfp.split(',')[0].trim() : '') ||
+    (req.secure ? 'https' : 'http');
+
+  // 请求方视角的 host（优先 X-Forwarded-Host，其次 Host 头）
+  const xfh = req.headers['x-forwarded-host'];
+  const rawHost = typeof xfh === 'string' ? xfh : req.headers.host;
+  if (!rawHost) return false;
+
   try {
     const originUrl = new URL(origin);
-    const host = req.headers.host || '';
-    return originUrl.host !== host;
+    // 用构造 URL 的方式解析 host（兼容 IPv6 [::1]:3333）
+    const hostUrl = new URL(`${reqScheme}://${rawHost}`);
+    return (
+      originUrl.hostname !== hostUrl.hostname ||
+      originUrl.protocol !== hostUrl.protocol
+    );
   } catch {
     return false;
   }
@@ -92,10 +117,12 @@ function isCrossSiteRequest(req: Request): boolean {
 /**
  * 根据请求上下文计算 cookie 的 sameSite 和 secure 属性。
  *
- * - 跨站 + HTTPS → sameSite: 'none', secure: true（允许跨站携带 cookie）
- * - 跨站 + HTTP  → sameSite: 'lax', secure: false（HTTP 无法设置 Secure cookie，
- *   跨站 cookie 无法发送，这是浏览器安全限制，需通过反向代理解决）
- * - 同站 → sameSite: 'lax'（安全且兼容）
+ * - 同站 + HTTP → sameSite: 'lax', secure: false（最常见：Nginx 反代 / 同域名不同端口）
+ * - 同站 + HTTPS → sameSite: 'lax', secure: true
+ * - 跨站 + HTTPS → sameSite: 'none', secure: true（跨站 fetch 携带 cookie 必需）
+ * - 跨站 + HTTP  → sameSite: 'lax', secure: false（浏览器安全限制：SameSite=None 必须配 Secure，
+ *   而 HTTP 无法设置 Secure cookie，因此跨站 HTTP 场景无法保留登录态。
+ *   这是浏览器硬限制，需通过同站反代或升级 HTTPS 解决，代码已注释说明）
  */
 function getCookieSameSiteOptions(req: Request): {
   sameSite: 'none' | 'lax';
@@ -109,13 +136,21 @@ function getCookieSameSiteOptions(req: Request): {
   return { sameSite: 'lax', secure };
 }
 
-/** 将 access_token / refresh_token 写入 httpOnly cookie。 */
+/**
+ * 将 access_token / refresh_token 写入 httpOnly cookie（分离式架构）。
+ *
+ * - HTTPS 请求：写入 httpOnly cookie（同站 Lax / 跨站 None+Secure），浏览器自动携带。
+ * - HTTP 请求：不写 cookie。浏览器拒绝跨站 http cookie（SameSite=None 必须配 Secure，
+ *   而 HTTP 无法设置），为避免半失效 cookie 残留，HTTP 场景统一走 Bearer token——
+ *   调用方需将 token 放入响应体（登录/刷新接口已返回 tokens）。
+ */
 export function setAuthCookies(
   req: Request,
   res: Response,
   accessToken: string,
   refreshToken: string,
 ): void {
+  if (!isRequestSecure(req)) return;
   const { sameSite, secure } = getCookieSameSiteOptions(req);
   res.cookie('access_token', accessToken, {
     httpOnly: true,
@@ -133,12 +168,16 @@ export function setAuthCookies(
   });
 }
 
-/** 仅更新 access_token cookie（refresh 不轮换）。 */
+/**
+ * 仅更新 access_token cookie（refresh 不轮换）。
+ * 与 setAuthCookies 相同：HTTP 请求不写 cookie，token 由响应体返回走 Bearer。
+ */
 export function setAccessTokenCookie(
   req: Request,
   res: Response,
   accessToken: string,
 ): void {
+  if (!isRequestSecure(req)) return;
   const { sameSite, secure } = getCookieSameSiteOptions(req);
   res.cookie('access_token', accessToken, {
     httpOnly: true,
@@ -149,7 +188,10 @@ export function setAccessTokenCookie(
   });
 }
 
-/** 清除 auth cookie（登出）。需传入 req 以匹配 sameSite 设置，否则跨站 cookie 无法被正确清除。 */
+/**
+ * 清除 auth cookie（登出）。需传入 req 以匹配 sameSite 设置，
+ * 否则跨站 cookie 无法被正确清除。HTTP 场景无 cookie 时调用无害。
+ */
 export function clearAuthCookies(req: Request, res: Response): void {
   const { sameSite, secure } = getCookieSameSiteOptions(req);
   res.clearCookie('access_token', { path: '/', sameSite, secure });

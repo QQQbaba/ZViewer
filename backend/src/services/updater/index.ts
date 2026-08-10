@@ -600,15 +600,22 @@ if exist "%PS1%" (
   start "" /b "%ROOT%\\start.bat" start
 ) else (
   :: 最终回退：直接启动 exe，手动设置环境变量
+  :: 从 .env 读取端口（若存在），否则使用默认值
   echo [更新脚本] 未找到 start.ps1/start.bat，直接启动 exe
-  set "PORT=3333"
+  if exist "%ROOT%\\.env" (
+    for /f "usebackq tokens=1,* delims==" %%a in ("%ROOT%\\.env") do (
+      if /i "%%a"=="PORT" set "PORT=%%b"
+      if /i "%%a"=="FRONTEND_PORT" set "FRONTEND_PORT=%%b"
+    )
+  )
+  if not defined PORT set "PORT=3333"
+  if not defined FRONTEND_PORT set "FRONTEND_PORT=4173"
   set "NODE_ENV=production"
   set "HOST=::"
   start "" /D "%ROOT%" "%ROOT%\\zviewer-backend.exe"
   :: 等待后端启动
   ping 127.0.0.1 -n 6 >nul
-  set "PORT=4173"
-  set "BACKEND_URL=http://localhost:3333"
+  set "BACKEND_URL=http://localhost:!PORT!"
   set "HOST=0.0.0.0"
   start "" /D "%ROOT%" "%ROOT%\\zviewer-frontend.exe"
 )
@@ -724,10 +731,19 @@ if [ -f "$ROOT/start.sh" ]; then
 else
   # 回退方案：start.sh 不存在时直接启动 exe，手动设置环境变量
   echo "[更新脚本] 未找到 start.sh，直接启动 exe"
-  PORT=3333 NODE_ENV=production HOST=:: \
+  # 从 .env 读取端口（若存在），否则使用默认值
+  ENV_PORT=""
+  ENV_FRONTEND_PORT=""
+  if [ -f "$ROOT/.env" ]; then
+    ENV_PORT=$(grep -E '^PORT=' "$ROOT/.env" | head -n 1 | cut -d= -f2- | tr -d '"' | xargs)
+    ENV_FRONTEND_PORT=$(grep -E '^FRONTEND_PORT=' "$ROOT/.env" | head -n 1 | cut -d= -f2- | tr -d '"' | xargs)
+  fi
+  PORT="\${ENV_PORT:-3333}"
+  FRONTEND_PORT="\${ENV_FRONTEND_PORT:-4173}"
+  PORT="$PORT" NODE_ENV=production HOST=:: \
     nohup "$ROOT/zviewer-backend" > /dev/null 2>&1 &
   sleep 3
-  PORT=4173 BACKEND_URL="http://localhost:3333" HOST=0.0.0.0 \
+  PORT="$FRONTEND_PORT" BACKEND_URL="http://localhost:$PORT" HOST=0.0.0.0 \
     nohup "$ROOT/zviewer-frontend" > /dev/null 2>&1 &
 fi
 

@@ -10,26 +10,37 @@ FRONTEND_DIR="$ROOT_DIR/frontend"
 LOG_DIR="$ROOT_DIR/log"
 PIDS_FILE="$ROOT_DIR/.prod.pids.json"
 
-BACKEND_PORT=""
-FRONTEND_PORT=""
+BACKEND_PORT="${BACKEND_PORT:-}"
+FRONTEND_PORT="${FRONTEND_PORT:-}"
 BACKEND_ONLY=0
 DO_BUILD=0
 HTTPS_MODE=0
 
 # ==================== 工具函数 ====================
 
-# 端口固定：后端 = .env 的 PORT 或默认 3333；前端 = 4173
+# 端口解析：后端 = 环境变量/.env 的 PORT 或默认 3333；前端 = FRONTEND_PORT 或默认 4173
 set_ports() {
   if [[ -z "$BACKEND_PORT" ]]; then
-    local env_port
-    env_port=""
+    local env_port=""
     if [[ -f "$ROOT_DIR/.env" ]]; then
       env_port=$(grep -E '^PORT=' "$ROOT_DIR/.env" | head -n 1 | cut -d= -f2- | tr -d '"' | xargs)
     fi
-    if [[ -n "$env_port" ]]; then BACKEND_PORT="$env_port"; else BACKEND_PORT=3333; fi
+    if [[ -n "$env_port" ]]; then
+      BACKEND_PORT="$env_port"
+    else
+      BACKEND_PORT=3333
+    fi
   fi
   if [[ -z "$FRONTEND_PORT" ]]; then
-    FRONTEND_PORT=4173
+    local env_frontend_port=""
+    if [[ -f "$ROOT_DIR/.env" ]]; then
+      env_frontend_port=$(grep -E '^FRONTEND_PORT=' "$ROOT_DIR/.env" | head -n 1 | cut -d= -f2- | tr -d '"' | xargs)
+    fi
+    if [[ -n "$env_frontend_port" ]]; then
+      FRONTEND_PORT="$env_frontend_port"
+    else
+      FRONTEND_PORT=4173
+    fi
   fi
 }
 
@@ -219,7 +230,10 @@ cmd_start() {
   else
     echo "  启动前端..."
     pushd "$FRONTEND_DIR" >/dev/null
-    nohup npx vite preview --port "$FRONTEND_PORT" --host > "$LOG_DIR/frontend.log" 2>&1 &
+    # HTTP 模式：显式设置 VITE_API_TARGET 指向当前后端端口（默认 3333），
+    # 否则修改 PORT 后 Vite preview 代理仍打到默认 3333
+    VITE_API_TARGET="http://localhost:$BACKEND_PORT" \
+      nohup npx vite preview --port "$FRONTEND_PORT" --host > "$LOG_DIR/frontend.log" 2>&1 &
     local frontend_pid=$!
     popd >/dev/null
 

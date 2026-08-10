@@ -9,7 +9,7 @@ import { Space } from '@/components/ui/Space'
 import { Title, Paragraph } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
-import { apiFetch, resetSessionExpired } from '@/lib/api'
+import { apiFetch, resetSessionExpired, saveAuthTokens } from '@/lib/api'
 import { reconnectSocket } from '@/hooks/useSocket'
 import { cn } from '@/lib/utils'
 
@@ -99,6 +99,8 @@ export default function LoginPage() {
           role: string
           status?: 'active' | 'pending'
         }
+        accessToken?: string
+        refreshToken?: string
         message?: string
       }
 
@@ -108,6 +110,8 @@ export default function LoginPage() {
           setMode('login')
           return
         }
+        // 保存返回的 token（跨站 HTTP / 直连场景 cookie 不可用时 fallback 到 Bearer 头）
+        saveAuthTokens(data.accessToken, data.refreshToken)
         // 登录成功 → 重置 session 过期标志，允许后续 401 时再次尝试 refresh
         resetSessionExpired()
         login({

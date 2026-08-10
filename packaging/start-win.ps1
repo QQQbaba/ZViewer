@@ -67,11 +67,27 @@ function Stop-ProcessByPort($localPort) {
     }
 }
 
-# 从 .env 读取 PORT（与后端 dotenv 行为一致）
-# 端口固定：后端 3333，前端 4173
+# 从 .env / 环境变量读取端口（与后端 dotenv 行为一致）
+# 优先级：环境变量 > .env > 默认值（后端 3333，前端 4173）
+function Read-PortValue {
+    param([string]$Key)
+    $envVal = [Environment]::GetEnvironmentVariable($Key)
+    if ($envVal -match '^\d+$') { return [int]$envVal }
+    if (Test-Path $envFile) {
+        $line = Get-Content $envFile | Where-Object { $_ -match "^\s*$([regex]::Escape($Key))\s*=" } | Select-Object -First 1
+        if ($line) {
+            $val = ($line -split '=', 2)[1].Trim().Trim('"').Trim()
+            if ($val -match '^\d+$') { return [int]$val }
+        }
+    }
+    return $null
+}
+
 function Set-Ports {
-    $script:BackendPort = 3333
-    $script:FrontendPort = 4173
+    $backendEnv = Read-PortValue -Key 'PORT'
+    $frontendEnv = Read-PortValue -Key 'FRONTEND_PORT'
+    $script:BackendPort = if ($backendEnv) { $backendEnv } else { 3333 }
+    $script:FrontendPort = if ($frontendEnv) { $frontendEnv } else { 4173 }
 }
 
 function Test-Exe([string]$Exe, [string]$Name) {
@@ -234,10 +250,14 @@ function Invoke-Start([switch]$BackendOnly) {
     }
 
     Write-Host "  启动后端..."
+    $rtmpEnv = Read-PortValue -Key 'RTMP_PORT'
+    $flvEnv = Read-PortValue -Key 'HTTP_FLV_PORT'
     $backendEnv = @{
         PORT = "$BackendPort"
         NODE_ENV = "production"
         HOST = "::"
+        RTMP_PORT = if ($rtmpEnv) { "$rtmpEnv" } else { "3334" }
+        HTTP_FLV_PORT = if ($flvEnv) { "$flvEnv" } else { "3335" }
     }
     if ($Https) { $backendEnv.HTTPS = "true" }
     $backend = Start-ExeWithEnv -FilePath $backendExe -EnvVars $backendEnv  `

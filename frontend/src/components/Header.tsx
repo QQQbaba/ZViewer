@@ -53,8 +53,10 @@ import {
   getSocketUrl,
   getFlvBaseUrl,
   getRtmpPort,
+  clearAuthTokens,
+  resetSessionExpired,
 } from '@/lib/api'
-import { resetSocket } from '@/hooks/useSocket'
+import { resetSocket, reconnectSocket } from '@/hooks/useSocket'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
@@ -244,7 +246,15 @@ export function Header() {
       console.warn('[Header] logout API failed:', err)
       message.error('退出登录请求失败，已强制清除本地状态')
     } finally {
+      // 清除本地 Bearer token（跨站 HTTP fallback）
+      clearAuthTokens()
+      // 重置 session 过期标志，允许后续 onConnectError 中的 refresh 尝试
+      resetSessionExpired()
       logout()
+      // 登出后必须重连 socket：旧连接仍持有已失效的 root 凭据，
+      // 重连后 buildSocketAuth() 返回空载荷 → 服务端拒绝 →
+      // onConnectError 处理器自动降级为 guest token
+      reconnectSocket()
     }
   }
 
@@ -874,8 +884,7 @@ export function Header() {
           <div
             className="rounded-lg p-3"
             style={{
-              backgroundColor:
-                'var(--md-sys-color-surface-container-high)',
+              backgroundColor: 'var(--md-sys-color-surface-container-high)',
             }}
           >
             <div className="flex items-start gap-2">
@@ -1003,11 +1012,13 @@ export function Header() {
               <p className="mt-2 text-xs font-medium">推荐方案：</p>
               <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs">
                 <li>
-                  使用反向代理（Nginx / Caddy）统一提供 HTTPS，后端通过反向代理访问
+                  使用反向代理（Nginx / Caddy）统一提供
+                  HTTPS，后端通过反向代理访问
                 </li>
                 <li>或为后端 Express 服务直接配置 HTTPS 证书</li>
                 <li>
-                  或使用 Docker 部署，前端 Nginx 自动代理 /api 和 /socket.io 到后端
+                  或使用 Docker 部署，前端 Nginx 自动代理 /api 和 /socket.io
+                  到后端
                 </li>
               </ul>
             </div>

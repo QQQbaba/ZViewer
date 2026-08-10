@@ -11,8 +11,23 @@
  *    - FLV_BASE_URL：HTTP-FLV 拉流基础地址
  *    - RTMP_PORT：OBS RTMP 推流端口
  *
- * 业务代码不再需要手动拼 Authorization header，也不需要从 authStore 取 accessToken。
+ * 鉴权分离（见 lib/authTransport.ts）：
+ * - HTTPS 场景 → httpOnly cookie（自动携带，本模块不读写 token）
+ * - HTTP 场景 → Bearer token（token 存储与请求头装配在 authTransport 中实现）
  */
+import {
+  getRefreshToken,
+  saveAuthTokens,
+  buildAuthHeaders,
+} from './authTransport'
+export {
+  isHttpsContext,
+  getAccessToken,
+  getRefreshToken,
+  saveAuthTokens,
+  clearAuthTokens,
+  buildAuthHeaders,
+} from './authTransport'
 
 const CUSTOM_API_URL_KEY = 'zviewer-custom-api-url'
 const CUSTOM_SOCKET_URL_KEY = 'zviewer-custom-socket-url'
@@ -54,6 +69,7 @@ const rawApiUrl = normalizeUrl(import.meta.env.VITE_API_URL || '')
 const rawSocketUrl = normalizeUrl(import.meta.env.VITE_SOCKET_URL || '')
 const rawFlvBaseUrl = normalizeUrl(import.meta.env.VITE_FLV_BASE_URL || '')
 const rawRtmpPort = (import.meta.env.VITE_RTMP_PORT || '3334').toString()
+const rawFlvPort = (import.meta.env.VITE_HTTP_FLV_PORT || '3335').toString()
 
 /** 从 localStorage 实时读取自定义值，避免模块加载后取值陈旧 */
 function getStored(key: string): string | null {
@@ -82,7 +98,7 @@ function computeFlvBaseUrl(): string {
       rawFlvBaseUrl ||
       (window.location.protocol === 'https:'
         ? ''
-        : `http://${window.location.hostname}:3335`)
+        : `http://${window.location.hostname}:${rawFlvPort}`)
   )
 }
 
@@ -239,17 +255,25 @@ async function refreshAccessToken(): Promise<boolean> {
 
   inflightRefresh = (async () => {
     try {
+      const refreshToken = getRefreshToken()
       const res = await fetch(`${getApiUrl()}/api/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
+        // 跨站 HTTP 场景 cookie 不可用，通过 body 携带 refresh token
+        body: refreshToken ? JSON.stringify({ refreshToken }) : undefined,
       })
 
       // refresh 成功 → 后端已 set 新的 access_token cookie，下一次请求会自动带上
       if (res.ok) {
-        const data = (await res.json()) as { success?: boolean; user?: unknown }
-        // refresh 接口成功但不返回 user（旧版兼容）→ 信任 cookie 已更新
+        const data = (await res.json()) as {
+          success?: boolean
+          accessToken?: string
+          user?: unknown
+        }
         if (data.success) {
+          // 保存返回的 access token（跨站 HTTP fallback 用）
+          if (data.accessToken) saveAuthTokens(data.accessToken)
           return true
         }
       }
@@ -292,6 +316,8 @@ export async function apiFetch(
     credentials: 'include',
     headers: {
       ...(headers || {}),
+      // 分离式鉴权：HTTPS 走 cookie（自动携带），HTTP 走 Bearer 头
+      ...buildAuthHeaders(),
     },
   })
 
@@ -341,10 +367,7 @@ export async function apiGet<T = unknown>(
  * if (data.success) { ... }
  * ```
  */
-export async function safeJson<T>(
-  res: Response,
-  fallback: T
-): Promise<T> {
+export async function safeJson<T>(res: Response, fallback: T): Promise<T> {
   try {
     return (await res.json()) as T
   } catch (err) {
