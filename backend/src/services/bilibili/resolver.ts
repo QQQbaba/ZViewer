@@ -92,6 +92,12 @@ export interface ResolveOptions {
    */
   page?: number;
   /**
+   * 直接指定分集 cid（优先级低于 page）。
+   * - 当 page 未指定但 cid 已提供时，从 info.pages 中查找匹配的 page
+   * - 用于 CLI 代理场景：前端已知目标分集的 cid，直接传入而无需先查 page 序号
+   */
+  cid?: number;
+  /**
    * 跳过 CDN 健康检查（HEAD 探测）。
    * - false/undefined（默认）：播放场景需要选择可达 URL，做 HEAD 探测
    * - true：下载场景直接返回 baseUrl，下载失败时由调用方重试 backupUrl
@@ -287,7 +293,7 @@ async function fallbackToMp4(
 export async function resolveBilibiliVideo(
   opts: ResolveOptions,
 ): Promise<ResolveResult> {
-  const { url, cookie, qn, codec, onProgress, preferMp4, page, skipCdnCheck, forceDash } = opts;
+  const { url, cookie, qn, codec, onProgress, preferMp4, page, cid, skipCdnCheck, forceDash } = opts;
 
   const bvid = extractBvid(url);
   if (!bvid) {
@@ -310,7 +316,8 @@ export async function resolveBilibiliVideo(
 
   // 确定当前播放的分集 cid：
   // - page 参数指定时使用 info.pages[page-1].cid
-  // - 未指定时使用 info.cid（视频默认 cid，通常是第一 P）
+  // - cid 参数指定时（page 未指定）从 info.pages 中查找匹配的 page
+  // - 均未指定时使用 info.cid（视频默认 cid，通常是第一 P）
   // 多 P 视频每个分集有独立的 cid 和 m4s 文件，必须用对应 cid 请求 playurl
   let effectiveCid = info.cid;
   let currentPage = 1;
@@ -321,8 +328,15 @@ export async function resolveBilibiliVideo(
       effectiveCid = targetPage.cid;
       currentPage = targetPage.page;
     }
+  } else if (cid && info.pages && info.pages.length > 0) {
+    // page 未指定但 cid 已提供：从 pages 中查找匹配的分集
+    const matchedPage = info.pages.find((p) => p.cid === cid);
+    if (matchedPage) {
+      effectiveCid = matchedPage.cid;
+      currentPage = matchedPage.page;
+    }
   } else if (info.pages && info.pages.length > 0) {
-    // 未指定 page 时，根据 info.cid 找到对应的 page 序号
+    // 未指定 page 和 cid 时，根据 info.cid 找到对应的 page 序号
     const matchedPage = info.pages.find((p) => p.cid === info.cid);
     if (matchedPage) {
       currentPage = matchedPage.page;

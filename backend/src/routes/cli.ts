@@ -15,7 +15,7 @@ const router = Router()
  *
  * 参数：
  *   bvid: BV 号
- *   cid:  视频分 P 的 cid
+ *   cid:  视频分 P 的 cid（可选，未指定时使用第一 P）
  *   qn:   清晰度 qn（可选）
  *   preferMp4: 是否优先 MP4（可选，默认 false）
  *   forceDash: 是否强制 DASH 并禁用 MP4 降级（可选，默认 false）
@@ -37,15 +37,15 @@ router.get('/resolve', async (req, res) => {
     res.status(400).json({ success: false, message: '缺少 bvid 参数' })
     return
   }
-  if (typeof cid !== 'string' || !cid.trim()) {
-    res.status(400).json({ success: false, message: '缺少 cid 参数' })
-    return
-  }
 
-  const cidNum = Number(cid)
-  if (!Number.isFinite(cidNum)) {
-    res.status(400).json({ success: false, message: 'cid 格式错误' })
-    return
+  // cid 是可选的：未指定时后端自动使用第一 P
+  let cidNum: number | undefined
+  if (typeof cid === 'string' && cid.trim()) {
+    cidNum = Number(cid)
+    if (!Number.isFinite(cidNum)) {
+      res.status(400).json({ success: false, message: 'cid 格式错误' })
+      return
+    }
   }
 
   const qn =
@@ -60,6 +60,7 @@ router.get('/resolve', async (req, res) => {
       qn,
       preferMp4,
       forceDash,
+      cid: cidNum,
       page: undefined,
       // CLI 使用本地代理播放，实际视频流由用户本机浏览器→CLI 拉取，
       // 后端无需校验 B站 CDN 可达性，避免远程服务器网络差异导致错误降级为 MP4。
