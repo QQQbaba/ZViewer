@@ -27,6 +27,13 @@ interface QualityOption {
   resolution?: string;
 }
 
+interface PageOption {
+  page: number;
+  cid: number;
+  part: string;
+  duration: number;
+}
+
 interface MovieDto {
   id: number;
   roomId: string;
@@ -42,6 +49,8 @@ interface MovieDto {
   cid: number | null;
   currentQn: number | null;
   acceptQuality: QualityOption[] | null;
+  pages: PageOption[] | null;
+  currentPage: number | null;
   serverUrl: string | null;
   path: string | null;
   username: string | null;
@@ -72,6 +81,27 @@ function parseAcceptQuality(value: string | null): QualityOption[] | null {
   }
 }
 
+function normalizePages(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'string') return value.trim() || null;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+function parsePages(value: string | null): PageOption[] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed as PageOption[];
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function canControlRoom(req: AuthenticatedRequest, room: Room): boolean {
   const role = req.user?.role;
   if (role === 'root') return true;
@@ -95,6 +125,8 @@ function serializeMovie(movie: Movie): MovieDto {
     cid: movie.cid,
     currentQn: movie.currentQn,
     acceptQuality: parseAcceptQuality(movie.acceptQuality),
+    pages: parsePages(movie.pages),
+    currentPage: movie.currentPage,
     serverUrl: movie.serverUrl,
     path: movie.path,
     username: movie.username,
@@ -337,6 +369,8 @@ export function createRoomsRouter(io: SocketIOServer): Router {
           cid,
           currentQn,
           acceptQuality,
+          pages,
+          currentPage,
           serverUrl,
           path,
           username,
@@ -355,6 +389,8 @@ export function createRoomsRouter(io: SocketIOServer): Router {
           cid?: unknown;
           currentQn?: unknown;
           acceptQuality?: unknown;
+          pages?: unknown;
+          currentPage?: unknown;
           serverUrl?: unknown;
           path?: unknown;
           username?: unknown;
@@ -401,6 +437,11 @@ export function createRoomsRouter(io: SocketIOServer): Router {
               ? currentQn
               : null,
           acceptQuality: normalizeAcceptQuality(acceptQuality),
+          pages: normalizePages(pages),
+          currentPage:
+            typeof currentPage === 'number' && Number.isFinite(currentPage)
+              ? currentPage
+              : null,
           serverUrl: typeof serverUrl === 'string' ? serverUrl : null,
           path: typeof path === 'string' ? path : null,
           username: typeof username === 'string' ? username : null,
@@ -491,6 +532,8 @@ export function createRoomsRouter(io: SocketIOServer): Router {
           cid,
           currentQn,
           acceptQuality,
+          pages,
+          currentPage,
           serverUrl,
           path,
           username,
@@ -509,6 +552,8 @@ export function createRoomsRouter(io: SocketIOServer): Router {
           cid?: unknown;
           currentQn?: unknown;
           acceptQuality?: unknown;
+          pages?: unknown;
+          currentPage?: unknown;
           serverUrl?: unknown;
           path?: unknown;
           username?: unknown;
@@ -538,6 +583,8 @@ export function createRoomsRouter(io: SocketIOServer): Router {
           cid?: number | null;
           currentQn?: number | null;
           acceptQuality?: string | null;
+          pages?: string | null;
+          currentPage?: number | null;
           serverUrl?: string | null;
           path?: string | null;
           username?: string | null;
@@ -562,6 +609,9 @@ export function createRoomsRouter(io: SocketIOServer): Router {
           update.currentQn = currentQn;
         if (acceptQuality !== undefined)
           update.acceptQuality = normalizeAcceptQuality(acceptQuality);
+        if (pages !== undefined) update.pages = normalizePages(pages);
+        if (typeof currentPage === 'number' && Number.isFinite(currentPage))
+          update.currentPage = currentPage;
         if (typeof serverUrl === 'string') update.serverUrl = serverUrl;
         if (typeof path === 'string') update.path = path;
         if (typeof username === 'string') update.username = username;
