@@ -57,6 +57,11 @@ import {
   filterQualitiesByVip,
 } from '@/modules/bilibili/bilibiliApi'
 import {
+  extractBvid,
+  resolveBilibiliViaCli,
+} from '@/modules/bilibili/cliApi'
+import { getActiveCliProxyUrl } from '@/modules/room/watch-together/movie-source-resolver'
+import {
   resolveOpenList,
   fetchOpenListDirectUrl,
 } from '@/modules/openlist/openlistApi'
@@ -729,11 +734,28 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
     setLoading(true)
     setResolveProgress('正在初始化解析...')
     try {
-      const resolved = await resolveBilibili(
-        url.trim(),
-        undefined,
-        (_step, msg) => setResolveProgress(msg)
-      )
+      // CLI 已连接时优先使用本地 CLI 代理解析（使用用户自己的 B站 Cookie，可获取高画质）
+      const cliProxyUrl = getActiveCliProxyUrl()
+      const bvid = extractBvid(url.trim())
+
+      let resolved: ResolvedSource
+      if (cliProxyUrl && bvid) {
+        setResolveProgress('正在通过 CLI 代理解析...')
+        resolved = await resolveBilibiliViaCli(
+          cliProxyUrl,
+          bvid,
+          undefined,
+          undefined,
+          false,
+          true
+        )
+      } else {
+        resolved = await resolveBilibili(
+          url.trim(),
+          undefined,
+          (_step, msg) => setResolveProgress(msg)
+        )
+      }
       setResolvedMovie(resolved)
       // 自动检测多 P 视频：若有多 P，弹出分集选择界面
       if (resolved.pages && resolved.pages.length > 1) {
@@ -756,11 +778,28 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
     setQualityLoading(true)
     setResolveProgress('正在切换清晰度...')
     try {
-      const resolved = await resolveBilibiliWithOptions(
-        url.trim(),
-        qn,
-        (_step, msg) => setResolveProgress(msg)
-      )
+      // CLI 已连接时通过本地 CLI 代理切换清晰度（使用用户自己的 B站 Cookie）
+      const cliProxyUrl = getActiveCliProxyUrl()
+      const bvid = extractBvid(url.trim())
+
+      let resolved: ResolvedSource
+      if (cliProxyUrl && bvid) {
+        setResolveProgress('正在通过 CLI 代理切换清晰度...')
+        resolved = await resolveBilibiliViaCli(
+          cliProxyUrl,
+          bvid,
+          resolvedMovie.cid,
+          qn,
+          false,
+          true
+        )
+      } else {
+        resolved = await resolveBilibiliWithOptions(
+          url.trim(),
+          qn,
+          (_step, msg) => setResolveProgress(msg)
+        )
+      }
       setResolvedMovie(resolved)
     } catch (err) {
       console.error('[MoviePushPanel] switch quality error:', err)
@@ -781,12 +820,29 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
     setPageSelectLoading(true)
     setResolveProgress(`正在解析 P${page} ${targetPage.part}...`)
     try {
-      const resolved = await resolveBilibiliWithOptions(
-        url.trim(),
-        resolvedMovie.currentQn,
-        (_step, msg) => setResolveProgress(msg),
-        { page }
-      )
+      // CLI 已连接时通过本地 CLI 代理切换分P（使用用户自己的 B站 Cookie）
+      const cliProxyUrl = getActiveCliProxyUrl()
+      const bvid = extractBvid(url.trim())
+
+      let resolved: ResolvedSource
+      if (cliProxyUrl && bvid) {
+        setResolveProgress(`正在通过 CLI 代理解析 P${page}...`)
+        resolved = await resolveBilibiliViaCli(
+          cliProxyUrl,
+          bvid,
+          targetPage.cid,
+          resolvedMovie.currentQn,
+          false,
+          true
+        )
+      } else {
+        resolved = await resolveBilibiliWithOptions(
+          url.trim(),
+          resolvedMovie.currentQn,
+          (_step, msg) => setResolveProgress(msg),
+          { page }
+        )
+      }
       setResolvedMovie(resolved)
     } catch (err) {
       console.error('[MoviePushPanel] page select error:', err)
@@ -1569,7 +1625,8 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
                   )}
                   options={filterQualitiesByVip(
                     resolvedMovie.acceptQuality,
-                    bilibiliUser?.vipStatus === 1
+                    bilibiliUser?.vipStatus === 1 ||
+                      resolvedMovie.vipStatus === 1
                   ).map((q) => ({
                     label: q.resolution
                       ? `${q.label} · ${q.resolution}`

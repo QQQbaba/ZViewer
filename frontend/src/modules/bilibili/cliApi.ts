@@ -83,7 +83,7 @@ interface CliResolveResponse {
  *
  * @param proxyUrl CLI 本地代理地址，例如 http://127.0.0.1:9333
  * @param bvid BV 号
- * @param cid 视频分 P 的 cid
+ * @param cid 视频分 P 的 cid（可选，未指定时后端自动使用第一 P）
  * @param qn 清晰度 qn（可选）
  * @param preferMp4 是否优先 MP4（可选，默认 false）
  * @param forceDash 是否强制使用 DASH 并禁用 MP4 降级（CLI 代理已连接时使用）
@@ -91,7 +91,7 @@ interface CliResolveResponse {
 export async function resolveBilibiliViaCli(
   proxyUrl: string,
   bvid: string,
-  cid: number,
+  cid?: number,
   qn?: number,
   preferMp4?: boolean,
   forceDash?: boolean
@@ -99,8 +99,10 @@ export async function resolveBilibiliViaCli(
   const base = proxyUrl.replace(/\/$/, '')
   const params = new URLSearchParams({
     bvid,
-    cid: String(cid),
   })
+  if (cid != null && Number.isFinite(cid)) {
+    params.set('cid', String(cid))
+  }
   if (qn != null && Number.isFinite(qn)) {
     params.set('qn', String(qn))
   }
