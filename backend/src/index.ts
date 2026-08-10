@@ -521,6 +521,11 @@ async function bootstrap() {
   };
   process.on('SIGTERM', gracefulShutdown);
   process.on('SIGINT', gracefulShutdown);
+
+  // 全局兜底：未捕获的 Promise rejection 不崩溃进程
+  process.on('unhandledRejection', (reason) => {
+    console.error('[unhandledRejection]', reason);
+  });
 }
 
 bootstrap().catch((err) => {
