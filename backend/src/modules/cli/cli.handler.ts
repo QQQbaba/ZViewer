@@ -88,7 +88,12 @@ export class CliHandler implements SocketEventHandler {
         socket.data.cliRoomId = roomId;
 
         // 加入房间：CLI 可接收房间事件用于终端日志展示
-        void socket.join(roomId);
+        const joinResult = socket.join(roomId);
+        if (joinResult instanceof Promise) {
+          joinResult.catch((err: unknown) => {
+            console.error('[CLI] 加入房间失败:', err);
+          });
+        }
 
         // 通知 CLI 注册成功
         io.to(socket.id).emit('cli-registered', { roomId });
@@ -105,8 +110,15 @@ export class CliHandler implements SocketEventHandler {
     // 2. 前端查询房间内 CLI 代理列表
     socket.on('cli-list-agents', async (roomId: string) => {
       if (typeof roomId !== 'string' || !roomId) return;
-      const agents = await this.getRoomAgents(io, roomId);
-      io.to(socket.id).emit('cli-agents', { roomId, agents });
+      try {
+        const agents = await this.getRoomAgents(io, roomId);
+        io.to(socket.id).emit('cli-agents', { roomId, agents });
+      } catch (err) {
+        // fetchSockets() 偶发失败（adapter 异常、长轮询断开等）时捕获，
+        // 避免 unhandled rejection 导致后端进程崩溃（Node 15+ 默认 throw）
+        console.error('[CLI] cli-list-agents 查询失败:', err);
+        io.to(socket.id).emit('cli-agents', { roomId, agents: [] });
+      }
     });
 
     // 3. 断开连接时通知房间内其他成员
