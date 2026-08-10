@@ -13,8 +13,10 @@ param(
     [ValidateSet('backend', 'frontend', '')]
     [string]$Target = '',
 
-    [switch]$Build,            # 启动前构建
-    [switch]$Https             # 使用自签 HTTPS
+    [int]$Port = 0,          # 后端端口覆盖（0 = 使用 .env / 默认 3333）
+    [int]$FrontendPort = 0,  # 前端端口覆盖（0 = 使用 .env / 默认 4173）
+    [switch]$Build,          # 启动前构建
+    [switch]$Https           # 使用自签 HTTPS
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,13 +35,14 @@ $envFile = Join-Path $rootDir ".env"
 
 # ==================== 工具函数 ====================
 
-function Read-EnvPort {
+function Read-EnvValue {
+    param([string]$Key)
     if (-not (Test-Path $envFile)) { return $null }
-    $line = Get-Content $envFile | Where-Object { $_ -match '^\s*PORT\s*=' } | Select-Object -First 1
+    $line = Get-Content $envFile | Where-Object { $_ -match "^\s*$([regex]::Escape($Key))\s*=" } | Select-Object -First 1
     if (-not $line) { return $null }
     $val = ($line -split '=', 2)[1].Trim().Trim('"').Trim()
-    if ($val -match '^\d+$') { return [int]$val }
-    return $null
+    if ($val -eq '') { return $null }
+    return $val
 }
 
 function Read-PidsFile {
@@ -133,9 +136,17 @@ function Build-Projects {
 # ==================== 命令 ====================
 
 function Set-Ports {
-    $envPort = Read-EnvPort
-    $script:Port = if ($envPort) { $envPort } else { 3333 }
-    $script:FrontendPort = 4173
+    # 端口优先级：命令行参数 > 环境变量 > .env > 默认值
+    $envPort = Read-EnvValue -Key 'PORT'
+    $envFrontendPort = Read-EnvValue -Key 'FRONTEND_PORT'
+    $script:Port = if ($Port -gt 0) { $Port }
+        elseif ($env:PORT -match '^\d+$') { [int]$env:PORT }
+        elseif ($envPort -match '^\d+$') { [int]$envPort }
+        else { 3333 }
+    $script:FrontendPort = if ($FrontendPort -gt 0) { $FrontendPort }
+        elseif ($env:FRONTEND_PORT -match '^\d+$') { [int]$env:FRONTEND_PORT }
+        elseif ($envFrontendPort -match '^\d+$') { [int]$envFrontendPort }
+        else { 4173 }
 }
 
 function Invoke-Start {
@@ -260,10 +271,14 @@ function Invoke-Start {
       Write-Host "  启动前端..."
       $viteJs = Resolve-ViteJs
       if (-not $viteJs) { throw "未找到 vite.js" }
+      # HTTP 模式：显式设置 VITE_API_TARGET 指向当前后端端口（默认 3333），
+      # 否则修改 PORT 后 Vite preview 代理仍打到默认 3333
+      $env:VITE_API_TARGET = "http://localhost:$Port"
       $frontend = Start-Process -FilePath "node" -ArgumentList "`"$viteJs`" preview --port $FrontendPort --host" `
           -WorkingDirectory $frontendDir -WindowStyle Hidden `
           -RedirectStandardOutput "$logDir/frontend.log" `
           -RedirectStandardError "$logDir/frontend.err.log" -PassThru
+      Remove-Item Env:VITE_API_TARGET -ErrorAction SilentlyContinue
 
       Write-PidsFile -backendPid $backend.Id -frontendPid $frontend.Id
       Write-Host "  后端 PID: $($backend.Id)"
