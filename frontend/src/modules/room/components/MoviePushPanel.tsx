@@ -10,6 +10,7 @@ import {
   Crown,
   FolderOpen,
   Clapperboard,
+  ListVideo,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -79,6 +80,7 @@ import {
 } from '@/modules/mounts'
 import { useAuthStore } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
+import { cn } from '@/lib/utils'
 
 type SourceType =
   | 'bilibili'
@@ -122,6 +124,17 @@ function extractTitleFromUrl(url: string) {
 function normalizeMountPath(path: string): string {
   if (!path) return path
   return path.trim().replace(/^\/+/, '/')
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return ''
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  }
+  return `${m}:${String(s).padStart(2, '0')}`
 }
 
 interface MoviePushPanelProps {
@@ -198,6 +211,9 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isPollingRef = useRef(false)
   const qrRetryCountRef = useRef(0)
+  // 多 P 视频分集选择弹窗
+  const [showPageSelector, setShowPageSelector] = useState(false)
+  const [pageSelectLoading, setPageSelectLoading] = useState(false)
 
   useEffect(() => {
     void fetchSettings()
@@ -719,6 +735,10 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         (_step, msg) => setResolveProgress(msg)
       )
       setResolvedMovie(resolved)
+      // 自动检测多 P 视频：若有多 P，弹出分集选择界面
+      if (resolved.pages && resolved.pages.length > 1) {
+        setShowPageSelector(true)
+      }
     } catch (err) {
       console.error('[MoviePushPanel] resolve error:', err)
       message.error(err instanceof Error ? err.message : '解析失败')
@@ -747,6 +767,32 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
       message.error(err instanceof Error ? err.message : '切换清晰度失败')
     } finally {
       setQualityLoading(false)
+      setResolveProgress('')
+    }
+  }
+
+  // 选择分 P：用目标 page 的 cid 重新解析视频流
+  const handlePageSelect = async (page: number) => {
+    if (!url.trim() || !resolvedMovie) return
+    const targetPage = resolvedMovie.pages?.find((p) => p.page === page)
+    if (!targetPage) return
+
+    setShowPageSelector(false)
+    setPageSelectLoading(true)
+    setResolveProgress(`正在解析 P${page} ${targetPage.part}...`)
+    try {
+      const resolved = await resolveBilibiliWithOptions(
+        url.trim(),
+        resolvedMovie.currentQn,
+        (_step, msg) => setResolveProgress(msg),
+        { page }
+      )
+      setResolvedMovie(resolved)
+    } catch (err) {
+      console.error('[MoviePushPanel] page select error:', err)
+      message.error(err instanceof Error ? err.message : '切换分P失败')
+    } finally {
+      setPageSelectLoading(false)
       setResolveProgress('')
     }
   }
@@ -1536,6 +1582,23 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
               </>
             )}
 
+          {sourceType === 'bilibili' &&
+            resolvedMovie?.pages &&
+            resolvedMovie.pages.length > 1 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                block
+                icon={<ListVideo className="h-4 w-4" />}
+                onClick={() => setShowPageSelector(true)}
+                disabled={pageSelectLoading || !isHost}
+              >
+                {resolvedMovie.currentPage
+                  ? `P${resolvedMovie.currentPage} ${resolvedMovie.pages.find((p) => p.page === resolvedMovie.currentPage)?.part ?? ''} · 点击切换`
+                  : `共 ${resolvedMovie.pages.length} P · 点击选择`}
+              </Button>
+            )}
+
           {sourceType === 'bilibili' && (
             <div
               className="rounded-[var(--md-sys-shape-corner)] p-2.5"
@@ -1767,6 +1830,107 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         onSelectFile={(path) => setServerFilePath(path)}
         selectable
       />
+
+      {sourceType === 'bilibili' && resolvedMovie?.pages && (
+        <Modal
+          open={showPageSelector}
+          onClose={() => setShowPageSelector(false)}
+          title={
+            <div className="flex items-center gap-2.5">
+              <div
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
+                style={{
+                  backgroundColor: 'var(--md-sys-color-primary-container)',
+                }}
+              >
+                <ListVideo
+                  className="h-4 w-4"
+                  style={{
+                    color: 'var(--md-sys-color-on-primary-container)',
+                  }}
+                />
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col">
+                <Text className="text-sm font-semibold leading-tight">
+                  选择分集
+                </Text>
+                <Text
+                  type="secondary"
+                  className="text-[10px] uppercase tracking-wide"
+                >
+                  {resolvedMovie.pages.length} P · 点击选择要添加的章节
+                </Text>
+              </div>
+            </div>
+          }
+          footer={
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowPageSelector(false)}
+            >
+              取消（使用当前分集）
+            </Button>
+          }
+        >
+          <div className="flex max-h-[400px] flex-col gap-1.5 overflow-y-auto">
+            {resolvedMovie.pages.map((page) => {
+              const isSelected =
+                page.page === (resolvedMovie.currentPage ?? 1)
+              return (
+                <div
+                  key={page.page}
+                  className={cn(
+                    'flex cursor-pointer items-center gap-3 rounded-[var(--md-sys-shape-corner)] border p-3 transition-all hover:-translate-y-0.5 hover:shadow-md',
+                    isSelected
+                      ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]'
+                      : 'glass border-transparent hover:border-[var(--md-sys-color-outline-variant)]'
+                  )}
+                  onClick={() => void handlePageSelect(page.page)}
+                >
+                  <div
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--md-sys-shape-corner)] text-xs font-medium"
+                    style={{
+                      backgroundColor: isSelected
+                        ? 'var(--md-sys-color-primary)'
+                        : 'color-mix(in srgb, var(--md-sys-color-primary) 12%, transparent)',
+                      color: isSelected
+                        ? 'var(--md-sys-color-on-primary)'
+                        : 'var(--md-sys-color-primary)',
+                    }}
+                  >
+                    {page.page}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <Paragraph
+                      className={cn(
+                        'm-0 truncate text-sm font-medium',
+                        isSelected &&
+                          'text-[var(--md-sys-color-on-primary-container)]'
+                      )}
+                      title={page.part}
+                    >
+                      {page.part}
+                    </Paragraph>
+                    {page.duration > 0 && (
+                      <Text
+                        type="secondary"
+                        className={cn(
+                          'text-[10px] uppercase tracking-wide',
+                          isSelected &&
+                            'text-[var(--md-sys-color-on-primary-container)]'
+                        )}
+                      >
+                        {formatDuration(page.duration)}
+                      </Text>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Modal>
+      )}
     </>
   )
 }
