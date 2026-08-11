@@ -32,6 +32,9 @@ interface RequestJoinPayload {
   password?: string;
 }
 
+/** 房主离线后观众仍可加入的宽限时间（毫秒）。5 分钟内房主不回来则无法加入。 */
+const HOST_JOIN_GRACE_MS = 5 * 60 * 1000; // 5 分钟
+
 /**
  * 观众加入事件处理器。
  */
@@ -75,8 +78,18 @@ export class ViewerJoinHandler implements SocketEventHandler {
             });
           }
 
-          // 校验房主在线
-          const sharer = await roomSessionService.getSharer(payload.roomId);
+          // 校验房主在线：
+          // - 需审批房间：房主必须在线（审批须由房主进行），离线时拒绝加入
+          // - 免审批房间：房主离线但未超过 5 分钟宽限期时仍允许加入
+          let sharer = null;
+          if (room.requireApproval) {
+            sharer = await roomSessionService.getSharer(payload.roomId);
+          } else {
+            sharer = await roomSessionService.getRecentSharer(
+              payload.roomId,
+              HOST_JOIN_GRACE_MS,
+            );
+          }
           if (!sharer) {
             return safeAck(callback, { success: false, message: '分享端不在线' });
           }
