@@ -171,6 +171,27 @@ export class RoomSessionService {
   }
 
   /**
+   * 获取房间内最近的 sharer session（包括已结束的）。
+   *
+   * 用于房主短时间离线时允许观众加入：如果上一个 sharer session 结束时间在 maxAgeMs 内，
+   * 视为房主"暂离"，允许观众加入房间。
+   */
+  async getRecentSharer(roomId: string, maxAgeMs: number): Promise<Session | null> {
+    const sessionRepo = AppDataSource.getRepository(Session);
+    const session = await sessionRepo.findOne({
+      where: { roomId, role: 'sharer' },
+      order: { startedAt: 'DESC' },
+    });
+    if (!session) return null;
+    // 如果房主在线（endedAt 为 null），直接返回
+    if (!session.endedAt) return session;
+    // 如果房主离线但未超过宽限期，仍视为"有效"
+    const elapsed = Date.now() - session.endedAt.getTime();
+    if (elapsed <= maxAgeMs) return session;
+    return null;
+  }
+
+  /**
    * 检查房间是否在线（有活跃 sharer）。
    */
   async isSharerOnline(roomId: string): Promise<boolean> {
