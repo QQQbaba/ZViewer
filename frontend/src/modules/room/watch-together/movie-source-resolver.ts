@@ -10,7 +10,7 @@
  * 本模块不触碰 React 状态 / store / message，所有副作用留在调用方。
  */
 import type { Movie } from '@/store/roomStore'
-import type { MediaFormat } from '@/lib/mediaFormat'
+import { detectMediaFormat, type MediaFormat } from '@/lib/mediaFormat'
 import { resolveBilibiliWithOptions } from '@/modules/bilibili/bilibiliApi'
 import { extractBvid, resolveBilibiliViaCli } from '@/modules/bilibili/cliApi'
 import { useCliAgentStore } from '@/store/cliAgentStore'
@@ -245,10 +245,13 @@ export async function resolveMovieSource({
   }
 
   // 非 B站 源：直接使用影片记录字段（Movie 类型不含 headers，见 roomStore）
+  // format 兜底：旧数据可能未存储 format 字段（直链 m3u8/flv 等），
+  // 通过 detectMediaFormat 从 URL 扩展名自动推断，确保选择正确的播放引擎。
+  const inferredFormat = movie.format || detectMediaFormat(movie.url)
   return {
     sourceUrl: movie.url,
     audioUrl: movie.audioUrl,
-    format: movie.format,
+    format: inferredFormat,
     videoCodec: movie.videoCodec,
     audioCodec: movie.audioCodec,
     cid: movie.cid,
