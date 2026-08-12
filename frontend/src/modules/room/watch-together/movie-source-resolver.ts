@@ -179,11 +179,16 @@ export async function resolveBilibiliOnline(
   if (proxyUrl) {
     const bvid = extractBvid(movie.url)
     if (bvid && movie.cid) {
+      // CLI 模式：默认使用 1080P（qn=80），让用户通过分辨率切换 UI 选择更高或更低清晰度
+      const cliQn =
+        movie.currentQn && movie.currentQn > 0
+          ? Math.max(movie.currentQn, 80)
+          : 80
       const resolved = await resolveBilibiliViaCli(
         proxyUrl,
         bvid,
         movie.cid,
-        movie.currentQn,
+        cliQn,
         effectivePreferMp4,
         forceDash
       )
