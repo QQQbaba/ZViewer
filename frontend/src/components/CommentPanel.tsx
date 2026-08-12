@@ -179,7 +179,7 @@ export function CommentPanel({
   const handleSendComment = () => handleSend(sendAsDanmaku)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+    <div className="glass-card flex min-h-0 flex-1 flex-col gap-3 overflow-hidden rounded-[var(--md-sys-shape-corner)] p-4">
       {!commentsOnly && (
         <SegmentedToggle
           options={[
@@ -196,7 +196,7 @@ export function CommentPanel({
           <div className="flex h-full min-h-0 flex-col gap-3">
             <div
               ref={listRef}
-              className="glass flex-1 min-h-0 overflow-y-auto rounded-[var(--md-sys-shape-corner)] p-3"
+              className="glass-bg flex-1 min-h-0 overflow-y-auto rounded-[var(--md-sys-shape-corner)] p-3"
             >
               <Space direction="vertical" className="w-full" size="sm" align="start">
                 {comments.length === 0 && (

@@ -43,8 +43,6 @@ import clientLogsRoutes from './routes/client-logs';
 import cliRoutes from './routes/cli';
 import { createRoomsRouter } from './routes/rooms';
 import { verifyAccessToken } from './middleware/auth';
-// 屏幕共享子模块保持原有注册方式（内部自管理 io.on('connection')）
-import { registerScreenSharingHandlers } from './services/screen-sharing';
 
 // 新模块化架构
 import { SocketRegistry } from './modules/socket';
@@ -77,6 +75,8 @@ import {
 import { CommentHandler } from './modules/comment';
 import { CliHandler } from './modules/cli';
 import { nmsService, StreamPushHandler, streamPushRouter } from './modules/stream-push';
+import { SignalingHandler, ViewerEventsHandler } from './modules/webrtc-signaling';
+import { VoiceChatHandler } from './modules/voice-chat';
 import { ensureUploadsRoot } from './services/server-files/pathResolver';
 import {
   AVATARS_DIR,
@@ -424,8 +424,8 @@ async function bootstrap() {
     }
   });
 
-  // 屏幕共享子模块保持原有注册方式（内部自管理 io.on('connection')）
-  registerScreenSharingHandlers(io);
+  // 屏幕共享子模块已迁移为新式架构（SocketEventHandler），
+  // 与 stream-push 一起通过 SocketRegistry 统一注册，消除旧 services/ 风格。
 
   // 启动 Node-Media-Server（RTMP + HTTP-FLV）用于 OBS 推流模式
   // 启动失败不影响主进程运行
@@ -452,7 +452,12 @@ async function bootstrap() {
     .add(new SeekApprovalHandler())
     .add(new CommentHandler())
     .add(new CliHandler())
-    .add(new StreamPushHandler());
+    .add(new StreamPushHandler())
+    // WebRTC 信令 + 观众就绪事件（迁移自 services/screen-sharing/）
+    .add(new SignalingHandler())
+    .add(new ViewerEventsHandler())
+    // 语音聊天服务器中转（从 signaling.ts 中分离）
+    .add(new VoiceChatHandler());
 
   // 挂载新模块的 REST 路由
   app.use('/api/rooms', createMovieRouter(io));

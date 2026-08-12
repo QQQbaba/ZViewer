@@ -515,7 +515,7 @@ export function RoomInfoPanel({
             className={cn(
               'flex flex-col gap-3',
               roomMode === 'screen-share' && isHost
-                ? 'min-w-0 flex-1'
+                ? 'min-w-[220px] flex-1'
                 : 'w-full'
             )}
           >
@@ -678,7 +678,7 @@ export function RoomInfoPanel({
               className={cn(
                 'flex min-h-0 flex-col gap-1.5',
                 roomMode === 'screen-share'
-                  ? 'min-w-0 flex-1 border-l border-[var(--glass-border)] pl-3'
+                  ? 'min-w-[180px] flex-1 border-l border-[var(--glass-border)] pl-3'
                   : 'flex-1'
               )}
             >
