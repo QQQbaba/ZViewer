@@ -1,14 +1,25 @@
-import { Server as SocketIOServer } from 'socket.io';
+/**
+ * 观众就绪事件处理器。
+ *
+ * 职责：
+ * - viewer-ready：观众就绪通知房主 + 推送影片列表
+ * - sharer-ready：房主开始共享时广播通知观众重发 viewer-ready
+ *
+ * 设计：实现 SocketEventHandler 接口，由 SocketRegistry 统一注册。
+ * 迁移自 services/screen-sharing/viewer-events.ts。
+ */
+import type { Server as SocketIOServer, Socket } from 'socket.io';
 import { IsNull } from 'typeorm';
 import { AppDataSource } from '../../data-source';
 import { Session } from '../../entities/Session';
-import { roomStateService } from '../../modules/room/room-state.service';
-import { roomPermissionService } from '../../modules/room/room-permission.service';
+import { roomStateService } from '../room/room-state.service';
+import { roomPermissionService } from '../room/room-permission.service';
+import type { SocketEventHandler } from '../socket';
 
-// 注册观众就绪相关的事件处理器
-// 内部注册 io.on('connection', ...)，所有事件均在该处理器内注册
-export function registerViewerEventHandlers(io: SocketIOServer): void {
-  io.on('connection', (socket) => {
+export class ViewerEventsHandler implements SocketEventHandler {
+  readonly name = 'webrtc-viewer-events';
+
+  register(socket: Socket, io: SocketIOServer): void {
     // --- 观众就绪：通知房主可以开始推送流 ---
     socket.on(
       'viewer-ready',
@@ -20,7 +31,6 @@ export function registerViewerEventHandlers(io: SocketIOServer): void {
           return callback?.({ success: false, message: '不在该房间中' });
         }
 
-        // 查找房间的 sharer session 用于转发信令（非权限校验，故直接查表）
         const sessionRepo = AppDataSource.getRepository(Session);
         const sharer = await sessionRepo.findOneBy({
           roomId: payload.roomId,
@@ -38,7 +48,7 @@ export function registerViewerEventHandlers(io: SocketIOServer): void {
           from: socket.id,
         });
 
-        // 推送影片列表与当前影片（使用新架构 roomStateService）
+        // 推送影片列表与当前影片
         io.to(socket.id).emit('movie-list', {
           movies: roomStateService.getMovies(payload.roomId),
         });
@@ -51,16 +61,12 @@ export function registerViewerEventHandlers(io: SocketIOServer): void {
     );
 
     // --- 房主共享就绪：通知房间内所有观众重新发送 viewer-ready ---
-    // 用于房主开始屏幕共享时通知观众重新触发信令流程。
-    // 注意：register-host.handler.ts 在房主注册时也会广播 sharer-ready（socket.to 排除发送者），
-    // 此处仅处理房主主动开始共享（非注册）的场景。
     socket.on(
       'sharer-ready',
       async (
         payload: { roomId: string },
         callback?: (response: { success: boolean; message?: string }) => void,
       ) => {
-        // 通过统一权限服务校验房主身份
         if (!(await roomPermissionService.isRoomHost(socket, payload.roomId))) {
           return callback?.({ success: false, message: '无权限' });
         }
@@ -68,7 +74,6 @@ export function registerViewerEventHandlers(io: SocketIOServer): void {
         console.log(
           `[sharer-ready] broadcast from sharer=${socket.id} to room=${payload.roomId}`,
         );
-        // 仅广播给房间内其他成员（排除发送者），避免房主自身重复触发
         socket.to(payload.roomId).emit('sharer-ready', {
           roomId: payload.roomId,
         });
@@ -76,5 +81,5 @@ export function registerViewerEventHandlers(io: SocketIOServer): void {
         callback?.({ success: true });
       },
     );
-  });
+  }
 }

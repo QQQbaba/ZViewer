@@ -148,25 +148,26 @@ export function useLocalMediaStream(
       const useTestStream =
         new URLSearchParams(window.location.search).get('testStream') === 'true'
 
+      // 使用更强的帧率约束：max 设置硬上限，ideal 设置期望值。
+      // 注意：屏幕共享场景下浏览器会在画面静止时主动降帧（节能优化），
+      // 这是浏览器层行为，无法通过约束完全消除。
+      // 后续通过 contentHint='motion' + 编码器 maxFramerate 共同保证输出帧率。
+      const videoConstraints: MediaTrackConstraints = {
+        frameRate: { ideal: frameRate, max: frameRate },
+        width: { ideal: 1920, max: 1920 },
+        height: { ideal: 1080, max: 1080 },
+      }
+
       let mediaStream: MediaStream
       if (useTestStream) {
         message.info('测试模式：使用摄像头画面代替屏幕共享')
         mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            frameRate: { ideal: frameRate, max: frameRate },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
+          video: { ...videoConstraints, width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: shareSystemAudio,
         })
       } else {
         mediaStream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            // 优先保持目标帧率；部分浏览器/显卡可能仍限制为 30/60，获取后再 applyConstraints 尽量逼近
-            frameRate: { ideal: frameRate, max: frameRate },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          },
+          video: videoConstraints,
           audio: shareSystemAudio,
         })
       }
@@ -189,20 +190,32 @@ export function useLocalMediaStream(
       setIsSharing(true)
       setIsPaused(false)
 
-      // 尝试将视频轨道设为运动/高帧率模式，并应用目标帧率
-      mediaStream.getVideoTracks().forEach((track) => {
-        track.contentHint = 'motion'
-        try {
-          void track.applyConstraints({
-            frameRate: { ideal: frameRate, max: frameRate },
-          })
-        } catch (err) {
-          console.warn(
-            '[useLocalMediaStream] applyConstraints frameRate error:',
-            err
-          )
-        }
-      })
+      // 对视频轨道应用目标帧率约束并设置 contentHint
+      // - contentHint='motion' 告知浏览器/编码器内容为动态画面，避免静止检测降帧
+      // - applyConstraints 使用 max 硬约束帧率上限，避免编码器超过目标帧率浪费带宽
+      // - 必须 await 确保 PC 建立前约束已生效
+      await Promise.all(
+        mediaStream.getVideoTracks().map(async (track) => {
+          track.contentHint = 'motion'
+          try {
+            await track.applyConstraints({
+              frameRate: { max: frameRate },
+            })
+            const settings = track.getSettings()
+            console.log(
+              '[useLocalMediaStream] applied frameRate constraint, actual:',
+              settings.frameRate,
+              'target:',
+              frameRate
+            )
+          } catch (err) {
+            console.warn(
+              '[useLocalMediaStream] applyConstraints frameRate error:',
+              err
+            )
+          }
+        })
+      )
 
       mediaStream.getVideoTracks().forEach((track) => {
         console.log(
@@ -211,7 +224,9 @@ export function useLocalMediaStream(
           'enabled:',
           track.enabled,
           'muted:',
-          track.muted
+          track.muted,
+          'settings:',
+          track.getSettings()
         )
         track.addEventListener('unmute', () => {
           console.log('[useLocalMediaStream] video track unmuted')

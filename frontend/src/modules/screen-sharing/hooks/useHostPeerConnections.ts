@@ -8,6 +8,25 @@ import type {
   ViewerReadyPayload,
 } from '../types'
 
+/**
+ * 根据目标帧率计算推荐最低码率（bps）。
+ *
+ * 码率不足是 60fps 无法维持的首要原因：编码器在带宽受限时会主动降帧
+ * 来维持单帧画质。degradationPreference='maintain-framerate' 可让编码器
+ * 优先降画质，但仍需保证最低码率阈值。
+ *
+ * 参考值（1080p）：
+ * - 15fps: 4 Mbps
+ * - 30fps: 8 Mbps
+ * - 45fps: 12 Mbps
+ * - 60fps: 16 Mbps
+ */
+function computeRecommendedBitrate(frameRate: number): number {
+  // 线性公式：0.267 Mbps/fps * frameRate，最低 2 Mbps
+  const mbps = Math.max(2, frameRate * 0.267)
+  return Math.round(mbps * 1000 * 1000)
+}
+
 interface UseHostPeerConnectionsOptions {
   socket: Socket | null
   /** 本地 MediaStream（来自 useLocalMediaStream） */
@@ -73,6 +92,10 @@ export function useHostPeerConnections(
   const [connectionCount, setConnectionCount] = useState(0)
   const [statsPeerConnection, setStatsPeerConnection] =
     useState<RTCPeerConnection | null>(null)
+  // 本地统计 PC：房主开始共享后即使没有观众也提供 outbound-rtp 统计
+  // 无观众时 SharingStatusPanel 的 pc 不为 null，可显示帧率/分辨率/码率等
+  const [localStatsPc, setLocalStatsPc] =
+    useState<RTCPeerConnection | null>(null)
   const [viewerIds, setViewerIds] = useState<string[]>([])
 
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
@@ -80,13 +103,54 @@ export function useHostPeerConnections(
   const pendingIceCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(
     new Map()
   )
+  const localStatsPcRef = useRef<RTCPeerConnection | null>(null)
 
   const updateConnectionCount = useCallback(() => {
     setConnectionCount(peerConnectionsRef.current.size)
   }, [])
 
+  // 本地统计 PC：房主开始共享后立即创建，无需观众连接即可提供 outbound-rtp 统计
+  // 编码器在 track 加入 sender 后即开始工作，pc.getStats() 可获取帧率/分辨率/码率
+  // 有观众连接后 statsPeerConnection 切换为观众 PC（含 RTT/丢包等完整统计）
+  // 所有观众离开后回退到本地统计 PC，保持面板数据不中断
+  useEffect(() => {
+    if (!localStream) {
+      // stream 清空时清理本地统计 PC
+      if (localStatsPcRef.current) {
+        localStatsPcRef.current.close()
+        localStatsPcRef.current = null
+        setLocalStatsPc(null)
+      }
+      return
+    }
+
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    localStatsPcRef.current = pc
+
+    // 添加视频 track 到 sender，触发编码器工作
+    const videoTrack = localStream.getVideoTracks()[0]
+    if (videoTrack) {
+      pc.addTrack(videoTrack, localStream)
+    }
+    // 添加音频 track（系统音频）
+    localStream.getAudioTracks().forEach((track) => {
+      pc.addTrack(track, localStream)
+    })
+
+    setLocalStatsPc(pc)
+    console.log('[useHostPeerConnections] local stats PC created')
+
+    return () => {
+      pc.close()
+      if (localStatsPcRef.current === pc) {
+        localStatsPcRef.current = null
+        setLocalStatsPc(null)
+      }
+    }
+  }, [localStream])
+
   const createPeerConnection = useCallback(
-    (viewerSocketId: string) => {
+    async (viewerSocketId: string) => {
       if (!localStream) {
         message.warning('尚未开始屏幕共享')
         return null
@@ -111,7 +175,53 @@ export function useHostPeerConnections(
       setStatsPeerConnection((prev) => prev ?? pc)
       updateConnectionCount()
 
-      localStream.getTracks().forEach((track) => {
+      // 使用 addTransceiver 替代 addTrack，以便设置 codec 偏好
+      // 优先使用 H.264（硬件加速，高帧率下性能更稳定），避免 VP8 在 60fps 下 CPU 开销过大
+      const videoTrack = localStream.getVideoTracks()[0]
+      if (videoTrack) {
+        const transceiver = pc.addTransceiver(videoTrack, {
+          streams: [localStream],
+          direction: 'sendonly',
+        })
+        // 设置 codec 偏好：H.264 优先（高帧率硬件编码性能最佳），VP9 次之，VP8 最后
+        try {
+          const caps = RTCRtpSender.getCapabilities('video')
+          if (caps && caps.codecs.length > 0) {
+            const preferredCodecs = caps.codecs
+              .filter((c) => {
+                const lower = c.mimeType.toLowerCase()
+                // 优先 H.264 高帧率硬件编码；VP9 作为备选（屏幕内容编码工具）
+                return lower === 'video/h264' || lower === 'video/vp9'
+              })
+              .sort((a, b) => {
+                // H.264 排最前
+                const aH264 = a.mimeType.toLowerCase() === 'video/h264'
+                const bH264 = b.mimeType.toLowerCase() === 'video/h264'
+                if (aH264 && !bH264) return -1
+                if (!aH264 && bH264) return 1
+                return 0
+              })
+            // 将未被选中的 codec 追加到末尾，保持兼容性
+            const otherCodecs = caps.codecs.filter(
+              (c) =>
+                c.mimeType.toLowerCase() !== 'video/h264' &&
+                c.mimeType.toLowerCase() !== 'video/vp9'
+            )
+            transceiver.setCodecPreferences([
+              ...preferredCodecs,
+              ...otherCodecs,
+            ])
+          }
+        } catch (err) {
+          console.warn(
+            '[useHostPeerConnections] setCodecPreferences error:',
+            err
+          )
+        }
+      }
+
+      // 音频 track 使用 addTrack
+      localStream.getAudioTracks().forEach((track) => {
         pc.addTrack(track, localStream)
       })
 
@@ -121,16 +231,41 @@ export function useHostPeerConnections(
         })
       }
 
-      // 配置编码器：优先保持帧率、设置最大帧率与码率，使视频流更像直播推流
+      // 配置编码器：根据帧率自动调整最低码率，避免码率不足导致编码器降帧
+      // 参考 WebRTC 官方推荐码率：
+      // - 1080p 30fps: 6-10 Mbps
+      // - 1080p 60fps: 14-20 Mbps
+      // 码率不足时编码器会优先丢帧来维持画质，degradationPreference='maintain-framerate'
+      // 可让编码器优先降画质而非降帧，但仍需保证最低码率
       const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video')
       if (videoSender) {
         try {
           const params = videoSender.getParameters()
-          if (!params.encodings) params.encodings = [{}]
-          params.encodings[0].maxBitrate = maxBitrateMbps * 1000 * 1000
+          if (!params.encodings || params.encodings.length === 0) {
+            params.encodings = [{}]
+          }
+          // 根据帧率计算推荐最低码率，用户设置值低于推荐值时自动提升
+          const recommendedMinBitrate = computeRecommendedBitrate(frameRate)
+          const userBitrate = maxBitrateMbps * 1000 * 1000
+          params.encodings[0].maxBitrate = Math.max(
+            userBitrate,
+            recommendedMinBitrate
+          )
           params.encodings[0].maxFramerate = frameRate
+          // maintain-framerate: 带宽不足时优先降低画质/分辨率，保持帧率
           params.degradationPreference = 'maintain-framerate'
-          void videoSender.setParameters(params)
+          await videoSender.setParameters(params)
+          console.log(
+            '[useHostPeerConnections] sender params set:',
+            'maxBitrate=',
+            params.encodings[0].maxBitrate,
+            'maxFramerate=',
+            params.encodings[0].maxFramerate,
+            'user=',
+            userBitrate,
+            'recommendedMin=',
+            recommendedMinBitrate
+          )
         } catch (err) {
           console.warn(
             '[useHostPeerConnections] set sender parameters error:',
@@ -169,7 +304,7 @@ export function useHostPeerConnections(
 
   const createAndSendOffer = useCallback(
     async (viewerSocketId: string) => {
-      const pc = createPeerConnection(viewerSocketId)
+      const pc = await createPeerConnection(viewerSocketId)
       if (!pc || !socket) return
 
       // 避免在 signalingState 非 stable 时重复创建 offer
@@ -247,8 +382,9 @@ export function useHostPeerConnections(
         updateConnectionCount()
         const nextPc = peerConnectionsRef.current.values().next().value as
           RTCPeerConnection | undefined
+        // 观众离开后：切换到下一个观众 PC，或回退到本地统计 PC
         setStatsPeerConnection((prev) =>
-          prev === pc ? (nextPc ?? null) : prev
+          prev === pc ? (nextPc ?? localStatsPcRef.current) : prev
         )
       }
       readyViewerIdsRef.current.delete(data.viewerSocketId)
@@ -326,13 +462,23 @@ export function useHostPeerConnections(
     peerConnectionsRef.current.clear()
     readyViewerIdsRef.current.clear()
     pendingIceCandidatesRef.current.clear()
+    // 清理本地统计 PC
+    if (localStatsPcRef.current) {
+      localStatsPcRef.current.close()
+      localStatsPcRef.current = null
+      setLocalStatsPc(null)
+    }
     setStatsPeerConnection(null)
     setConnectionCount(0)
   }, [])
 
+  // 优先使用观众 PC（含 RTT/丢包等完整统计），无观众时回退到本地统计 PC
+  // 这样房主开始共享后即使没有观众，SharingStatusPanel 也能显示帧率/分辨率/码率
+  const effectiveStatsPc = statsPeerConnection ?? localStatsPc
+
   return {
     connectionCount,
-    statsPeerConnection,
+    statsPeerConnection: effectiveStatsPc,
     viewerIds,
     handleSignalAnswer,
     handleSignalIceCandidate,

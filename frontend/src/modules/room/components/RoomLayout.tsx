@@ -574,8 +574,16 @@ export function RoomLayout({
                     ))}
                   </div>
                 </div>
-                {/* 桌面端：三列平铺 */}
-                <div className="hidden h-[340px] gap-4 lg:grid lg:grid-cols-3">
+                {/* 桌面端：根据卡片数量动态列数，避免少量卡片时宽度过小。
+                    1 张 → 单列占满；2 张 → 两列；3 张及以上 → 三列。 */}
+                <div
+                  className={cn(
+                    'hidden h-[340px] gap-4 lg:grid',
+                    controlChildren.length === 1 && 'lg:grid-cols-1',
+                    controlChildren.length === 2 && 'lg:grid-cols-2',
+                    controlChildren.length >= 3 && 'lg:grid-cols-3'
+                  )}
+                >
                   {controlChildren.map((child, index) => (
                     <Fragment key={index}>{child}</Fragment>
                   ))}
