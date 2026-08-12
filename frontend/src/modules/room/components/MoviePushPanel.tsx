@@ -77,7 +77,7 @@ import {
   resolveServerFile,
   buildServerFileProxyUrl,
 } from '@/modules/server-files/serverFilesApi'
-import type { MediaFormat } from '@/lib/mediaFormat'
+import { detectMediaFormat, type MediaFormat } from '@/lib/mediaFormat'
 import {
   fetchAllMounts,
   type UnionMount,
@@ -105,7 +105,7 @@ const ALL_SOURCE_OPTIONS: {
   rootOnly?: boolean
 }[] = [
   { value: 'bilibili', label: '哔哩哔哩' },
-  { value: 'mp4', label: 'MP4 直链' },
+  { value: 'mp4', label: '视频直链' },
   { value: 'webdav', label: 'WebDAV' },
   { value: 'ftp', label: 'FTP' },
   { value: 'openlist', label: 'OpenList' },
@@ -894,7 +894,15 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         }
         const movieUrl = url.trim()
         const title = extractTitleFromUrl(movieUrl)
-        await addMovie(roomId, { url: movieUrl, title, source: 'mp4' })
+        // 自动检测媒体格式：m3u8 -> hls，mp4/mkv/webm -> 对应格式
+        // 后端存储 format 字段，播放时据此选择 HLS/Direct 引擎
+        const detectedFormat = detectMediaFormat(movieUrl)
+        await addMovie(roomId, {
+          url: movieUrl,
+          title,
+          source: 'mp4',
+          format: detectedFormat !== 'unknown' ? detectedFormat : undefined,
+        })
         resetForm()
         message.success('影片已添加')
       } else if (sourceType === 'webdav' || sourceType === 'openlist') {
