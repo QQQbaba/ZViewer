@@ -7,6 +7,21 @@ import type {
 import type { BilibiliVideoPage } from '@/modules/bilibili/types'
 import type { MediaFormat } from '@/lib/mediaFormat'
 import type { WatchTogetherState } from '@/modules/sync-playback/types'
+import type { AniSubsEpisode } from '@/modules/anisubs/types'
+
+/**
+ * ani-subs 番剧源元数据。
+ *
+ * 存储 sourceId 和 episode 信息，用于播放时重新解析播放地址。
+ * 仅 sourceType='anime' 时有值。
+ * ani-subs 的视频地址通常带 token/signature，短期有效，
+ * 刷新后需要通过 sourceMeta 重新解析，而非使用过期的 URL。
+ */
+export interface AniSubsSourceMeta {
+  sourceId: string
+  episode: AniSubsEpisode
+  originalTitle: string
+}
 
 function jsonHeaders(): Record<string, string> {
   return { 'Content-Type': 'application/json' }
@@ -68,6 +83,11 @@ export interface Movie {
   pages?: BilibiliVideoPage[]
   /** 当前播放的分集序号（从 1 开始，默认 1） */
   currentPage?: number
+  /**
+   * ani-subs 番剧源元数据。
+   * 仅 sourceType='anime' 时有值，用于播放时重新解析播放地址。
+   */
+  sourceMeta?: AniSubsSourceMeta | null
 }
 
 export interface MovieDto {
@@ -91,6 +111,8 @@ export interface MovieDto {
   path: string | null
   username: string | null
   directLink: boolean
+  /** ani-subs 番剧源元数据（仅 source='anime' 时有值） */
+  sourceMeta: AniSubsSourceMeta | null
   order: number
   createdAt: string
   updatedAt: string
@@ -119,6 +141,7 @@ export function mapDtoToMovie(dto: MovieDto): Movie {
     acceptQuality: dto.acceptQuality ?? undefined,
     pages: dto.pages ?? undefined,
     currentPage: dto.currentPage ?? undefined,
+    sourceMeta: dto.sourceMeta ?? null,
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
   }
@@ -300,6 +323,7 @@ interface RoomState {
       username?: string
       password?: string
       directLink?: boolean
+      sourceMeta?: AniSubsSourceMeta | null
     }
   ) => Promise<void>
   updateMovie: (
@@ -325,6 +349,7 @@ interface RoomState {
       username?: string
       password?: string
       directLink?: boolean
+      sourceMeta?: AniSubsSourceMeta | null
     }
   ) => Promise<void>
   removeMovie: (roomId: string, movieId: number) => Promise<void>

@@ -120,6 +120,19 @@ export class Movie {
   @Column({ type: 'boolean', default: false })
   directLink!: boolean;
 
+  /**
+   * ani-subs 番剧源元数据（JSON 字符串）。
+   *
+   * 存储 sourceId 和 episode 信息，用于播放时重新解析播放地址。
+   * ani-subs 的视频地址通常带 token/signature，短期有效，
+   * 刷新后需要通过 sourceMeta 重新解析，而非使用过期的 URL。
+   *
+   * 结构：{ sourceId: string, episode: AniSubsEpisode, originalTitle: string }
+   * 仅 source='anime' 时有值，其他源类型为 null。
+   */
+  @Column({ type: 'text', nullable: true })
+  sourceMeta!: string | null;
+
   @Column({ type: 'integer', default: 0 })
   order!: number;
 

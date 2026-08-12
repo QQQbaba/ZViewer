@@ -424,12 +424,20 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         })
 
         // 2. 同时异步加入影片列表（不阻塞预览播放）
-        //    后端广播 movie-list 后由 useWatchTogether 自动刷新本地缓存
+        //    ani-subs 的视频地址带 token/signature，短期有效，
+        //    因此存储 sourceMeta 元数据而非解析后的 URL。
+        //    播放时（含刷新恢复）通过 sourceMeta 重新解析获取最新地址。
+        //    url 字段存储 sourceId 作为标识，便于调试和日志追踪。
         void addMovie(roomId, {
-          url: finalUrl,
+          url: `anisubs://${sourceId}/${episode.id}`,
           title,
           source: 'anime',
           format: resolved.format,
+          sourceMeta: {
+            sourceId,
+            episode,
+            originalTitle: title,
+          },
         })
           .then(() => fetchMovies(roomId))
           .catch((err) => {

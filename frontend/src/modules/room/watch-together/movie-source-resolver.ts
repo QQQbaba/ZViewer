@@ -17,6 +17,11 @@ import { useCliAgentStore } from '@/store/cliAgentStore'
 import { getBilibiliParseOptions } from '@/modules/bilibili/parseOptions'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import type { QualityOption } from './resolveSource'
+import {
+  resolveAniSubsEpisode,
+  buildAniSubsProxyUrl,
+  needsAniSubsProxy,
+} from '@/modules/anisubs'
 
 /** 房主刷新恢复时由后端返回的最近一次播放状态（源相关子集） */
 export interface RecoverySourceInfo {
@@ -201,11 +206,51 @@ export async function resolveBilibiliOnline(
 }
 
 /**
+ * 在线解析 ani-subs 番剧源播放地址。
+ *
+ * ani-subs 的视频地址通常带 token/signature，短期有效（几分钟到几小时）。
+ * 每次播放（含刷新恢复）都通过 sourceMeta 重新解析，确保使用最新地址。
+ *
+ * 防盗链处理：若返回 headers（Referer/UA 等），构建后端代理 URL。
+ * 浏览器无法为 video.src 设置 Referer/UA，必须走代理。
+ *
+ * @throws sourceMeta 缺失或解析失败时抛错
+ */
+export async function resolveAnimeOnline(
+  movie: Movie,
+): Promise<ResolvedMovieSource> {
+  if (!movie.sourceMeta) {
+    throw new Error('番剧源元数据缺失，请重新添加该番剧')
+  }
+
+  const { sourceId, episode } = movie.sourceMeta
+  const resolved = await resolveAniSubsEpisode(sourceId, episode)
+
+  // 防盗链处理：若返回 headers，走后端代理 URL
+  const finalUrl = needsAniSubsProxy(resolved.url, resolved.headers)
+    ? buildAniSubsProxyUrl(resolved.url, resolved.headers)
+    : resolved.url
+
+  return {
+    sourceUrl: finalUrl,
+    audioUrl: undefined,
+    format: resolved.format as MediaFormat | undefined,
+    videoCodec: undefined,
+    audioCodec: undefined,
+    duration: movie.duration ?? 0,
+    headers: undefined,
+    reusedRecoveryUrl: false,
+  }
+}
+
+/**
  * 解析影片的播放源。
  *
- * B站 地址带有快速过期的签名（通常 1-2 小时）。房主刷新恢复时优先复用
- * recovery 中的旧 sourceUrl（刚过期几秒到几分钟，大概率仍有效），避免一次
- * 在线解析的网络往返；仅在 attach 失败时才由调用方回退重新解析。
+ * - B站 源：在线解析 playurl（带解析进度回调）；
+ * - ani-subs 番剧源：通过 sourceMeta 在线解析（URL 短期有效，每次重新解析）；
+ * - 房主刷新恢复（recovery）且旧 URL 可用：优先复用旧 URL，
+ *   标记 reusedRecoveryUrl，attach 失败时由调用方回退到在线解析；
+ * - 其他源（webdav / ftp / url 等）：直接使用影片记录字段。
  *
  * @throws 在线解析失败且无旧 URL 可复用时抛错（调用方决定提示与重试策略）
  */
@@ -242,6 +287,12 @@ export async function resolveMovieSource({
       }
     }
     return resolveBilibiliOnline(movie, onProgress)
+  }
+
+  if (sourceType === 'anime') {
+    // ani-subs 番剧源：URL 短期有效，每次播放都通过 sourceMeta 重新解析
+    // recovery 场景下也强制重新解析，因为旧 URL 大概率已过期
+    return resolveAnimeOnline(movie)
   }
 
   // 非 B站 源：直接使用影片记录字段（Movie 类型不含 headers，见 roomStore）
