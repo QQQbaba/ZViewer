@@ -1,11 +1,11 @@
-import { useEffect, useRef, useMemo } from 'react'
+import { useEffect, useRef } from 'react'
 import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { RequireAuth } from '@/components/RequireAuth'
 import { useAuthStore, type User } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
-import { apiFetch, resetSessionExpired, saveAuthTokens, getCustomApiUrl } from '@/lib/api'
+import { apiFetch, resetSessionExpired, saveAuthTokens } from '@/lib/api'
 import { reconnectSocket } from '@/hooks/useSocket'
 import { useBackendHealth } from '@/hooks/useBackendHealth'
 import { ReturnToRoomButton } from '@/components/ReturnToRoomButton'
@@ -16,8 +16,6 @@ import AdminPage from '@/pages/AdminPage'
 import ProfilePage from '@/pages/ProfilePage'
 import RoomsListPage from '@/pages/RoomsListPage'
 import JoinByRoomIdPage from '@/pages/JoinByRoomIdPage'
-import ServerConfigPage from '@/pages/ServerConfigPage'
-import BilibiliAccountPage from '@/pages/BilibiliAccountPage'
 
 function AuthInitializer() {
   const { setUser, setAutoLoginStatus } = useAuthStore()
@@ -199,13 +197,6 @@ function App() {
     void fetchSettings()
   }, [fetchSettings])
 
-  // Android 专用：未配置服务器地址时显示配置页
-  const hasServerUrl = useMemo(() => !!getCustomApiUrl(), [])
-
-  if (!hasServerUrl) {
-    return <ServerConfigPage />
-  }
-
   return (
     <Layout>
       <ThemeProvider>
@@ -255,14 +246,6 @@ function App() {
             element={
               <RequireAuth>
                 <JoinByRoomIdPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/bilibili-account"
-            element={
-              <RequireAuth>
-                <BilibiliAccountPage />
               </RequireAuth>
             }
           />

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   Palette,
   LogOut,
@@ -72,11 +72,9 @@ import { Switch } from '@/components/ui/Switch'
 import { BackgroundSettingsPanel } from '@/components/BackgroundSettingsPanel'
 import { PRESET_SEEDS } from '@/lib/themes'
 import { cn } from '@/lib/utils'
-import { Capacitor } from '@capacitor/core'
 
 export function Header() {
   const { user, logout, isAuthenticated } = useAuthStore()
-  const navigate = useNavigate()
   const {
     isDark,
     setDark,
@@ -321,11 +319,6 @@ export function Header() {
           <button
             type="button"
             onClick={() => {
-              // Android (Capacitor) 原生端：跳转到 B站 账号管理页
-              if (Capacitor.isNativePlatform()) {
-                navigate('/bilibili-account')
-                return
-              }
               const ua = navigator.userAgent.toLowerCase()
               const isWindows = /windows nt|win32|win64/.test(ua)
               const isMac = /macintosh|mac os x/.test(ua)
@@ -353,7 +346,7 @@ export function Header() {
             style={{
               border: '1px solid var(--md-sys-color-outline)',
             }}
-            title={Capacitor.isNativePlatform() ? 'B站 账号管理' : '下载 CLI 高画质代理'}
+            title="下载 CLI 高画质代理"
           >
             <Download className="w-4 h-4" />
           </button>

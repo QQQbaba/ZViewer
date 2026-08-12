@@ -18,18 +18,6 @@ import { mseEngine } from './engines/mse-engine'
 import { hlsEngine } from './engines/hls-engine'
 import { flvEngine } from './engines/flv-engine'
 import { directEngine } from './engines/direct-engine'
-import { isCliProxyUrl } from './services/url-proxy'
-
-/** 是否运行在 Capacitor 原生（Android/iOS）环境 */
-function isNativePlatform(): boolean {
-  try {
-    // 动态读取 Capacitor 全局，避免在纯 Web 环境抛错
-    const cap = (globalThis as any).Capacitor
-    return !!(cap && cap.isNativePlatform && cap.isNativePlatform())
-  } catch {
-    return false
-  }
-}
 
 /** 所有引擎实例（单例，无需重复创建） */
 const ENGINES: Record<EngineType, PlayerEngine> = {
@@ -45,10 +33,6 @@ export function selectEngine(source: PlayerSource): PlayerEngine {
   // DASH 源或含独立音频轨 → dash.js 引擎
   // （自研 MSE 引擎暂时禁用，统一由 dash.js 处理双轨合并）
   if (source.format === 'dash' || source.audioUrl) {
-    // Android 原生 + CLI 代理模式：MSE 引擎（dash.js 预下载 init segment 会 403）
-    if (isNativePlatform() && isCliProxyUrl(source.url)) {
-      return ENGINES.mse
-    }
     return ENGINES.dash
   }
   if (source.format === 'hls') {
