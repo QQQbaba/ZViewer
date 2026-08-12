@@ -70,17 +70,44 @@ export const imageProxyRouter = Router().get(
 // 媒体代理：绕过浏览器对 B站 CDN 的 Referer/UA 限制。
 // 前端 fetch 携带凭证（credentials: 'include'），CORS 必须由全局中间件
 // 反射 Origin + credentials，不能手动设置 ACAO:*（否则浏览器拒绝响应）。
+//
+// 对于非 B站 URL（如第三方 m3u8 直链），不添加 B站 Referer/Origin，
+// 避免因错误的 Referer 导致源服务器拒绝请求。
 const router = Router().get(
   '/proxy',
   async (req: AuthenticatedRequest, res: Response) => {
     const trimmedUrl = readUrlParam(req, res);
     if (!trimmedUrl) return;
 
+    // 根据 URL 域名判断是否为 B站 CDN，非 B站 URL 不添加 B站 headers
+    let isBilibiliUrl = false;
+    try {
+      const parsed = new URL(trimmedUrl);
+      isBilibiliUrl =
+        /(?:bilibili|bilivideo|hdslb|mcdn|upos|bstatic|akamaized|pili-video|boss-pgc)/i.test(
+          parsed.hostname,
+        );
+    } catch {
+      // URL 解析失败时不添加 B站 headers
+    }
+
+    // 根据 URL 后缀推断 Content-Type（m3u8 / ts 分片等）
+    const lowerUrl = trimmedUrl.toLowerCase();
+    let defaultContentType = 'video/mp4';
+    if (lowerUrl.includes('.m3u8')) {
+      defaultContentType = 'application/vnd.apple.mpegurl';
+    } else if (lowerUrl.includes('.ts')) {
+      // HLS ts 分片，通常无需显式 Content-Type，MPEG-TS 流
+      defaultContentType = 'video/mp2t';
+    }
+
     await proxyHttpUpstream(req, res, {
       url: trimmedUrl,
-      headers: { referer: BILIBILI_REFERER, origin: BILIBILI_REFERER },
+      headers: isBilibiliUrl
+        ? { referer: BILIBILI_REFERER, origin: BILIBILI_REFERER }
+        : {},
       cors: 'global',
-      defaultContentType: 'video/mp4',
+      defaultContentType,
       logTag: 'stream',
       errorMessage: '代理媒体失败',
     });

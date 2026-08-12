@@ -198,8 +198,11 @@ export function clearAuthCookies(req: Request, res: Response): void {
   res.clearCookie('refresh_token', { path: '/', sameSite, secure });
 }
 
-/** 从 cookie 或 Authorization Header 读取 access token。 */
+/** 从 cookie、Authorization Header 或查询参数读取 access token。 */
 export function extractAccessToken(req: Request): string | undefined {
+  // 从查询参数读取（用于 hls.js 等无法设置 header 的场景）
+  const queryToken = req.query?.token;
+  if (typeof queryToken === 'string' && queryToken) return queryToken;
   // 优先从 cookie 读取（前端 fetch credentials: 'include' 自动携带）
   const cookieToken = req.cookies?.access_token;
   if (typeof cookieToken === 'string' && cookieToken) return cookieToken;

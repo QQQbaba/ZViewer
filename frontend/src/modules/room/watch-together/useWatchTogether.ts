@@ -733,10 +733,13 @@ export function useWatchTogether({
   // 观众端完全依赖 handleState 接收房主广播的 sourceUrl/audioUrl 进行 MSE attach，
   // 不独立解析（避免与房主状态冲突导致黑屏）。
   useEffect(() => {
+    ;(window as unknown as { __wtDebug?: unknown[] }).__wtDebug = (window as unknown as { __wtDebug?: unknown[] }).__wtDebug || []
+    ;(window as unknown as { __wtDebug?: unknown[] }).__wtDebug!.push({ step: 'effect', currentMovieId, isHost: isHostRef.current, moviesCount: movies.length })
     if (!currentMovieId) return
     if (!isHostRef.current) return
     const movie = movies.find((m) => m.id === currentMovieId)
     if (!movie) return
+    ;(window as unknown as { __wtDebug?: unknown[] }).__wtDebug!.push({ step: 'movieFound', id: movie.id, sourceType: movie.sourceType, format: movie.format, url: movie.url?.slice(0, 80) })
 
     // 避免 movies 列表刷新时重复加载同一部影片
     if (

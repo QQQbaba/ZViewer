@@ -88,9 +88,19 @@ export function isCliProxyUrl(url: string): boolean {
  * 后端代理会自动添加 Referer/User-Agent 头绕过防盗链，并透传 Range 请求支持断点续传。
  *
  * 使用相对路径确保 video 标签的请求通过 Nginx 代理转发到后端（同域请求携带 cookie）。
+ *
+ * 认证：hls.js 等场景无法设置 Authorization header，因此将 access token
+ * 附加到查询参数中，后端 extractAccessToken 会优先从查询参数读取。
  */
 export function buildProxyUrl(url: string): string {
-  return `/api/stream/proxy?url=${encodeURIComponent(url)}`
+  let token = ''
+  try {
+    token = localStorage.getItem('zviewer-access-token') || ''
+  } catch {
+    // SSR 或非浏览器环境忽略
+  }
+  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : ''
+  return `/api/stream/proxy?url=${encodeURIComponent(url)}${tokenParam}`
 }
 
 /**
