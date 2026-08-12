@@ -25,6 +25,7 @@ import {
   onFullscreenChange,
 } from '@/lib/fullscreen-utils'
 import type { SharingMode } from '@/modules/screen-sharing/hooks/useConnectionStats'
+import type { P2PStatus } from '@/modules/p2p/types'
 
 interface RoomLayoutProps {
   /** 房间 ID，用于模式切换 socket 事件 */
@@ -50,9 +51,15 @@ interface RoomLayoutProps {
   sharingRole?: 'sender' | 'receiver'
   /** 共享模式标签，默认服务器中转 */
   sharingMode?: SharingMode
-  /** P2P 直连开关当前状态（Task 6.3 接入） */
+  /** P2P 直连是否已启用（来自页面层 useP2PTunnel） */
   p2pEnabled?: boolean
-  /** P2P 直连开关回调（Task 6.3 接入） */
+  /** P2P 隧道 PC（P2P 启用时用于统计展示） */
+  p2pPC?: RTCPeerConnection | null
+  /** P2P 协商状态 */
+  p2pStatus?: P2PStatus
+  /** 是否已触发回退到服务器中转 */
+  p2pFallbackNotice?: boolean
+  /** P2P 直连开关回调 */
   onToggleP2P?: (enabled: boolean) => void
   /**
    * 显式覆盖共享状态判断。
@@ -86,7 +93,10 @@ export function RoomLayout({
   peerConnection = null,
   sharingRole = 'sender',
   sharingMode = 'server-relay',
-  p2pEnabled,
+  p2pEnabled = false,
+  p2pPC = null,
+  p2pStatus = 'idle',
+  p2pFallbackNotice = false,
   onToggleP2P,
   sharingActive,
   webFullscreen = false,
@@ -236,7 +246,10 @@ export function RoomLayout({
       mode={sharingRole}
       sharingMode={sharingMode}
       p2pEnabled={p2pEnabled}
-      onToggleP2P={onToggleP2P}
+      p2pPC={p2pPC}
+      p2pStatus={p2pStatus}
+      fallbackNotice={p2pFallbackNotice}
+      onToggleP2P={onToggleP2P ?? (() => {})}
     />
   ) : (
     rightPanel

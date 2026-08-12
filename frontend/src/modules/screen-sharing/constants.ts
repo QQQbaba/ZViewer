@@ -1,6 +1,7 @@
-export const ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-]
+import { ICE_SERVERS } from '@/modules/p2p/constants'
+
+// 重新导出以保持 screen-sharing 模块内向后兼容
+export { ICE_SERVERS }
 
 export const FRAME_RATE_OPTIONS = [
   { label: '15 fps', value: 15 },

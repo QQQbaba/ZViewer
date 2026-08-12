@@ -1,5 +1,3 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
 import {
   Activity,
   Cpu,
@@ -9,32 +7,33 @@ import {
   Signal,
   Waypoints,
 } from 'lucide-react'
-import { Switch } from '@/components/ui/Switch'
 import { Tag } from '@/components/ui/Tag'
 import { Text, Paragraph } from '@/components/ui/Typography'
-import { message } from '@/components/ui/message'
+import { Switch } from '@/components/ui/Switch'
 import { cn } from '@/lib/utils'
-import { useSocket } from '@/hooks/useSocket'
 import {
   useConnectionStats,
   type SharingMode,
 } from '@/modules/screen-sharing/hooks/useConnectionStats'
-import { useP2PTunnel, type P2PStatus } from '@/hooks/useP2PTunnel'
+import type { P2PStatus } from '@/modules/p2p/types'
 
 export interface SharingStatusPanelProps {
+  /** 服务器中转 PC（P2P 未启用时使用） */
   pc: RTCPeerConnection | null
   /** 当前角色：发送端 / 接收端 */
   mode: 'sender' | 'receiver'
-  /** 共享模式标签：服务器中转 / P2P 直连 */
+  /** 基础共享模式标签：服务器中转 / P2P 直连 */
   sharingMode: SharingMode
-  /** P2P 直连开关当前状态（外部同步覆盖，例如来自 p2p-mode-change 广播） */
-  p2pEnabled?: boolean
-  /** P2P 直连开关回调（Task 6.3 接入，本任务预留） */
-  onToggleP2P?: (enabled: boolean) => void
-  /** 本地媒体流（sender 模式下用于 P2P 轨道注入） */
-  localStream?: MediaStream | null
-  /** 远端成员 socketId（sender 模式下指定 P2P 对端；receiver 可由 offer 自动填充） */
-  remotePeerId?: string | null
+  /** P2P 直连是否已启用（来自外部 useP2PTunnel） */
+  p2pEnabled: boolean
+  /** P2P 隧道 PC（P2P 启用时切换展示） */
+  p2pPC: RTCPeerConnection | null
+  /** P2P 协商状态 */
+  p2pStatus: P2PStatus
+  /** 是否已触发回退到服务器中转 */
+  fallbackNotice: boolean
+  /** P2P 直连开关回调 */
+  onToggleP2P: (enabled: boolean) => void
 }
 
 interface StatRowProps {
@@ -98,7 +97,6 @@ function getSharingModeLabel(mode: SharingMode): string {
 }
 
 function getSharingModeColor(): 'success' | 'primary' {
-  // P2P 直连用 success 突出低延迟直连；服务器中转用 primary
   return 'primary'
 }
 
@@ -174,87 +172,17 @@ export function SharingStatusPanel({
   pc,
   mode,
   sharingMode,
-  p2pEnabled: p2pEnabledProp,
+  p2pEnabled,
+  p2pPC,
+  p2pStatus,
+  fallbackNotice,
   onToggleP2P,
-  localStream,
-  remotePeerId,
 }: SharingStatusPanelProps) {
-  const { socket } = useSocket()
-  const { roomId: routeRoomId } = useParams<{ roomId?: string }>()
-  const roomId = routeRoomId ?? ''
-
-  const [fallbackNotice, setFallbackNotice] = useState(false)
-
-  const handleP2PStatusChange = useMemo(
-    () => (status: P2PStatus, didFallback: boolean) => {
-      if (didFallback) {
-        setFallbackNotice(true)
-        message.warning('已回退到服务器中转')
-      } else if (status === 'connected') {
-        setFallbackNotice(false)
-        message.success('P2P 直连已建立')
-      } else if (status === 'connecting') {
-        setFallbackNotice(false)
-      }
-    },
-    []
-  )
-
-  const {
-    enableP2P,
-    disableP2P,
-    p2pEnabled: p2pTunnelEnabled,
-    p2pPC,
-    p2pStatus,
-  } = useP2PTunnel({
-    socket,
-    roomId,
-    localStream,
-    role: mode,
-    remotePeerId,
-    onStatusChange: handleP2PStatusChange,
-  })
-
-  // 房主切换 P2P 时：触发 hook 的 enable/disable，并广播状态给房间成员
-  const handleToggleP2P = (enabled: boolean) => {
-    if (enabled) {
-      void enableP2P()
-    } else {
-      disableP2P()
-    }
-    onToggleP2P?.(enabled)
-    if (socket && roomId) {
-      socket.emit('p2p-mode-change', { roomId, enabled })
-    }
-  }
-
-  // 接收房间内 P2P 模式广播：同步开关状态（房主以外的成员仅同步显示）
-  useEffect(() => {
-    if (!socket) return
-    const handleP2PModeChange = (data: {
-      roomId: string
-      enabled: boolean
-    }) => {
-      if (!roomId || data.roomId !== roomId) return
-      if (data.enabled) {
-        void enableP2P()
-      } else {
-        disableP2P()
-      }
-    }
-    socket.on('p2p-mode-change', handleP2PModeChange)
-    return () => {
-      socket.off('p2p-mode-change', handleP2PModeChange)
-    }
-  }, [socket, roomId, enableP2P, disableP2P])
-
-  // 真正展示给统计面板的 PC：P2P 启用时切换为 p2pPC
-  const displayPC = p2pTunnelEnabled ? p2pPC : pc
-  const displaySharingMode: SharingMode = p2pTunnelEnabled ? 'p2p' : sharingMode
-
-  // SharingStatusPanel 内部始终使用 server 模式（旧 ConnectionMode 用于 tag 展示），
-  // 真正的共享模式由 sharingMode 字段表达
+  // P2P 启用时切换为 p2pPC，否则使用服务器中转 PC
+  const displayPC = p2pEnabled ? p2pPC : pc
+  const displaySharingMode: SharingMode = p2pEnabled ? 'p2p' : sharingMode
   const legacyMode = displaySharingMode === 'p2p' ? 'direct' : 'server'
+
   const { stats, formatBitrate, formatPacketLoss } = useConnectionStats(
     displayPC,
     legacyMode,
@@ -271,10 +199,7 @@ export function SharingStatusPanel({
   const codecText = stats.codec ?? '-'
   const rttText = stats.rtt === null ? '-' : `${stats.rtt} ms`
   const jitterText = stats.jitter === null ? '-' : `${stats.jitter} ms`
-
   const bitrateHint = mode === 'sender' ? '上行码率' : '下行码率'
-
-  const switchChecked = p2pTunnelEnabled || p2pEnabledProp || false
 
   return (
     <div className="glass-card flex h-full w-full flex-col gap-3 rounded-2xl p-4">
@@ -301,12 +226,12 @@ export function SharingStatusPanel({
         <Tag color={getConnectionStateColor(stats.connectionState)}>
           {getConnectionStateText(stats.connectionState)}
         </Tag>
-        {p2pTunnelEnabled && (
+        {p2pEnabled && (
           <Tag color={getP2PStatusColor(p2pStatus)}>
             {getP2PStatusLabel(p2pStatus)}
           </Tag>
         )}
-        {fallbackNotice && !p2pTunnelEnabled && (
+        {fallbackNotice && !p2pEnabled && (
           <Tag color="warning">已回退到服务器中转</Tag>
         )}
       </div>
@@ -328,7 +253,7 @@ export function SharingStatusPanel({
           <div className="leading-tight">
             <Paragraph className="m-0 text-xs font-medium">P2P 直连</Paragraph>
             <Text type="secondary" className="text-[10px] opacity-70">
-              {p2pTunnelEnabled
+              {p2pEnabled
                 ? getP2PStatusLabel(p2pStatus)
                 : fallbackNotice
                   ? '已回退到服务器中转'
@@ -337,8 +262,8 @@ export function SharingStatusPanel({
           </div>
         </div>
         <Switch
-          checked={switchChecked}
-          onChange={(e) => handleToggleP2P(e.target.checked)}
+          checked={p2pEnabled}
+          onChange={(e) => onToggleP2P(e.target.checked)}
         />
       </div>
 

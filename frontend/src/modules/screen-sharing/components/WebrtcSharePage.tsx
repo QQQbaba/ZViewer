@@ -26,6 +26,8 @@ import { message } from '@/components/ui/message'
 import { useLocalMediaStream } from '../hooks/useLocalMediaStream'
 import { useHostPeerConnections } from '../hooks/useHostPeerConnections'
 import { useSignalingChannel } from '../hooks/useSignalingChannel'
+import { useP2PTunnel } from '@/modules/p2p'
+import type { P2PStatus } from '@/modules/p2p/types'
 import { MediaSettingsCard } from './MediaSettingsCard'
 import { ShareControlsBar } from './ShareControlsBar'
 import { SharingPausedOverlay } from './SharingPausedOverlay'
@@ -35,16 +37,29 @@ import type {
   RoomModeChangedPayload,
 } from '../types'
 
+/** P2P 状态快照，由 WebrtcSharePage 提升到 RoomPage 供 RoomLayout 使用 */
+export interface P2PStateSnapshot {
+  enabled: boolean
+  pc: RTCPeerConnection | null
+  status: P2PStatus
+  fallbackNotice: boolean
+  /** 切换 P2P 开关（enabled=true 启用，false 禁用） */
+  toggle: (enabled: boolean) => void
+}
+
 interface WebrtcSharePageProps {
   className?: string
   style?: React.CSSProperties
   onStatsPeerConnectionChange?: (pc: RTCPeerConnection | null) => void
+  /** P2P 状态变化回调，提升到 RoomPage 供 RoomLayout 的 SharingStatusPanel 使用 */
+  onP2PStateChange?: (state: P2PStateSnapshot) => void
 }
 
 function WebrtcSharePage({
   className,
   style,
   onStatsPeerConnectionChange,
+  onP2PStateChange,
 }: WebrtcSharePageProps) {
   const navigate = useNavigate()
   const { socket, connected } = useSocket()
@@ -235,6 +250,87 @@ function WebrtcSharePage({
     onRoomClosed: handleRoomClosed,
     onRoomModeChanged: handleRoomModeChanged,
   })
+
+  // P2P 直连隧道（房主为 sender，使用第一个观众作为对端）
+  const [p2pFallbackNotice, setP2pFallbackNotice] = useState(false)
+  const firstViewerId = viewerIds[0] ?? null
+  const {
+    enableP2P,
+    disableP2P,
+    p2pEnabled,
+    p2pPC,
+    p2pStatus,
+  } = useP2PTunnel({
+    socket,
+    roomId: currentRoomId,
+    localStream: stream,
+    role: 'sender',
+    remotePeerId: firstViewerId,
+    onStatusChange: (status, didFallback) => {
+      if (didFallback) {
+        setP2pFallbackNotice(true)
+        message.warning('P2P 连接失败，已回退到服务器中转')
+      } else if (status === 'connected') {
+        setP2pFallbackNotice(false)
+        message.success('P2P 直连已建立')
+      } else if (status === 'connecting') {
+        setP2pFallbackNotice(false)
+      }
+    },
+  })
+
+  // 房主切换 P2P 开关：触发 hook enable/disable，并广播给房间内其他成员
+  const handleToggleP2P = useCallback(
+    (enabled: boolean) => {
+      if (enabled) {
+        void enableP2P()
+      } else {
+        disableP2P()
+      }
+      if (socket && currentRoomId) {
+        socket.emit('p2p-mode-change', { roomId: currentRoomId, enabled })
+      }
+    },
+    [enableP2P, disableP2P, socket, currentRoomId]
+  )
+
+  // 接收房间内 P2P 模式广播（观众端同步开关状态）
+  useEffect(() => {
+    if (!socket) return
+    const handleP2PModeChange = (data: {
+      roomId: string
+      enabled: boolean
+    }) => {
+      if (!currentRoomId || data.roomId !== currentRoomId) return
+      if (data.enabled) {
+        void enableP2P()
+      } else {
+        disableP2P()
+      }
+    }
+    socket.on('p2p-mode-change', handleP2PModeChange)
+    return () => {
+      socket.off('p2p-mode-change', handleP2PModeChange)
+    }
+  }, [socket, currentRoomId, enableP2P, disableP2P])
+
+  // 上报 P2P 状态到父组件（含 toggle 方法，供 SharingStatusPanel 开关调用）
+  useEffect(() => {
+    onP2PStateChange?.({
+      enabled: p2pEnabled,
+      pc: p2pPC,
+      status: p2pStatus,
+      fallbackNotice: p2pFallbackNotice,
+      toggle: handleToggleP2P,
+    })
+  }, [
+    p2pEnabled,
+    p2pPC,
+    p2pStatus,
+    p2pFallbackNotice,
+    handleToggleP2P,
+    onP2PStateChange,
+  ])
 
   useEffect(() => {
     onStatsPeerConnectionChange?.(statsPeerConnection)

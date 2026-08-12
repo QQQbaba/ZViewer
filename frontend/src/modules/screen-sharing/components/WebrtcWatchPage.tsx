@@ -31,10 +31,21 @@ import { CommentPanel } from '@/components/CommentPanel'
 import { RoomLayout } from '@/modules/room/components/RoomLayout'
 import { RoomInfoPanel } from '@/modules/room/components/RoomInfoPanel'
 import { useControlBarAutoHide } from '@/hooks/useControlBarAutoHide'
+import { useP2PTunnel } from '@/modules/p2p'
+import type { P2PStatus } from '@/modules/p2p/types'
 import { useViewerPeerConnection } from '../hooks/useViewerPeerConnection'
 import { useSignalingChannel } from '../hooks/useSignalingChannel'
 import { RemoteVideoPlayer } from './RemoteVideoPlayer'
 import { WatchControlsBar } from './WatchControlsBar'
+
+/** 观众端 P2P 状态快照 */
+export interface ViewerP2PStateSnapshot {
+  enabled: boolean
+  pc: RTCPeerConnection | null
+  status: P2PStatus
+  fallbackNotice: boolean
+  toggle: (enabled: boolean) => void
+}
 
 declare global {
   interface HTMLVideoElement {
@@ -118,6 +129,62 @@ function WebrtcWatchPage({ roomId }: WebrtcWatchPageProps) {
     onSignalOffer: handleSignalOffer,
     onSignalIceCandidate: handleSignalIceCandidate,
   })
+
+  // P2P 直连隧道（观众为 receiver，remotePeerId 由 offer 自动填充）
+  const [p2pFallbackNotice, setP2pFallbackNotice] = useState(false)
+  const {
+    enableP2P,
+    disableP2P,
+    p2pEnabled,
+    p2pPC,
+    p2pStatus,
+  } = useP2PTunnel({
+    socket,
+    roomId,
+    role: 'receiver',
+    onStatusChange: (status, didFallback) => {
+      if (didFallback) {
+        setP2pFallbackNotice(true)
+        message.warning('P2P 连接失败，已回退到服务器中转')
+      } else if (status === 'connected') {
+        setP2pFallbackNotice(false)
+        message.success('P2P 直连已建立')
+      } else if (status === 'connecting') {
+        setP2pFallbackNotice(false)
+      }
+    },
+  })
+
+  // 观众接收房主 P2P 模式广播：同步开关状态
+  useEffect(() => {
+    if (!socket) return
+    const handleP2PModeChange = (data: {
+      roomId: string
+      enabled: boolean
+    }) => {
+      if (data.roomId !== roomId) return
+      if (data.enabled) {
+        void enableP2P()
+      } else {
+        disableP2P()
+      }
+    }
+    socket.on('p2p-mode-change', handleP2PModeChange)
+    return () => {
+      socket.off('p2p-mode-change', handleP2PModeChange)
+    }
+  }, [socket, roomId, enableP2P, disableP2P])
+
+  const handleToggleP2P = useCallback(
+    (enabled: boolean) => {
+      if (enabled) {
+        void enableP2P()
+      } else {
+        disableP2P()
+      }
+    },
+    [enableP2P, disableP2P]
+  )
 
   // WebRTC 控制栏自动隐藏（逻辑仿照 WatchTogetherCore）
   const webrtcControlBarVisible = useControlBarAutoHide(webrtcStageRef)
@@ -326,6 +393,11 @@ function WebrtcWatchPage({ roomId }: WebrtcWatchPageProps) {
       peerConnection={pc}
       sharingRole="receiver"
       sharingActive
+      p2pEnabled={p2pEnabled}
+      p2pPC={p2pPC}
+      p2pStatus={p2pStatus}
+      p2pFallbackNotice={p2pFallbackNotice}
+      onToggleP2P={handleToggleP2P}
       webFullscreen={isWebFullscreen}
       rightPanel={
         <CommentPanel socket={socket} roomId={roomId} commentsOnly />

@@ -21,19 +21,24 @@ import { RequestNotification } from '@/components/ui/RequestNotification'
 import type { RequestNotificationItem } from '@/components/ui/RequestNotification'
 import { useShareMethod } from '../hooks/useShareMethod'
 import { useStreamStatus } from '../hooks/useStreamStatus'
-import WebrtcSharePage from './WebrtcSharePage'
+import WebrtcSharePage, {
+  type P2PStateSnapshot,
+} from './WebrtcSharePage'
 import { StreamPushPage } from './StreamPushPage'
 
 interface SharePageProps {
   className?: string
   style?: React.CSSProperties
   onStatsPeerConnectionChange?: (pc: RTCPeerConnection | null) => void
+  /** P2P 状态变化回调，透传到 RoomPage 供 RoomLayout 使用 */
+  onP2PStateChange?: (state: P2PStateSnapshot) => void
 }
 
 function SharePage({
   className,
   style,
   onStatsPeerConnectionChange,
+  onP2PStateChange,
 }: SharePageProps) {
   const { socket } = useSocket()
   const setIsSharing = useRoomStore((state) => state.setIsSharing)
@@ -164,6 +169,7 @@ function SharePage({
           className={className}
           style={style}
           onStatsPeerConnectionChange={onStatsPeerConnectionChange}
+          onP2PStateChange={onP2PStateChange}
         />
       )}
 

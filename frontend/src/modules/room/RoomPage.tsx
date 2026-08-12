@@ -15,6 +15,7 @@ import { MoviePushPanel } from '@/modules/room/components/MoviePushPanel'
 import { CommentPanel } from '@/components/CommentPanel'
 import { Spinner } from '@/components/ui/Spinner'
 import { SharePage, WatchPage } from '@/modules/screen-sharing'
+import type { P2PStateSnapshot } from '@/modules/screen-sharing/components/WebrtcSharePage'
 import type { MediaFormat } from '@/lib/mediaFormat'
 
 import type { RoomMode } from '@/store/roomStore'
@@ -114,6 +115,14 @@ function RoomPage() {
   const [hostPeerConnection, setHostPeerConnection] =
     useState<RTCPeerConnection | null>(null)
   const [isWebFullscreen, setIsWebFullscreen] = useState(false)
+  // 房主 P2P 状态（由 WebrtcSharePage 提升）
+  const [p2pState, setP2pState] = useState<P2PStateSnapshot>({
+    enabled: false,
+    pc: null,
+    status: 'idle',
+    fallbackNotice: false,
+    toggle: () => {},
+  })
 
   // 将 URL 中的房间号同步到 store，确保刷新或直接访问房间链接时
   // MoviePushPanel 等依赖 store.roomId 的组件能正常工作。
@@ -329,7 +338,10 @@ function RoomPage() {
           </div>
         )
       ) : (
-        <SharePage onStatsPeerConnectionChange={setHostPeerConnection} />
+        <SharePage
+          onStatsPeerConnectionChange={setHostPeerConnection}
+          onP2PStateChange={setP2pState}
+        />
       )
 
     const controls =
@@ -357,6 +369,11 @@ function RoomPage() {
             />
           }
           peerConnection={hostPeerConnection}
+          p2pEnabled={p2pState.enabled}
+          p2pPC={p2pState.pc}
+          p2pStatus={p2pState.status}
+          p2pFallbackNotice={p2pState.fallbackNotice}
+          onToggleP2P={p2pState.toggle}
           controls={controls}
           controlLabels={
             mode === 'screen-share'

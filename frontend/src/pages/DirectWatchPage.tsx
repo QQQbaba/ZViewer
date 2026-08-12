@@ -18,8 +18,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { message } from '@/components/ui/message'
 import { ConnectionStatsPanel } from '@/modules/screen-sharing/components/ConnectionStatsPanel'
 import { LiveArtPlayer } from '@/modules/art-player'
-
-const ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }]
+import { ICE_SERVERS } from '@/modules/p2p/constants'
 
 interface DirectSignalData {
   sdp: RTCSessionDescriptionInit
