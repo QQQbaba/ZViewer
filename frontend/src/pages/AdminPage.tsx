@@ -940,7 +940,7 @@ export default function AdminPage() {
         <div className="mb-6 flex flex-wrap items-center justify-center gap-2">
           <button
             onClick={() => setActiveTab('users')}
-            className="relative flex items-center gap-2 rounded-[var(--md-sys-shape-corner)] px-4 py-2 text-sm font-medium transition-all"
+            className="relative flex items-center gap-2 rounded-[var(--md-sys-shape-corner)] px-3 py-2 text-sm font-medium transition-all sm:px-4"
             style={{
               backgroundColor:
                 activeTab === 'users'
@@ -954,11 +954,11 @@ export default function AdminPage() {
             }}
           >
             <Users className="h-4 w-4" />
-            用户管理
+            <span className="hidden sm:inline">用户管理</span>
           </button>
           <button
             onClick={() => setActiveTab('rooms')}
-            className="relative flex items-center gap-2 rounded-[var(--md-sys-shape-corner)] px-4 py-2 text-sm font-medium transition-all"
+            className="relative flex items-center gap-2 rounded-[var(--md-sys-shape-corner)] px-3 py-2 text-sm font-medium transition-all sm:px-4"
             style={{
               backgroundColor:
                 activeTab === 'rooms'
@@ -972,11 +972,11 @@ export default function AdminPage() {
             }}
           >
             <LayoutDashboard className="h-4 w-4" />
-            房间管理
+            <span className="hidden sm:inline">房间管理</span>
           </button>
           <button
             onClick={() => setActiveTab('settings')}
-            className="relative flex items-center gap-2 rounded-[var(--md-sys-shape-corner)] px-4 py-2 text-sm font-medium transition-all"
+            className="relative flex items-center gap-2 rounded-[var(--md-sys-shape-corner)] px-3 py-2 text-sm font-medium transition-all sm:px-4"
             style={{
               backgroundColor:
                 activeTab === 'settings'
@@ -990,12 +990,12 @@ export default function AdminPage() {
             }}
           >
             <Settings className="h-4 w-4" />
-            基础设置
+            <span className="hidden sm:inline">基础设置</span>
           </button>
         </div>
 
-        <Space justify="between" align="center" className="mb-4">
-          <Text type="secondary">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Text type="secondary" className="shrink-0">
             {activeTab === 'users'
               ? `共 ${users.length} 位用户`
               : activeTab === 'rooms'
@@ -1003,11 +1003,11 @@ export default function AdminPage() {
                 : ''}
           </Text>
           {activeTab !== 'settings' && (
-            <Space>
+            <div className="flex flex-wrap items-center gap-2">
               {activeTab === 'rooms' && (
                 <>
                   <div
-                    className="inline-flex rounded-[var(--md-sys-shape-corner)] border p-0.5"
+                    className="inline-flex shrink-0 rounded-[var(--md-sys-shape-corner)] border p-0.5"
                     style={{ borderColor: 'var(--md-sys-color-outline)' }}
                   >
                     <button
@@ -1064,8 +1064,12 @@ export default function AdminPage() {
                       icon={<Trash2 className="h-4 w-4" />}
                       onClick={() => setBatchDeleteConfirm(true)}
                       disabled={batchDeleteLoading}
+                      title={`删除已选 ${selectedRoomIds.size} 个房间`}
                     >
-                      删除已选 ({selectedRoomIds.size})
+                      <span className="sm:hidden">已选 {selectedRoomIds.size}</span>
+                      <span className="hidden sm:inline">
+                        删除已选 ({selectedRoomIds.size})
+                      </span>
                     </Button>
                   )}
                   <Button
@@ -1074,8 +1078,10 @@ export default function AdminPage() {
                     icon={<Trash2 className="h-4 w-4" />}
                     onClick={() => setDeleteAllConfirm(true)}
                     disabled={deleteAllLoading}
+                    title="删除所有房间"
                   >
-                    删除所有房间
+                    <span className="sm:hidden">全部</span>
+                    <span className="hidden sm:inline">删除所有房间</span>
                   </Button>
                   <Button
                     variant="danger"
@@ -1083,8 +1089,10 @@ export default function AdminPage() {
                     icon={<Trash2 className="h-4 w-4" />}
                     onClick={() => setCleanupConfirm(true)}
                     disabled={cleanupLoading}
+                    title="一键移除无人使用的房间"
                   >
-                    一键移除无人使用的房间
+                    <span className="sm:hidden">清理</span>
+                    <span className="hidden sm:inline">一键移除无人使用的房间</span>
                   </Button>
                 </>
               )}
@@ -1094,12 +1102,14 @@ export default function AdminPage() {
                 icon={<RefreshCw className="h-4 w-4" />}
                 onClick={loadData}
                 disabled={loading}
+                title="刷新"
               >
-                刷新
+                <span className="sm:hidden">刷新</span>
+                <span className="hidden sm:inline">刷新</span>
               </Button>
-            </Space>
+            </div>
           )}
-        </Space>
+        </div>
 
         {loading ? (
           <div className="py-12">
@@ -1269,8 +1279,8 @@ export default function AdminPage() {
                 <div
                   className={
                     roomViewMode === 'tile'
-                      ? 'col-span-full flex items-center gap-3 rounded-[var(--md-sys-shape-corner)] border px-4 py-2'
-                      : 'flex items-center gap-3 rounded-[var(--md-sys-shape-corner)] border px-4 py-2'
+                      ? 'col-span-full flex items-center gap-3 rounded-[var(--md-sys-shape-corner)] border px-3 py-2 sm:px-4'
+                      : 'flex items-center gap-3 rounded-[var(--md-sys-shape-corner)] border px-3 py-2 sm:px-4'
                   }
                   style={{
                     borderColor: 'var(--md-sys-color-outline)',
@@ -1279,7 +1289,7 @@ export default function AdminPage() {
                 >
                   <input
                     type="checkbox"
-                    className="h-4 w-4 cursor-pointer accent-[var(--md-sys-color-primary)]"
+                    className="h-4 w-4 shrink-0 cursor-pointer accent-[var(--md-sys-color-primary)]"
                     checked={
                       rooms.length > 0 &&
                       rooms.every((r) => selectedRoomIds.has(r.roomId))
@@ -1320,7 +1330,7 @@ export default function AdminPage() {
                     <div className="flex min-w-0 flex-1 items-start gap-3">
                       <input
                         type="checkbox"
-                        className="mt-1 h-4 w-4 cursor-pointer accent-[var(--md-sys-color-primary)]"
+                        className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-[var(--md-sys-color-primary)]"
                         checked={selectedRoomIds.has(room.roomId)}
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) => {
@@ -1343,7 +1353,19 @@ export default function AdminPage() {
                           >
                             {room.name || room.roomId}
                           </span>
-                          <Text type="secondary" className="text-xs">
+                          <Text
+                            type="secondary"
+                            className="text-xs sm:hidden"
+                            title={room.roomId}
+                          >
+                            {room.roomId.length > 8
+                              ? `${room.roomId.slice(0, 8)}…`
+                              : room.roomId}
+                          </Text>
+                          <Text
+                            type="secondary"
+                            className="hidden text-xs sm:inline"
+                          >
                             {room.roomId}
                           </Text>
                           {room.status === 'active' ? (
@@ -1365,22 +1387,15 @@ export default function AdminPage() {
                         </div>
                         <Text
                           type="secondary"
-                          className={
-                            roomViewMode === 'tile'
-                              ? 'mt-2 text-xs leading-relaxed'
-                              : 'text-xs'
-                          }
+                          className="mt-1 text-xs leading-relaxed sm:mt-0"
                         >
                           观众 {room.viewerCount} / {room.maxViewers}
-                          {roomViewMode === 'tile' ? <br /> : ' · '}分享端
-                          {room.sharerOnline ? '在线' : '离线'}
-                          {roomViewMode === 'tile' ? <br /> : ' · '}创建于{' '}
-                          {formatDate(room.createdAt)}
-                          {roomViewMode === 'tile' ? (
-                            <br />
-                          ) : (
-                            ' · '
-                          )}最后访问 {formatDate(room.lastAccessedAt)}
+                          {roomViewMode === 'tile' ? <br /> : ' · '}
+                          分享端{room.sharerOnline ? '在线' : '离线'}
+                          {roomViewMode === 'tile' ? <br /> : ' · '}
+                          创建于 {formatDate(room.createdAt)}
+                          {roomViewMode === 'tile' ? <br /> : ' · '}
+                          最后访问 {formatDate(room.lastAccessedAt)}
                         </Text>
                       </div>
                     </div>
@@ -1388,7 +1403,7 @@ export default function AdminPage() {
                       variant="danger"
                       size="sm"
                       className={
-                        roomViewMode === 'tile' ? 'mt-auto w-full' : ''
+                        roomViewMode === 'tile' ? 'mt-auto w-full' : 'w-full sm:w-auto'
                       }
                       icon={<Power className="h-4 w-4" />}
                       onClick={(e) => {
