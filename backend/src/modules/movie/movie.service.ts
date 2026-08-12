@@ -58,6 +58,51 @@ function parseAcceptQualityArray(
 }
 
 /**
+ * 将 ani-subs 番剧源元数据规范化为 JSON 字符串存储。
+ *
+ * 前端传入 sourceMeta 对象（{ sourceId, episode, originalTitle }），
+ * 序列化为 JSON 字符串存入 DB。
+ * - 对象：JSON.stringify 后返回
+ * - string：视为已序列化的 JSON，trim 后返回
+ * - null/undefined/空对象：返回 null
+ */
+function normalizeSourceMeta(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'string') return value.trim() || null;
+  if (typeof value === 'object') {
+    try {
+      const json = JSON.stringify(value);
+      // 空对象或 "{}" 视为无值
+      return json === '{}' ? null : json;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * 将 DB 中的 sourceMeta JSON 字符串解析为对象。
+ *
+ * DB 中存储为 JSON 字符串（如 '{"sourceId":"xxx","episode":{...},"originalTitle":"..."}'），
+ * 前端期望对象形式。解析失败时返回 null。
+ */
+function parseSourceMeta(
+  value: string | null | undefined,
+): MovieDto['sourceMeta'] {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && 'sourceId' in parsed) {
+      return parsed as NonNullable<MovieDto['sourceMeta']>;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 将任意值规范化为 pages 字符串（JSON 序列化）。
  *
  * - string：trim 后返回（空字符串返回 null，视为已序列化的 JSON）
@@ -176,6 +221,7 @@ export class MovieService {
       username: typeof data.username === 'string' ? data.username : null,
       password: typeof data.password === 'string' ? data.password : null,
       directLink: data.directLink === true,
+      sourceMeta: normalizeSourceMeta(data.sourceMeta),
       order: nextOrder,
     });
 
@@ -233,6 +279,7 @@ export class MovieService {
     if (typeof data.username === 'string') update.username = data.username;
     if (typeof data.password === 'string') update.password = data.password;
     if (typeof data.directLink === 'boolean') update.directLink = data.directLink;
+    if (data.sourceMeta !== undefined) update.sourceMeta = normalizeSourceMeta(data.sourceMeta);
 
     await repo.update({ id: movie.id }, update);
 
@@ -304,6 +351,7 @@ export class MovieService {
       username: movie.username,
       password: movie.password,
       directLink: movie.directLink,
+      sourceMeta: parseSourceMeta(movie.sourceMeta),
       order: movie.order,
       createdAt: movie.createdAt.toISOString(),
       updatedAt: movie.updatedAt.toISOString(),

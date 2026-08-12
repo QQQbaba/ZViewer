@@ -798,18 +798,33 @@ export function useWatchTogether({
         }
       }
 
-      // 1. 解析播放源（B站 在线解析 / recovery 复用旧 URL / 其他源直用记录字段）
+      // 1. 解析播放源
+      // - B站：在线解析 playurl（带解析进度 UI），recovery 时优先复用旧 URL
+      // - ani-subs 番剧源：通过 sourceMeta 在线解析（URL 短期有效，每次重新解析）
+      // - 其他源：直接使用影片记录字段
       let resolved: ResolvedMovieSource
       try {
-        const willResolveOnline =
-          sourceType === 'bilibili' && !(isRecovery && recovery?.sourceUrl)
-        resolved = willResolveOnline
-          ? await resolveOnline()
-          : await resolveMovieSource({
+        if (sourceType === 'bilibili' && !(isRecovery && recovery?.sourceUrl)) {
+          resolved = await resolveOnline()
+        } else if (sourceType === 'anime') {
+          // ani-subs 番剧源：每次播放都通过 sourceMeta 重新解析
+          setIsResolving(true)
+          try {
+            resolved = await resolveMovieSource({
               movie,
               sourceType,
-              recovery: isRecovery ? recovery : null,
+              recovery: null, // anime 源不复用 recovery URL（短期有效）
             })
+          } finally {
+            setIsResolving(false)
+          }
+        } else {
+          resolved = await resolveMovieSource({
+            movie,
+            sourceType,
+            recovery: isRecovery ? recovery : null,
+          })
+        }
       } catch (err) {
         console.error('[useWatchTogether] 解析视频源失败:', err)
         message.error(err instanceof Error ? err.message : '视频源解析失败')

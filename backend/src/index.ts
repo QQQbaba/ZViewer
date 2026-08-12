@@ -479,6 +479,15 @@ async function bootstrap() {
   // 启动播放记忆定时广播服务（房主断开期间由服务器接管广播）
   playbackBroadcasterService.start(io);
 
+  // 定期持久化 sql.js 数据库（每 30 秒），防止进程异常退出时数据丢失
+  const dbSaveInterval = setInterval(async () => {
+    try {
+      await (AppDataSource.driver as import('typeorm/driver/sqljs/SqljsDriver').SqljsDriver).autoSave();
+    } catch {
+      // autoSave 静默失败，下次重试
+    }
+  }, 30000);
+
   io.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id}`);
     socketRegistry.registerAll(socket, io);
@@ -511,11 +520,19 @@ async function bootstrap() {
 
   // 主进程退出时停止 NMS 并刷新脏数据
   const gracefulShutdown = async () => {
+    // 停止定期保存
+    clearInterval(dbSaveInterval);
     // 先刷新所有脏数据到 DB，避免最多 2s 的播放进度丢失
     try {
       await playbackMemoryService.flushAllDirty();
     } catch (err) {
       console.error('[flushAllDirty] error:', err);
+    }
+    // 显式保存 sql.js 数据库（autoSave 为异步，进程退出前须确保写盘）
+    try {
+      await (AppDataSource.driver as import('typeorm/driver/sqljs/SqljsDriver').SqljsDriver).autoSave();
+    } catch (err) {
+      console.error('[sql.js] autoSave error:', err);
     }
     try {
       stopNms();
