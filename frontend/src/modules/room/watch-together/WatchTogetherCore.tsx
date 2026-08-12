@@ -125,11 +125,14 @@ export function WatchTogetherCore({
   )
   const currentMovieId = useRoomStore((state) => state.currentMovieId)
   // 当前影片的 directLink 标记，用于统计信息中显示"直链/服务器中转"
-  const currentMovieDirectLink = useRoomStore(
-    (state) =>
-      state.movies.find((m) => m.id === state.currentMovieId)?.directLink ??
-      false
-  )
+  // mp4 直链视频（sourceType='mp4'）实际走浏览器直连源服务器（resolveProxyUrl 返回原 URL），
+  // 应显示为"直链"；挂载源（webdav/openlist 等）根据 directLink 字段判断。
+  const currentMovieDirectLink = useRoomStore((state) => {
+    const m = state.movies.find((mv) => mv.id === state.currentMovieId)
+    if (!m) return false
+    if (m.sourceType === 'mp4') return true
+    return m.directLink ?? false
+  })
   // 当前影片的源类型，用于判断是否支持自动搜索字幕
   const currentMovieSourceType = useRoomStore(
     (state) =>
