@@ -30,12 +30,9 @@ import {
   formatKBytes,
 } from '@/modules/player/services/p2p-stats-store'
 import { useCliAgent } from '@/hooks/useCliAgent'
-import { useCliAgentStore } from '@/store/cliAgentStore'
 import { getApiUrl } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
-import { Capacitor } from '@capacitor/core'
-import { startProxy, stopProxy } from '@/lib/zviewer-plugin'
 
 export interface BilibiliParseSettingsProps {
   /** 影片 ID，配置按此 key 独立存储 */
@@ -56,11 +53,6 @@ export function BilibiliParseSettings({
   const { bufferMode, p2pEnabled, cliEnabled } =
     useBilibiliParsePreferences(movieId)
   const cliAgent = useCliAgent(roomId)
-  // Android (Capacitor) 原生：本地代理状态
-  const isNative = Capacitor.isNativePlatform()
-  const [nativeProxyRunning, setNativeProxyRunning] = useState(false)
-  // 合并外部 CLI 与 Android 原生代理：Android 上用原生代理，桌面用外部 CLI
-  const cliAvailable = isNative ? nativeProxyRunning : cliAgent.available
   const triggerReloadBilibili = useRoomStore(
     (state) => state.triggerReloadBilibili
   )
@@ -71,7 +63,7 @@ export function BilibiliParseSettings({
   const watchTogetherBufferMode = useRoomStore(
     (state) => state.watchTogether.bufferMode
   )
-  const cliUnavailable = cliEnabled && !cliAvailable
+  const cliUnavailable = cliEnabled && !cliAgent.available
   const dashDisabled = useSystemSettingsStore((s) => s.dashDisabled)
   // 服务器端 DASH 禁用时，CLI 未启用的影片强制 MP4 且不可切换
   const dashLocked = dashDisabled && !cliEnabled
@@ -136,73 +128,51 @@ export function BilibiliParseSettings({
     [movieId, isHost, isCurrentMovie, triggerReloadBilibili]
   )
 
-  const handleCliChange = async (next: boolean) => {
-    const current = getBilibiliParseOptions(movieId)
-    if (next) {
-      // Android 原生端：启动本地代理
-      if (isNative) {
-        try {
-          const { baseUrl } = await startProxy()
-          setNativeProxyRunning(true)
-          // 将原生代理注入 cliAgentStore，供 movie-source-resolver 使用
-          useCliAgentStore.getState().setAgents([
-            {
-              socketId: 'native-android-proxy',
-              // 注意：resolveBilibiliViaCli 期望 proxyUrl 是基础地址（无 /proxy?url= 后缀），
-              // 它会拼接 /resolve 和 /proxy?url=。baseUrl 形如 http://127.0.0.1:{port}/proxy?url=，
-              // 需截取到 :{port} 作为 proxyUrl。
-              proxyUrl: baseUrl.split('/proxy?url=')[0],
-              agent: 'zviewer-android',
-              version: 'android',
-            },
-          ])
-        } catch (e) {
-          console.warn('[CLI] 启动 Android 本地代理失败:', e)
-          return
-        }
+  const handleCliChange = useCallback(
+    (next: boolean) => {
+      const current = getBilibiliParseOptions(movieId)
+      if (next) {
+        setBilibiliParseOptions(movieId, {
+          cliEnabled: true,
+          p2pEnabled: false,
+          preferMp4: false,
+          cliPrevPreferMp4: current.preferMp4,
+        })
+      } else {
+        setBilibiliParseOptions(movieId, {
+          cliEnabled: false,
+          p2pEnabled: undefined,
+          preferMp4: current.cliPrevPreferMp4 ?? true,
+          cliPrevPreferMp4: undefined,
+        })
       }
-      setBilibiliParseOptions(movieId, {
-        cliEnabled: true,
-        p2pEnabled: false,
-        preferMp4: false,
-        cliPrevPreferMp4: current.preferMp4,
-      })
-    } else {
-      // Android 原生端：停止本地代理
-      if (isNative) {
-        try {
-          await stopProxy()
-        } catch (e) {
-          console.warn('[CLI] 停止 Android 本地代理失败:', e)
-        }
-        setNativeProxyRunning(false)
-        useCliAgentStore.getState().setAgents([])
+      if (!isCurrentMovie) return
+      if (next && !cliAgent.available) {
+        setPendingCliReload(true)
+        return
       }
-      setBilibiliParseOptions(movieId, {
-        cliEnabled: false,
-        p2pEnabled: undefined,
-        preferMp4: current.cliPrevPreferMp4 ?? true,
-        cliPrevPreferMp4: undefined,
-      })
-    }
-    if (!isCurrentMovie) return
-    if (next && !cliAvailable) {
-      setPendingCliReload(true)
-      return
-    }
-    if (isHost) {
-      triggerReloadBilibili()
-    } else {
-      triggerViewerSourceReload()
-    }
-  }
+      if (isHost) {
+        triggerReloadBilibili()
+      } else {
+        triggerViewerSourceReload()
+      }
+    },
+    [
+      movieId,
+      isHost,
+      isCurrentMovie,
+      cliAgent.available,
+      triggerReloadBilibili,
+      triggerViewerSourceReload,
+    ]
+  )
 
   // React Compiler 严格规则误报：本 effect 根据外部 CLI 代理状态变化触发重载，
   // setPendingCliReload 用于清除一次性等待标记，不存在级联渲染问题。
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!pendingCliReload) return
-    if (cliAvailable) {
+    if (cliAgent.available) {
       setPendingCliReload(false)
       if (isHost) {
         triggerReloadBilibili()
@@ -217,7 +187,7 @@ export function BilibiliParseSettings({
     return () => clearTimeout(timer)
   }, [
     pendingCliReload,
-    cliAvailable,
+    cliAgent.available,
     isHost,
     triggerReloadBilibili,
     triggerViewerSourceReload,
@@ -225,16 +195,11 @@ export function BilibiliParseSettings({
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleOpenCliSetup = useCallback(() => {
-    if (isNative) {
-      // Android 原生端：跳转到 B站 账号管理页
-      window.location.href = '/bilibili-account'
-      return
-    }
     const url = new URL('http://127.0.0.1:9333/')
     url.searchParams.set('server', getApiUrl())
     url.searchParams.set('room', roomId)
     window.open(url.toString(), '_blank', 'noopener,noreferrer')
-  }, [roomId, isNative])
+  }, [roomId])
 
   const renderSegmented = (
     value: boolean,
@@ -332,7 +297,7 @@ export function BilibiliParseSettings({
               {dashLocked
                 ? '服务器已禁用 DASH 模式，当前强制 MP4 播放'
                 : cliEnabled
-                  ? cliAvailable
+                  ? cliAgent.available
                     ? 'CLI 代理已启用，当前使用本地 DASH 高画质解析（不再自动降级 MP4）'
                     : '已启用 CLI 但未连接本地代理，请先启动本地 zcontrol-cli 以播放 DASH 高画质'
                   : displayPreferMp4
@@ -511,12 +476,12 @@ export function BilibiliParseSettings({
                 <span
                   className="inline-block h-1 w-1 rounded-full"
                   style={{
-                    backgroundColor: cliAvailable
+                    backgroundColor: cliAgent.available
                       ? 'var(--md-sys-color-tertiary)'
                       : displayCliEnabled
                         ? 'var(--md-sys-color-error)'
                         : 'var(--md-sys-color-outline)',
-                    boxShadow: cliAvailable
+                    boxShadow: cliAgent.available
                       ? '0 0 4px var(--md-sys-color-tertiary)'
                       : 'none',
                   }}
@@ -525,7 +490,7 @@ export function BilibiliParseSettings({
                   className="text-[9px] font-medium"
                   style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
                 >
-                  {cliAvailable
+                  {cliAgent.available
                     ? '已连接'
                     : displayCliEnabled
                       ? '未连接'
@@ -579,7 +544,7 @@ export function BilibiliParseSettings({
               {displayP2pEnabled
                 ? 'P2P 与 CLI 代理互斥，请关闭 P2P 后再启用 CLI'
                 : displayCliEnabled
-                  ? cliAvailable
+                  ? cliAgent.available
                     ? `已连接本地代理 ${cliAgent.agentInfo?.version ?? ''}`
                     : '已启用但未检测到本地 CLI，请先启动本地代理以播放 DASH 高画质'
                   : '使用本地 zcontrol-cli 获取大会员等高画质'}
