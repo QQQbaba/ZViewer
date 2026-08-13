@@ -96,6 +96,8 @@ router.post(
         status: isOpen ? 'active' : 'pending',
       });
       await userRepository().save(user);
+      // 显式触发 autoSave，确保注册用户立即写入文件
+      await (AppDataSource.driver as import('typeorm/driver/sqljs/SqljsDriver').SqljsDriver).autoSave().catch(() => {});
 
       if (isOpen) {
         const tokens = generateTokens(user.id, user.role, user.username);
@@ -361,6 +363,8 @@ router.patch(
 
       user.passwordHash = bcrypt.hashSync(newPassword, 10);
       await userRepo.save(user);
+      // 显式触发 autoSave，确保密码修改立即写入文件
+      await (AppDataSource.driver as import('typeorm/driver/sqljs/SqljsDriver').SqljsDriver).autoSave().catch(() => {});
       res.json({ success: true, message: '密码修改成功' });
     } catch (err) {
       console.error('change password error:', err);
@@ -405,6 +409,8 @@ router.patch(
 
       user.username = trimmedUsername;
       await userRepo.save(user);
+      // 显式触发 autoSave，确保用户名修改立即写入文件
+      await (AppDataSource.driver as import('typeorm/driver/sqljs/SqljsDriver').SqljsDriver).autoSave().catch(() => {});
       res.json({
         success: true,
         message: '用户名修改成功',

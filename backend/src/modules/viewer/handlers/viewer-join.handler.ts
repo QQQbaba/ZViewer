@@ -15,6 +15,7 @@ import type { Server as SocketIOServer, Socket } from 'socket.io';
 import bcrypt from 'bcryptjs';
 import { AppDataSource } from '../../../data-source';
 import { Room } from '../../../entities/Room';
+import type { RoomMode } from '../../../entities/Room';
 import type { UserRole } from '../../../entities/User';
 import {
   type AckCallback,
@@ -23,6 +24,7 @@ import {
 } from '../../socket';
 import { roomSessionService } from '../../room/room-session.service';
 import { roomStateService } from '../../room/room-state.service';
+import { movieBroadcasterService } from '../../movie';
 import type { ViewerJoinedPayload } from '../../shared';
 import { viewerListService } from '../viewer-list.service';
 
@@ -56,6 +58,41 @@ export class ViewerJoinHandler implements SocketEventHandler {
           }
           if (room.status !== 'active') {
             return safeAck(callback, { success: false, message: '房间已关闭' });
+          }
+
+          // 房主身份恢复：如果当前用户是房间 owner（room.ownerUserId === userId），
+          // 说明房主关闭标签页/浏览器后重新进入，sessionStorage 标记已丢失，
+          // 走了观众流程。此时应自动恢复房主身份，而非创建 viewer session。
+          const userId: number = socket.data.userId;
+          if (
+            userId != null &&
+            room.ownerUserId === userId &&
+            role !== 'guest'
+          ) {
+            // 调用 registerHost 恢复 sharer session（复用旧 session 或创建新的）
+            const hostResult = await roomSessionService.registerHost(
+              socket,
+              payload.roomId,
+              userId,
+            );
+            if (hostResult) {
+              // 同步 DB 影片到 roomStateService 并广播 movie-list
+              await movieBroadcasterService.broadcastMovieList(io, payload.roomId);
+              // 通知房间内其他成员房主已就绪
+              socket.to(payload.roomId).emit('sharer-ready', { roomId: payload.roomId });
+
+              return safeAck(callback, {
+                success: true,
+                message: '已恢复房主身份',
+                data: {
+                  mode: hostResult.mode as RoomMode,
+                  shareMethod: hostResult.shareMethod as 'webrtc' | 'stream-push',
+                  streamKey: hostResult.streamKey,
+                  isHost: true,
+                },
+              });
+            }
+            // registerHost 失败（房间状态异常等），继续走观众流程
           }
 
           // 密码校验：root 跳过；其他角色使用 bcrypt.compare
