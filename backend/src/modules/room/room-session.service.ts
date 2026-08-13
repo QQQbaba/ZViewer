@@ -48,8 +48,13 @@ export class RoomSessionService {
     const room = await roomRepo.findOneBy({ roomId, status: 'active' });
     if (!room) return null;
 
-    // 校验房主身份
-    if (room.ownerUserId !== userId) return null;
+    // 校验房主身份：ownerUserId 为 null 时（guest 创建的房间），允许任何非 guest 用户接管
+    if (room.ownerUserId !== null && room.ownerUserId !== userId) return null;
+
+    // 无 owner 的房间：设置当前用户为 owner
+    if (room.ownerUserId === null) {
+      await roomRepo.update({ roomId }, { ownerUserId: userId });
+    }
 
     // 取消重连定时器
     roomStateService.cancelReconnectTimer(roomId);

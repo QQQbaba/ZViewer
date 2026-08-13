@@ -60,14 +60,16 @@ export class ViewerJoinHandler implements SocketEventHandler {
             return safeAck(callback, { success: false, message: '房间已关闭' });
           }
 
-          // 房主身份恢复：如果当前用户是房间 owner（room.ownerUserId === userId），
+          // 房主身份恢复：如果当前用户是房间 owner 或房间无 owner 记录，
           // 说明房主关闭标签页/浏览器后重新进入，sessionStorage 标记已丢失，
           // 走了观众流程。此时应自动恢复房主身份，而非创建 viewer session。
           const userId: number = socket.data.userId;
+          const isRoomOwner = room.ownerUserId === userId;
+          const isOrphanRoom = room.ownerUserId === null && role !== 'guest';
           if (
             userId != null &&
-            room.ownerUserId === userId &&
-            role !== 'guest'
+            role !== 'guest' &&
+            (isRoomOwner || isOrphanRoom)
           ) {
             // 调用 registerHost 恢复 sharer session（复用旧 session 或创建新的）
             const hostResult = await roomSessionService.registerHost(
