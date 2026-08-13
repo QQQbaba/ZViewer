@@ -1,3 +1,4 @@
+import { stripPassword, extractErrorMessage } from '../modules/shared/mount-utils';
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../data-source';
 import { UserMount } from '../entities/UserMount';
@@ -21,11 +22,6 @@ const router = Router();
 
 const userMountRepository = () => AppDataSource.getRepository(UserMount);
 
-function stripPassword(mount: UserMount): Omit<UserMount, 'password'> {
-  const { password: _password, ...rest } = mount;
-  return rest;
-}
-
 function mountToParams(mount: UserMount): FTPConnectionParams {
   return {
     serverUrl: mount.serverUrl!,
@@ -34,10 +30,6 @@ function mountToParams(mount: UserMount): FTPConnectionParams {
     username: mount.username || undefined,
     password: mount.password || undefined,
   };
-}
-
-function extractErrorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback;
 }
 
 router.use(authenticateToken);

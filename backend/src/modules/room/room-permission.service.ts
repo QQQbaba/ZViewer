@@ -78,8 +78,6 @@ export class RoomPermissionService {
   }
 
   /**
-
-  /**
    * 判断给定角色是否可以创建房间。
    *
    * 权限规则（基于系统设置 `roomCreationMode`）：

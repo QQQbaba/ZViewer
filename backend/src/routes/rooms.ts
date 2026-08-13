@@ -5,7 +5,7 @@ import { Movie } from '../entities/Movie';
 import { Room } from '../entities/Room';
 import { Session } from '../entities/Session';
 import { DanmakuTrack } from '../entities/DanmakuTrack';
-import { IsNull } from 'typeorm';
+import { IsNull, In } from 'typeorm';
 import {
   authenticateToken,
   AuthenticatedRequest,
@@ -176,20 +176,6 @@ async function broadcastDanmakuTracks(
   });
 }
 
-/** 弹幕辅助数据 DTO（与前端 danmakuStore 对齐） */
-interface DanmakuMetaDto {
-  blockKeywords: string[];
-  deletedLog: unknown[];
-  realtimeLog: unknown[];
-}
-
-async function broadcastDanmakuMeta(
-  io: SocketIOServer,
-  roomId: string,
-): Promise<void> {
-  await danmakuMetaService.broadcast(io, roomId);
-}
-
 async function broadcastMovieList(
   io: SocketIOServer,
   roomId: string,
@@ -250,17 +236,25 @@ export function createRoomsRouter(io: SocketIOServer): Router {
           order: { lastAccessedAt: 'DESC' },
         });
 
-        const result = await Promise.all(
-          rooms.map(async (room) => {
-            const viewerCount = await sessionRepo.count({
-              where: { roomId: room.roomId, role: 'viewer', endedAt: IsNull() },
-            });
-            const sharer = await sessionRepo.findOneBy({
-              roomId: room.roomId,
-              role: 'sharer',
-              endedAt: IsNull(),
-            });
-            return {
+        // 批量查询观众数和 sharer 在线状态（消除 N+1）
+        const roomIds = rooms.map((r) => r.roomId);
+        const [allViewers, allSharers] = await Promise.all([
+          sessionRepo.find({
+            where: { roomId: In(roomIds), role: 'viewer', endedAt: IsNull() },
+            select: ['roomId'],
+          }),
+          sessionRepo.find({
+            where: { roomId: In(roomIds), role: 'sharer', endedAt: IsNull() },
+            select: ['roomId'],
+          }),
+        ]);
+        const viewerCountMap = new Map<string, number>();
+        for (const v of allViewers) {
+          viewerCountMap.set(v.roomId, (viewerCountMap.get(v.roomId) || 0) + 1);
+        }
+        const sharerSet = new Set(allSharers.map((s) => s.roomId));
+
+        const result = rooms.map((room) => ({
               id: room.id,
               roomId: room.roomId,
               name: room.name,
@@ -268,14 +262,12 @@ export function createRoomsRouter(io: SocketIOServer): Router {
               requireApproval: room.requireApproval,
               maxViewers: room.maxViewers,
               hasPassword: !!room.password,
-              viewerCount,
-              sharerOnline: !!sharer,
+              viewerCount: viewerCountMap.get(room.roomId) ?? 0,
+              sharerOnline: sharerSet.has(room.roomId),
               mode: room.mode,
               lastAccessedAt: room.lastAccessedAt.toISOString(),
               createdAt: room.createdAt.toISOString(),
-            };
-          }),
-        );
+            }));
 
         res.json({ success: true, rooms: result });
       } catch (err) {
@@ -939,7 +931,7 @@ export function createRoomsRouter(io: SocketIOServer): Router {
           nextKeywords,
           nextDeleted,
         );
-        await broadcastDanmakuMeta(io, roomId);
+        await danmakuMetaService.broadcast(io, roomId);
         res.json({ success: true, meta: serializeDanmakuMeta(meta) });
       } catch (err) {
         console.error('update danmaku meta error:', err);

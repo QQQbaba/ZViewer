@@ -8,6 +8,7 @@
  * - 解析播放地址（直连 URL 或本服务代理 URL）
  * - 代理播放流（复用 services/proxy/http-proxy.ts）
  */
+import { stripPassword, extractErrorMessage } from '../modules/shared/mount-utils';
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../data-source';
 import { UserMount } from '../entities/UserMount';
@@ -24,15 +25,6 @@ import { upgradeToHttpsIfNeeded } from '../services/url-utils';
 const router = Router();
 
 const userMountRepository = () => AppDataSource.getRepository(UserMount);
-
-function stripPassword(mount: UserMount): Omit<UserMount, 'password'> {
-  const { password: _password, ...rest } = mount;
-  return rest;
-}
-
-function extractErrorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback;
-}
 
 function extractErrorCode(err: unknown): string {
   return err instanceof EmbyError ? err.code ?? 'EMBY_ERROR' : 'UNREACHABLE';

@@ -31,6 +31,14 @@ async function validateSignalPair(
   return null;
 }
 
+function safeCallback(callback?: (response: { success: boolean; message?: string }) => void, result?: { success: boolean; message?: string }): void {
+  try {
+    callback?.(result ?? { success: true });
+  } catch {
+    // callback 抛异常不影响主流程
+  }
+}
+
 export class SignalingHandler implements SocketEventHandler {
   readonly name = 'webrtc-signaling';
 
@@ -42,21 +50,27 @@ export class SignalingHandler implements SocketEventHandler {
         payload: { to: string; data: unknown },
         callback?: (response: { success: boolean; message?: string }) => void,
       ) => {
-        const roomId = await validateSignalPair(io, socket, payload.to);
-        if (!roomId) {
-          console.warn(
-            `[signal-offer] pair validation failed from=${socket.id} to=${payload.to}`,
+        try {
+          const roomId = await validateSignalPair(io, socket, payload.to);
+          if (!roomId) {
+            console.warn(
+              `[signal-offer] pair validation failed from=${socket.id} to=${payload.to}`,
+            );
+            safeCallback(callback, { success: false, message: '不在同一房间' });
+            return;
+          }
+          console.log(
+            `[signal-offer] relay from=${socket.id} to=${payload.to} room=${roomId}`,
           );
-          return callback?.({ success: false, message: '不在同一房间' });
+          io.to(payload.to).emit('signal-offer', {
+            from: socket.id,
+            data: payload.data,
+          });
+          safeCallback(callback);
+        } catch (err) {
+          console.error('[signal-offer] error:', err);
+          safeCallback(callback, { success: false, message: '信令转发失败' });
         }
-        console.log(
-          `[signal-offer] relay from=${socket.id} to=${payload.to} room=${roomId}`,
-        );
-        io.to(payload.to).emit('signal-offer', {
-          from: socket.id,
-          data: payload.data,
-        });
-        callback?.({ success: true });
       },
     );
 
@@ -67,21 +81,27 @@ export class SignalingHandler implements SocketEventHandler {
         payload: { to: string; data: unknown },
         callback?: (response: { success: boolean; message?: string }) => void,
       ) => {
-        const roomId = await validateSignalPair(io, socket, payload.to);
-        if (!roomId) {
-          console.warn(
-            `[signal-answer] pair validation failed from=${socket.id} to=${payload.to}`,
+        try {
+          const roomId = await validateSignalPair(io, socket, payload.to);
+          if (!roomId) {
+            console.warn(
+              `[signal-answer] pair validation failed from=${socket.id} to=${payload.to}`,
+            );
+            safeCallback(callback, { success: false, message: '不在同一房间' });
+            return;
+          }
+          console.log(
+            `[signal-answer] relay from=${socket.id} to=${payload.to} room=${roomId}`,
           );
-          return callback?.({ success: false, message: '不在同一房间' });
+          io.to(payload.to).emit('signal-answer', {
+            from: socket.id,
+            data: payload.data,
+          });
+          safeCallback(callback);
+        } catch (err) {
+          console.error('[signal-answer] error:', err);
+          safeCallback(callback, { success: false, message: '信令转发失败' });
         }
-        console.log(
-          `[signal-answer] relay from=${socket.id} to=${payload.to} room=${roomId}`,
-        );
-        io.to(payload.to).emit('signal-answer', {
-          from: socket.id,
-          data: payload.data,
-        });
-        callback?.({ success: true });
       },
     );
 
@@ -92,18 +112,24 @@ export class SignalingHandler implements SocketEventHandler {
         payload: { to: string; data: unknown },
         callback?: (response: { success: boolean; message?: string }) => void,
       ) => {
-        const roomId = await validateSignalPair(io, socket, payload.to);
-        if (!roomId) {
-          console.warn(
-            `[signal-ice-candidate] pair validation failed from=${socket.id} to=${payload.to}`,
-          );
-          return callback?.({ success: false, message: '不在同一房间' });
+        try {
+          const roomId = await validateSignalPair(io, socket, payload.to);
+          if (!roomId) {
+            console.warn(
+              `[signal-ice-candidate] pair validation failed from=${socket.id} to=${payload.to}`,
+            );
+            safeCallback(callback, { success: false, message: '不在同一房间' });
+            return;
+          }
+          io.to(payload.to).emit('signal-ice-candidate', {
+            from: socket.id,
+            data: payload.data,
+          });
+          safeCallback(callback);
+        } catch (err) {
+          console.error('[signal-ice-candidate] error:', err);
+          safeCallback(callback, { success: false, message: '信令转发失败' });
         }
-        io.to(payload.to).emit('signal-ice-candidate', {
-          from: socket.id,
-          data: payload.data,
-        });
-        callback?.({ success: true });
       },
     );
   }

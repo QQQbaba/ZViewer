@@ -4,6 +4,7 @@
  * 与 emby.ts 结构一致，但 type 为 'jellyfin'，Jellyfin 是 Emby 开源分支，API 完全兼容。
  * 分离式架构：REST 客户端在 services/jellyfin-client.ts（重导出 emby-client）。
  */
+import { stripPassword, extractErrorMessage } from '../modules/shared/mount-utils';
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../data-source';
 import { UserMount } from '../entities/UserMount';
@@ -16,15 +17,6 @@ import { upgradeToHttpsIfNeeded } from '../services/url-utils';
 const router = Router();
 
 const userMountRepository = () => AppDataSource.getRepository(UserMount);
-
-function stripPassword(mount: UserMount): Omit<UserMount, 'password'> {
-  const { password: _password, ...rest } = mount;
-  return rest;
-}
-
-function extractErrorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback;
-}
 
 function extractErrorCode(err: unknown): string {
   return err instanceof JellyfinError ? err.code ?? 'JELLYFIN_ERROR' : 'UNREACHABLE';

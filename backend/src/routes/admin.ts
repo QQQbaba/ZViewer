@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { IsNull } from 'typeorm';
+import { IsNull, In } from 'typeorm';
 import { AppDataSource } from '../data-source';
 import { User, type UserRole } from '../entities/User';
 import { Room } from '../entities/Room';
@@ -208,33 +208,39 @@ router.get(
         order: { createdAt: 'DESC' },
       });
 
-      const result = await Promise.all(
-        rooms.map(async (room) => {
-          const viewerCount = await sessionRepo.count({
-            where: { roomId: room.roomId, role: 'viewer', endedAt: IsNull() },
-          });
-          const sharer = await sessionRepo.findOneBy({
-            roomId: room.roomId,
-            role: 'sharer',
-            endedAt: IsNull(),
-          });
-          return {
-            id: room.id,
-            roomId: room.roomId,
-            name: room.name,
-            status: room.status,
-            requireApproval: room.requireApproval,
-            maxViewers: room.maxViewers,
-            hasPassword: !!room.password,
-            viewerCount,
-            sharerOnline: !!sharer,
-            ownerUserId: room.ownerUserId,
-            lastAccessedAt: room.lastAccessedAt.toISOString(),
-            createdAt: room.createdAt.toISOString(),
-            updatedAt: room.updatedAt.toISOString(),
-          };
+      // 批量查询观众数和 sharer 在线状态（消除 N+1）
+      const roomIds = rooms.map((r) => r.roomId);
+      const [allViewers, allSharers] = await Promise.all([
+        sessionRepo.find({
+          where: { roomId: In(roomIds), role: 'viewer', endedAt: IsNull() },
+          select: ['roomId'],
         }),
-      );
+        sessionRepo.find({
+          where: { roomId: In(roomIds), role: 'sharer', endedAt: IsNull() },
+          select: ['roomId'],
+        }),
+      ]);
+      const viewerCountMap = new Map<string, number>();
+      for (const v of allViewers) {
+        viewerCountMap.set(v.roomId, (viewerCountMap.get(v.roomId) || 0) + 1);
+      }
+      const sharerSet = new Set(allSharers.map((s) => s.roomId));
+
+      const result = rooms.map((room) => ({
+              id: room.id,
+              roomId: room.roomId,
+              name: room.name,
+              status: room.status,
+              requireApproval: room.requireApproval,
+              maxViewers: room.maxViewers,
+              hasPassword: !!room.password,
+              viewerCount: viewerCountMap.get(room.roomId) ?? 0,
+              sharerOnline: sharerSet.has(room.roomId),
+              ownerUserId: room.ownerUserId,
+              lastAccessedAt: room.lastAccessedAt.toISOString(),
+              createdAt: room.createdAt.toISOString(),
+              updatedAt: room.updatedAt.toISOString(),
+            }));
 
       res.json({ success: true, rooms: result });
     } catch (err) {

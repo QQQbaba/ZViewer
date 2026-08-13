@@ -19,6 +19,7 @@
  */
 import { Router, Request, Response } from 'express';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import multer from 'multer';
@@ -256,7 +257,10 @@ router.get('/browse', async (req: AuthenticatedRequest, res: Response): Promise<
   try {
     const roots = await loadRootRegistry();
     const { abs, root } = resolveSafePath(req.query.path as string | undefined, roots);
-    if (!fs.existsSync(abs) || !fs.statSync(abs).isDirectory()) {
+    let stat;
+    try {
+      stat = await fsp.stat(abs);
+    } catch {
       res.json({
         success: true,
         entries: [],
@@ -265,27 +269,44 @@ router.get('/browse', async (req: AuthenticatedRequest, res: Response): Promise<
       });
       return;
     }
-    const items = fs.readdirSync(abs, { withFileTypes: true });
-    const entries = items
-      .filter((item) => !item.name.startsWith('.'))
-      .map((item) => {
+    if (!stat.isDirectory()) {
+      res.json({
+        success: true,
+        entries: [],
+        currentPath: toPrefixedPath(root, abs),
+        readonly: root.readonly,
+      });
+      return;
+    }
+    const items = await fsp.readdir(abs, { withFileTypes: true });
+    const filtered = items.filter((item) => !item.name.startsWith('.'));
+    const entries = await Promise.all(
+      filtered.map(async (item) => {
         const childAbs = path.join(abs, item.name);
-        const stat = fs.statSync(childAbs);
+        let childStat;
+        try {
+          childStat = await fsp.stat(childAbs);
+        } catch {
+          return null;
+        }
         return {
           name: item.name,
           path: toPrefixedPath(root, childAbs),
           type: item.isDirectory() ? 'directory' : 'file',
-          size: item.isFile() ? stat.size : undefined,
-          modifiedAt: stat.mtime.toISOString(),
+          size: item.isFile() ? childStat.size : undefined,
+          modifiedAt: childStat.mtime.toISOString(),
         };
-      })
+      }),
+    );
+    const sortedEntries = entries
+      .filter((e): e is NonNullable<typeof e> => e !== null)
       .sort((a, b) => {
         if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
         return a.name.localeCompare(b.name, 'zh-Hans-CN');
       });
     res.json({
       success: true,
-      entries,
+      entries: sortedEntries,
       currentPath: toPrefixedPath(root, abs),
       readonly: root.readonly,
     });

@@ -7,6 +7,7 @@
  * - directUrlFallback：WebDAV 在 AList API 失败时回退拼接直链，OpenList 不回退
  * - includeSize：OpenList resolve 返回文件大小
  */
+import { stripPassword, extractErrorMessage } from '../modules/shared/mount-utils';
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../data-source';
 import { UserMount } from '../entities/UserMount';
@@ -51,11 +52,6 @@ export interface MountRouterOptions {
 
 const userMountRepository = () => AppDataSource.getRepository(UserMount);
 
-function stripPassword(mount: UserMount): Omit<UserMount, 'password'> {
-  const { password: _password, ...rest } = mount;
-  return rest;
-}
-
 // 默认的 UserMount → WebDAVConnectionParams
 function defaultMountToParams(mount: UserMount): WebDAVConnectionParams {
   return {
@@ -71,10 +67,6 @@ function extractErrorCode(err: unknown): string {
   if (err instanceof WebDAVError) return err.code;
   if (err instanceof OpenListError) return err.code;
   return 'UNREACHABLE';
-}
-
-function extractErrorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback;
 }
 
 export function createMountRouter(opts: MountRouterOptions): Router {
