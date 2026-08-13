@@ -69,6 +69,7 @@ export class RoomSessionService {
     if (existingSharer) {
       // 更新 socketId（重连场景）
       existingSharer.socketId = socket.id;
+      existingSharer.userId = userId;
       await sessionRepo.save(existingSharer);
     } else {
       // 创建新 session
@@ -76,6 +77,7 @@ export class RoomSessionService {
         roomId,
         socketId: socket.id,
         role: 'sharer',
+        userId,
       });
       await sessionRepo.save(session);
     }
@@ -110,6 +112,7 @@ export class RoomSessionService {
   async admitViewer(
     socket: Socket,
     roomId: string,
+    userId?: number | null,
   ): Promise<Session | null> {
     const sessionRepo = AppDataSource.getRepository(Session);
     const roomRepo = AppDataSource.getRepository(Room);
@@ -122,6 +125,7 @@ export class RoomSessionService {
       roomId,
       socketId: socket.id,
       role: 'viewer',
+      userId: userId ?? null,
     });
     await sessionRepo.save(session);
 
@@ -210,6 +214,27 @@ export class RoomSessionService {
   async getViewerCount(roomId: string): Promise<number> {
     const viewers = await this.getViewers(roomId);
     return viewers.length;
+  }
+
+  /**
+   * 查找同一用户在同一房间的活跃 session。
+   *
+   * 用于检测同一账户是否已通过另一个标签页/设备进入同一房间。
+   * guest 用户（userId 为 null）不检测，直接返回 null。
+   *
+   * @returns 活跃 session（endedAt 为 null）或 null
+   */
+  async findActiveSessionByUser(
+    roomId: string,
+    userId: number | null,
+  ): Promise<Session | null> {
+    if (userId == null) return null;
+    const sessionRepo = AppDataSource.getRepository(Session);
+    return sessionRepo.findOneBy({
+      roomId,
+      userId,
+      endedAt: IsNull(),
+    });
   }
 
   /**

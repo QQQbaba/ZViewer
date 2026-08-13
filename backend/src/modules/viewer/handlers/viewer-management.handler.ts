@@ -82,7 +82,11 @@ export class ViewerManagementHandler implements SocketEventHandler {
           const room = await roomRepo.findOneBy({ roomId: sharer.roomId });
 
           // 调用 admitViewer 创建 viewer session + join 房间
-          await roomSessionService.admitViewer(viewerSocket, sharer.roomId);
+          await roomSessionService.admitViewer(
+            viewerSocket,
+            sharer.roomId,
+            viewerSocket.data.userId ?? null,
+          );
 
           // 推送房间信息给新观众
           io.to(payload.viewerSocketId).emit('join-approved', {
