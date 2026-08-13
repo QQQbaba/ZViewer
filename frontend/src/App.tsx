@@ -18,7 +18,8 @@ import RoomsListPage from '@/pages/RoomsListPage'
 import JoinByRoomIdPage from '@/pages/JoinByRoomIdPage'
 
 function AuthInitializer() {
-  const { setUser, setAutoLoginStatus } = useAuthStore()
+  const setUser = useAuthStore((s) => s.setUser)
+  const setAutoLoginStatus = useAuthStore((s) => s.setAutoLoginStatus)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {

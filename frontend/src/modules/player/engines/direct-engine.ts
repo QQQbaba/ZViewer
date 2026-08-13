@@ -49,6 +49,10 @@ export const directEngine: PlayerEngine = {
     video.src = targetUrl
     video.load()
     await waitForMetadata(video)
-    return { cleanup: () => { delete video.dataset.serverDuration } }
+    return {
+      cleanup: () => {
+        delete video.dataset.serverDuration
+      },
+    }
   },
 }

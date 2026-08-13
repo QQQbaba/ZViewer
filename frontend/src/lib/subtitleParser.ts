@@ -149,7 +149,9 @@ function parseSrt(content: string): ParsedCue[] {
  * 支持的 settings：line, position, align
  * 示例：line:50% position:50% align:center
  */
-function parseVttCueSettings(settingsStr: string): Pick<ParsedCue, 'line' | 'position' | 'align'> {
+function parseVttCueSettings(
+  settingsStr: string
+): Pick<ParsedCue, 'line' | 'position' | 'align'> {
   const result: Pick<ParsedCue, 'line' | 'position' | 'align'> = {}
 
   const lineMatch = settingsStr.match(/line:(\d+(?:\.\d+)?)%/)
@@ -253,9 +255,11 @@ function extractAssPosition(
 
     // 若无 \pos，按 \an 垂直分量设置 line
     if (line === undefined) {
-      if (an <= 3) line = 100      // 底部
-      else if (an <= 6) line = 50  // 中部
-      else line = 0                // 顶部
+      if (an <= 3)
+        line = 100 // 底部
+      else if (an <= 6)
+        line = 50 // 中部
+      else line = 0 // 顶部
     }
   }
 
@@ -351,7 +355,10 @@ function cleanAssText(text: string): string {
         }
       }
       i = end + 1
-    } else if (text[i] === '\\' && (text[i + 1] === 'N' || text[i + 1] === 'n')) {
+    } else if (
+      text[i] === '\\' &&
+      (text[i + 1] === 'N' || text[i + 1] === 'n')
+    ) {
       // ASS 换行 \N 或 \n
       result += '<br>'
       i += 2
@@ -414,8 +421,14 @@ function parseAss(content: string): ParsedCue[] {
           .slice(7)
           .split(',')
           .map((f) => f.trim().toLowerCase())
-      } else if (trimmed.toLowerCase().startsWith('style:') && styleFormatFields.length > 0) {
-        const styleData = trimmed.slice(6).split(',').map((s) => s.trim())
+      } else if (
+        trimmed.toLowerCase().startsWith('style:') &&
+        styleFormatFields.length > 0
+      ) {
+        const styleData = trimmed
+          .slice(6)
+          .split(',')
+          .map((s) => s.trim())
         const styleName = styleData[0]?.toLowerCase() ?? ''
         if (styleName === 'default') {
           const alignIdx = styleFormatFields.indexOf('alignment')
@@ -467,7 +480,12 @@ function parseAss(content: string): ParsedCue[] {
       const text = cleanAssText(rawText).trim()
 
       if (text && end > start) {
-        const pos = extractAssPosition(rawText, playResX, playResY, defaultAlign)
+        const pos = extractAssPosition(
+          rawText,
+          playResX,
+          playResY,
+          defaultAlign
+        )
         cues.push({ start, end, text, ...pos })
       }
     }

@@ -293,10 +293,18 @@ export function useVideoSource({
       startTime?: number,
       blobs?: { videoBlob: Blob; audioBlob: Blob }
     ) => {
-      ;(window as unknown as { __srcDebug?: unknown[] }).__srcDebug = (window as unknown as { __srcDebug?: unknown[] }).__srcDebug || []
-      ;(window as unknown as { __srcDebug?: unknown[] }).__srcDebug!.push({ step: 'applySourceToVideo', sourceUrl: state.sourceUrl?.slice(0, 80), format: state.format, sourceType: state.sourceType })
+      ;(window as unknown as { __srcDebug?: unknown[] }).__srcDebug =
+        (window as unknown as { __srcDebug?: unknown[] }).__srcDebug || []
+      ;(window as unknown as { __srcDebug?: unknown[] }).__srcDebug!.push({
+        step: 'applySourceToVideo',
+        sourceUrl: state.sourceUrl?.slice(0, 80),
+        format: state.format,
+        sourceType: state.sourceType,
+      })
       if (!state.sourceUrl) {
-        ;(window as unknown as { __srcDebug?: unknown[] }).__srcDebug!.push({ step: 'sourceUrl empty' })
+        ;(window as unknown as { __srcDebug?: unknown[] }).__srcDebug!.push({
+          step: 'sourceUrl empty',
+        })
         return
       }
 

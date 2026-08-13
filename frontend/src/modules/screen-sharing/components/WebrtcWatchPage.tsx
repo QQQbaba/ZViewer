@@ -9,12 +9,7 @@
  *
  * WatchPage 分发器根据 roomMode + shareMethod 决定渲染本组件或 StreamPushViewer。
  */
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { message } from '@/components/ui/message'
 import { useSocket } from '@/hooks/useSocket'
 import { cn } from '@/lib/utils'
@@ -132,13 +127,7 @@ function WebrtcWatchPage({ roomId }: WebrtcWatchPageProps) {
 
   // P2P 直连隧道（观众为 receiver，remotePeerId 由 offer 自动填充）
   const [p2pFallbackNotice, setP2pFallbackNotice] = useState(false)
-  const {
-    enableP2P,
-    disableP2P,
-    p2pEnabled,
-    p2pPC,
-    p2pStatus,
-  } = useP2PTunnel({
+  const { enableP2P, disableP2P, p2pEnabled, p2pPC, p2pStatus } = useP2PTunnel({
     socket,
     roomId,
     role: 'receiver',
@@ -399,9 +388,7 @@ function WebrtcWatchPage({ roomId }: WebrtcWatchPageProps) {
       p2pFallbackNotice={p2pFallbackNotice}
       onToggleP2P={handleToggleP2P}
       webFullscreen={isWebFullscreen}
-      rightPanel={
-        <CommentPanel socket={socket} roomId={roomId} commentsOnly />
-      }
+      rightPanel={<CommentPanel socket={socket} roomId={roomId} commentsOnly />}
       controls={<RoomInfoPanel roomId={roomId} isHost={false} />}
       controlLabels={['房间状态']}
     />

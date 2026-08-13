@@ -251,14 +251,24 @@ export function DanmakuTrackCard() {
                       if (value === '' || value === '-') return
                       const minutes = Number(value)
                       if (Number.isNaN(minutes)) return
-                      const seconds = Math.round(track.offset - Math.trunc(track.offset / 60) * 60)
-                      const clampedMinutes = Math.min(999, Math.max(-999, minutes))
-                      void updateTrackOffset(track.trackId, clampedMinutes * 60 + seconds)
+                      const seconds = Math.round(
+                        track.offset - Math.trunc(track.offset / 60) * 60
+                      )
+                      const clampedMinutes = Math.min(
+                        999,
+                        Math.max(-999, minutes)
+                      )
+                      void updateTrackOffset(
+                        track.trackId,
+                        clampedMinutes * 60 + seconds
+                      )
                     }}
                     onBlur={(e) => {
                       const value = e.target.value
                       if (value === '' || value === '-') {
-                        const seconds = Math.round(track.offset - Math.trunc(track.offset / 60) * 60)
+                        const seconds = Math.round(
+                          track.offset - Math.trunc(track.offset / 60) * 60
+                        )
                         void updateTrackOffset(track.trackId, seconds)
                       }
                     }}
@@ -273,14 +283,21 @@ export function DanmakuTrackCard() {
                     step={1}
                     min={-60}
                     max={60}
-                    value={String(Math.round(track.offset - Math.trunc(track.offset / 60) * 60))}
+                    value={String(
+                      Math.round(
+                        track.offset - Math.trunc(track.offset / 60) * 60
+                      )
+                    )}
                     onChange={(e) => {
                       const value = e.target.value
                       if (value === '' || value === '-') return
                       const seconds = Number(value)
                       if (Number.isNaN(seconds)) return
                       const minutes = Math.trunc(track.offset / 60)
-                      void updateTrackOffset(track.trackId, minutes * 60 + seconds)
+                      void updateTrackOffset(
+                        track.trackId,
+                        minutes * 60 + seconds
+                      )
                     }}
                     onBlur={(e) => {
                       const value = e.target.value
@@ -300,8 +317,14 @@ export function DanmakuTrackCard() {
                         normalizedMinutes += Math.ceil(seconds / 60)
                         seconds = seconds % 60
                       }
-                      normalizedMinutes = Math.min(999, Math.max(-999, normalizedMinutes))
-                      void updateTrackOffset(track.trackId, normalizedMinutes * 60 + seconds)
+                      normalizedMinutes = Math.min(
+                        999,
+                        Math.max(-999, normalizedMinutes)
+                      )
+                      void updateTrackOffset(
+                        track.trackId,
+                        normalizedMinutes * 60 + seconds
+                      )
                     }}
                     className="h-6 w-[72px] px-1 text-right text-[11px] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />

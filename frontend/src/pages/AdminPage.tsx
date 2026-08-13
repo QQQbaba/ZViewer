@@ -37,8 +37,15 @@ import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import { apiFetch, getApiUrl } from '@/lib/api'
-import { checkFfmpeg, installFfmpeg, uploadFfmpeg } from '@/modules/server-files/serverFilesApi'
-import type { FfmpegStatus, FfmpegInstallProgress } from '@/modules/server-files/types'
+import {
+  checkFfmpeg,
+  installFfmpeg,
+  uploadFfmpeg,
+} from '@/modules/server-files/serverFilesApi'
+import type {
+  FfmpegStatus,
+  FfmpegInstallProgress,
+} from '@/modules/server-files/types'
 
 interface AdminUser {
   id: number
@@ -99,7 +106,8 @@ interface UpdateStageEventPayload {
 function formatBytes(bytes: number): string {
   if (bytes <= 0) return '0 B'
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024)
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
@@ -287,9 +295,7 @@ export default function AdminPage() {
         setUpdateInfo(data.info)
         if (data.info.hasUpdate) {
           message.info(
-            data.info.isPrerelease
-              ? '发现新预发布版本'
-              : '发现新版本'
+            data.info.isPrerelease ? '发现新预发布版本' : '发现新版本'
           )
         } else {
           message.success('当前已是最新版本')
@@ -417,9 +423,7 @@ export default function AdminPage() {
     }
   }
 
-  const handleFileUpload = async (
-    event: ChangeEvent<HTMLInputElement>
-  ) => {
+  const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
 
@@ -451,9 +455,7 @@ export default function AdminPage() {
         xhr.responseType = 'text'
         xhr.setRequestHeader(
           'Content-Type',
-          lowerName.endsWith('.tar.gz')
-            ? 'application/gzip'
-            : 'application/zip'
+          lowerName.endsWith('.tar.gz') ? 'application/gzip' : 'application/zip'
         )
 
         // 上传进度跟踪
@@ -581,7 +583,12 @@ export default function AdminPage() {
       })
     } catch (err) {
       console.error('[AdminPage] upload update error:', err)
-      if (err instanceof Error && err.message !== 'network error' && err.message !== 'auth expired' && !err.message.startsWith('HTTP')) {
+      if (
+        err instanceof Error &&
+        err.message !== 'network error' &&
+        err.message !== 'auth expired' &&
+        !err.message.startsWith('HTTP')
+      ) {
         message.error('上传更新失败')
       }
     } finally {
@@ -1066,7 +1073,9 @@ export default function AdminPage() {
                       disabled={batchDeleteLoading}
                       title={`删除已选 ${selectedRoomIds.size} 个房间`}
                     >
-                      <span className="sm:hidden">已选 {selectedRoomIds.size}</span>
+                      <span className="sm:hidden">
+                        已选 {selectedRoomIds.size}
+                      </span>
                       <span className="hidden sm:inline">
                         删除已选 ({selectedRoomIds.size})
                       </span>
@@ -1092,7 +1101,9 @@ export default function AdminPage() {
                     title="一键移除无人使用的房间"
                   >
                     <span className="sm:hidden">清理</span>
-                    <span className="hidden sm:inline">一键移除无人使用的房间</span>
+                    <span className="hidden sm:inline">
+                      一键移除无人使用的房间
+                    </span>
                   </Button>
                 </>
               )}
@@ -1403,7 +1414,9 @@ export default function AdminPage() {
                       variant="danger"
                       size="sm"
                       className={
-                        roomViewMode === 'tile' ? 'mt-auto w-full' : 'w-full sm:w-auto'
+                        roomViewMode === 'tile'
+                          ? 'mt-auto w-full'
+                          : 'w-full sm:w-auto'
                       }
                       icon={<Power className="h-4 w-4" />}
                       onClick={(e) => {
@@ -1593,7 +1606,8 @@ export default function AdminPage() {
                 <div
                   className="mb-6 flex flex-col gap-2 rounded-[var(--md-sys-shape-corner)] p-3"
                   style={{
-                    backgroundColor: 'var(--md-sys-color-surface-container-high)',
+                    backgroundColor:
+                      'var(--md-sys-color-surface-container-high)',
                   }}
                 >
                   {(() => {
@@ -1607,16 +1621,18 @@ export default function AdminPage() {
                             <div
                               className="flex h-7 w-7 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
                               style={{
-                                backgroundColor: available && capable
-                                  ? 'var(--md-sys-color-primary-container)'
-                                  : needFullVersion
-                                    ? 'var(--md-sys-color-tertiary-container)'
-                                    : 'var(--md-sys-color-surface-container-highest)',
-                                color: available && capable
-                                  ? 'var(--md-sys-color-on-primary-container)'
-                                  : needFullVersion
-                                    ? 'var(--md-sys-color-on-tertiary-container)'
-                                    : 'var(--md-sys-color-on-surface-variant)',
+                                backgroundColor:
+                                  available && capable
+                                    ? 'var(--md-sys-color-primary-container)'
+                                    : needFullVersion
+                                      ? 'var(--md-sys-color-tertiary-container)'
+                                      : 'var(--md-sys-color-surface-container-highest)',
+                                color:
+                                  available && capable
+                                    ? 'var(--md-sys-color-on-primary-container)'
+                                    : needFullVersion
+                                      ? 'var(--md-sys-color-on-tertiary-container)'
+                                      : 'var(--md-sys-color-on-surface-variant)',
                               }}
                             >
                               {ffmpegChecking ? (
@@ -1629,7 +1645,12 @@ export default function AdminPage() {
                             </div>
                             <div className="flex flex-col">
                               <Text className="text-xs font-medium text-[var(--md-sys-color-on-surface)]">
-                                FFmpeg {!available ? '未安装' : capable ? '完整版' : '精简版'}
+                                FFmpeg{' '}
+                                {!available
+                                  ? '未安装'
+                                  : capable
+                                    ? '完整版'
+                                    : '精简版'}
                               </Text>
                               <Text className="text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
                                 {available
@@ -1639,38 +1660,48 @@ export default function AdminPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
-                            {(!available || needFullVersion) && !ffmpegInstalling && !ffmpegUploading && (
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                icon={<Download className="h-3.5 w-3.5" />}
-                                onClick={handleInstallFfmpeg}
-                              >
-                                {needFullVersion ? '下载完整版' : '下载 FFmpeg'}
-                              </Button>
-                            )}
-                            {(!available || needFullVersion) && !ffmpegInstalling && !ffmpegUploading && (
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                icon={<Upload className="h-3.5 w-3.5" />}
-                                onClick={() => ffmpegFileInputRef.current?.click()}
-                              >
-                                手动安装
-                              </Button>
-                            )}
-                            {(!available || needFullVersion) && !ffmpegInstalling && !ffmpegUploading && (
-                              <a
-                                href="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex h-8 items-center gap-1.5 rounded-[var(--md-sys-shape-corner-full)] px-3 text-xs font-medium text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
-                                title="在浏览器中手动下载 FFmpeg 压缩包"
-                              >
-                                <ExternalLink className="h-3.5 w-3.5" />
-                                手动下载
-                              </a>
-                            )}
+                            {(!available || needFullVersion) &&
+                              !ffmpegInstalling &&
+                              !ffmpegUploading && (
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  icon={<Download className="h-3.5 w-3.5" />}
+                                  onClick={handleInstallFfmpeg}
+                                >
+                                  {needFullVersion
+                                    ? '下载完整版'
+                                    : '下载 FFmpeg'}
+                                </Button>
+                              )}
+                            {(!available || needFullVersion) &&
+                              !ffmpegInstalling &&
+                              !ffmpegUploading && (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  icon={<Upload className="h-3.5 w-3.5" />}
+                                  onClick={() =>
+                                    ffmpegFileInputRef.current?.click()
+                                  }
+                                >
+                                  手动安装
+                                </Button>
+                              )}
+                            {(!available || needFullVersion) &&
+                              !ffmpegInstalling &&
+                              !ffmpegUploading && (
+                                <a
+                                  href="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-[var(--md-sys-shape-corner-full)] px-3 text-xs font-medium text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
+                                  title="在浏览器中手动下载 FFmpeg 压缩包"
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                  手动下载
+                                </a>
+                              )}
                             <input
                               ref={ffmpegFileInputRef}
                               type="file"
@@ -1696,11 +1727,15 @@ export default function AdminPage() {
                             )}
                           </div>
                         </div>
-                        {needFullVersion && !ffmpegInstalling && !ffmpegUploading && (
-                          <Text className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                            当前 FFmpeg 缺少 AAC 编码器，无法转码 DTS/AC3 等音频。点击「下载完整版」自动下载，或「手动安装」上传 zip 压缩包。
-                          </Text>
-                        )}
+                        {needFullVersion &&
+                          !ffmpegInstalling &&
+                          !ffmpegUploading && (
+                            <Text className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                              当前 FFmpeg 缺少 AAC 编码器，无法转码 DTS/AC3
+                              等音频。点击「下载完整版」自动下载，或「手动安装」上传
+                              zip 压缩包。
+                            </Text>
+                          )}
                         {ffmpegInstalling && (
                           <div className="flex flex-col gap-1.5">
                             <div className="flex items-center justify-between text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
@@ -1712,7 +1747,8 @@ export default function AdminPage() {
                                 className="h-full rounded-full transition-all"
                                 style={{
                                   width: `${ffmpegInstallPercent}%`,
-                                  backgroundColor: 'var(--md-sys-color-primary)',
+                                  backgroundColor:
+                                    'var(--md-sys-color-primary)',
                                 }}
                               />
                             </div>
@@ -1729,7 +1765,9 @@ export default function AdminPage() {
                 <div className="glass-card mb-6 p-4">
                   <div className="flex items-center justify-between pb-3 mb-3 border-b border-[var(--md-sys-color-outline-variant)]">
                     <div className="flex-1 min-w-0 pr-3">
-                      <Text className="text-sm font-medium">接收预发布版本更新</Text>
+                      <Text className="text-sm font-medium">
+                        接收预发布版本更新
+                      </Text>
                       <Text type="secondary" className="block text-xs mt-0.5">
                         开启后可更新到预发布版本，关闭则仅在正式版之间更新
                       </Text>
@@ -1752,10 +1790,7 @@ export default function AdminPage() {
                         <Text className="text-sm font-medium">
                           更新 CDN 加速
                         </Text>
-                        <Text
-                          type="secondary"
-                          className="block text-xs mt-0.5"
-                        >
+                        <Text type="secondary" className="block text-xs mt-0.5">
                           开启后，更新检测和 Release 下载将走 CDN 代理加速
                         </Text>
                       </div>
@@ -1894,17 +1929,17 @@ export default function AdminPage() {
                       {updateInfo.assetSize > 0 && (
                         <Text type="secondary" className="text-xs">
                           构建产物：{updateInfo.assetName} (
-                          {(
-                            updateInfo.assetSize /
-                            (1024 * 1024)
-                          ).toFixed(1)}
+                          {(updateInfo.assetSize / (1024 * 1024)).toFixed(1)}
                           MB)
                         </Text>
                       )}
                       {updateInfo.releaseNotes && (
                         <div className="max-h-32 overflow-y-auto rounded-[var(--md-sys-radius-small)] bg-[var(--md-sys-color-surface-container-high)] p-2">
                           <Text className="whitespace-pre-wrap text-xs leading-relaxed">
-                            {updateInfo.releaseNotes.split('\n').slice(0, 10).join('\n')}
+                            {updateInfo.releaseNotes
+                              .split('\n')
+                              .slice(0, 10)
+                              .join('\n')}
                           </Text>
                         </div>
                       )}

@@ -77,19 +77,16 @@ function WebrtcSharePage({
 
   // 帧率切换时自动调整推荐码率（仅在未共享时）
   // 码率不足是 60fps 降帧的首要原因，自动提升到推荐值避免用户手动调整
-  const handleFrameRateChange = useCallback(
-    (next: number) => {
-      setFrameRate(next)
-      // 推荐码率：15fps→4, 30fps→8, 45fps→12, 60fps→16
-      const recommended = Math.max(2, Math.round(next * 0.267))
-      setMaxBitrateMbps((prev) => {
-        // 仅当当前码率低于推荐值时自动提升，不覆盖用户主动设置的高码率
-        if (prev < recommended) return recommended
-        return prev
-      })
-    },
-    []
-  )
+  const handleFrameRateChange = useCallback((next: number) => {
+    setFrameRate(next)
+    // 推荐码率：15fps→4, 30fps→8, 45fps→12, 60fps→16
+    const recommended = Math.max(2, Math.round(next * 0.267))
+    setMaxBitrateMbps((prev) => {
+      // 仅当当前码率低于推荐值时自动提升，不覆盖用户主动设置的高码率
+      if (prev < recommended) return recommended
+      return prev
+    })
+  }, [])
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(
@@ -254,13 +251,7 @@ function WebrtcSharePage({
   // P2P 直连隧道（房主为 sender，使用第一个观众作为对端）
   const [p2pFallbackNotice, setP2pFallbackNotice] = useState(false)
   const firstViewerId = viewerIds[0] ?? null
-  const {
-    enableP2P,
-    disableP2P,
-    p2pEnabled,
-    p2pPC,
-    p2pStatus,
-  } = useP2PTunnel({
+  const { enableP2P, disableP2P, p2pEnabled, p2pPC, p2pStatus } = useP2PTunnel({
     socket,
     roomId: currentRoomId,
     localStream: stream,
@@ -348,7 +339,10 @@ function WebrtcSharePage({
       { roomId: currentRoomId },
       (response: { success: boolean; message?: string }) => {
         if (!response.success) {
-          console.warn('[WebrtcSharePage] sharer-ready failed:', response.message)
+          console.warn(
+            '[WebrtcSharePage] sharer-ready failed:',
+            response.message
+          )
         }
       }
     )

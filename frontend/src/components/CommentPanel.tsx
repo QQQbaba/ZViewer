@@ -10,7 +10,7 @@ import { message } from '@/components/ui/message'
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle'
 import { useAuthStore } from '@/store/authStore'
 import { useRoomStore } from '@/store/roomStore'
-import { cn } from '@/lib/utils'
+import { cn, formatIsoTime } from '@/lib/utils'
 import type { Socket } from 'socket.io-client'
 import { DanmakuTrackCard } from '@/modules/room/watch-together/DanmakuTrackCard'
 import { RealtimeDanmakuCard } from '@/modules/room/watch-together/RealtimeDanmakuCard'
@@ -43,15 +43,6 @@ interface CommentHistoryResponse {
   success: boolean
   comments?: CommentItem[]
   message?: string
-}
-
-function formatTime(iso: string) {
-  const date = new Date(iso)
-  return date.toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
 }
 
 function getInitials(name: string) {
@@ -198,7 +189,12 @@ export function CommentPanel({
               ref={listRef}
               className="glass-bg flex-1 min-h-0 overflow-y-auto rounded-[var(--md-sys-shape-corner)] p-3"
             >
-              <Space direction="vertical" className="w-full" size="sm" align="start">
+              <Space
+                direction="vertical"
+                className="w-full"
+                size="sm"
+                align="start"
+              >
                 {comments.length === 0 && (
                   <div className="flex w-full flex-col items-center justify-center gap-2 py-8 text-center">
                     <MessagesSquare
@@ -263,7 +259,7 @@ export function CommentPanel({
                             type="secondary"
                             className="text-[9px] leading-none"
                           >
-                            {formatTime(comment.createdAt)}
+                            {formatIsoTime(comment.createdAt)}
                           </Text>
                         </div>
                         <Text className="mt-0.5 break-words text-xs leading-snug">

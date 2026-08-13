@@ -41,7 +41,8 @@ function getSocket(): Socket {
 
   // 调试钩子：暴露 socket 到 window 以便检查内部状态
   if (typeof window !== 'undefined') {
-    ;(window as unknown as { __debugSocket?: Socket }).__debugSocket = globalSocket
+    ;(window as unknown as { __debugSocket?: Socket }).__debugSocket =
+      globalSocket
   }
 
   return globalSocket

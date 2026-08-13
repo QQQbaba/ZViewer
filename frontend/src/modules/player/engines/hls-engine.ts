@@ -35,7 +35,7 @@ function canPlayNativeHls(video: HTMLVideoElement): boolean {
  */
 function createProxyLoader() {
   const BaseLoader = Hls.DefaultConfig.loader
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   return class ProxyLoader extends BaseLoader {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     load(context: any, config: any, callbacks: any): void {

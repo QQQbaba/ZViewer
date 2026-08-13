@@ -9,7 +9,7 @@ import { message } from '@/components/ui/message'
 import { useDanmakuStore } from '@/store/danmakuStore'
 import type { DanmakuItem } from '@/modules/danmaku/types'
 import { useRoomStore } from '@/store/roomStore'
-import { cn } from '@/lib/utils'
+import { cn, formatDuration } from '@/lib/utils'
 
 const WINDOW_SIZE = 5 // 秒，用于当前时间高亮范围
 const AUTO_SCROLL_RESUME_MS = 2000
@@ -42,12 +42,6 @@ function getDanmakuTypeLabel(
   if (mode === 4) return { label: '底部', variant: 'primary' }
   if (color !== 16777215) return { label: '彩色', variant: 'warning' }
   return { label: '滚动', variant: 'default' }
-}
-
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
 /**
@@ -89,7 +83,7 @@ const DanmakuListItem: FC<{
           isHighlighted && 'text-[var(--md-sys-color-on-primary-container)]'
         )}
       >
-        {formatTime(item.actualTime)}
+        {formatDuration(item.actualTime)}
       </Text>
       <span
         className={cn(
@@ -275,7 +269,7 @@ export function RealtimeDanmakuCard() {
     return allDanmaku.filter((item) => {
       if (item.content.toLowerCase().includes(query)) return true
       if (item.trackLabel.toLowerCase().includes(query)) return true
-      if (formatTime(item.actualTime).includes(query)) return true
+      if (formatDuration(item.actualTime).includes(query)) return true
       return false
     })
   }, [allDanmaku, searchQuery])
@@ -716,7 +710,7 @@ export function RealtimeDanmakuCard() {
                           {entry.item.content}
                         </Text>
                         <Text type="secondary" className="text-[10px]">
-                          {formatTime(entry.item.time)} · {entry.trackLabel}
+                          {formatDuration(entry.item.time)} · {entry.trackLabel}
                         </Text>
                       </div>
                       <button

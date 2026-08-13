@@ -94,8 +94,9 @@ export function useHostPeerConnections(
     useState<RTCPeerConnection | null>(null)
   // 本地统计 PC：房主开始共享后即使没有观众也提供 outbound-rtp 统计
   // 无观众时 SharingStatusPanel 的 pc 不为 null，可显示帧率/分辨率/码率等
-  const [localStatsPc, setLocalStatsPc] =
-    useState<RTCPeerConnection | null>(null)
+  const [localStatsPc, setLocalStatsPc] = useState<RTCPeerConnection | null>(
+    null
+  )
   const [viewerIds, setViewerIds] = useState<string[]>([])
 
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())

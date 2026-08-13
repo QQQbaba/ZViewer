@@ -422,7 +422,8 @@ export function MovieListPanel({ isHost }: MovieListPanelProps) {
                         className="inline-flex min-w-0 max-w-full truncate"
                       >
                         {movie.sourceType === 'mp4' && movie.format
-                          ? FORMAT_LABELS[movie.format] || movie.format.toUpperCase()
+                          ? FORMAT_LABELS[movie.format] ||
+                            movie.format.toUpperCase()
                           : SOURCE_LABELS[movie.sourceType] || movie.sourceType}
                       </Tag>
                       {movie.pages && movie.pages.length > 1 && (

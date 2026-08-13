@@ -217,7 +217,7 @@ export async function resolveBilibiliOnline(
  * @throws sourceMeta 缺失或解析失败时抛错
  */
 export async function resolveAnimeOnline(
-  movie: Movie,
+  movie: Movie
 ): Promise<ResolvedMovieSource> {
   if (!movie.sourceMeta) {
     throw new Error('番剧源元数据缺失，请重新添加该番剧')

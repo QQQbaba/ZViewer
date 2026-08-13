@@ -481,126 +481,128 @@ export function RoomLayout({
 
   return (
     <>
-    <div
-      className={cn(
-        'flex flex-col items-center overflow-y-auto px-2 py-3 md:px-4 md:py-6',
-        webFullscreen
-          ? 'fixed inset-0 z-[100] h-screen min-h-0 items-stretch p-0 overflow-hidden'
-          : 'min-h-[calc(100vh-64px)]'
-      )}
-    >
-      {/* 网页全屏时仍然使用 Card，避免容器类型切换导致 WatchTogetherPanel 重新挂载、
-          ArtPlayer 重建而重新加载视频。通过 !important 覆盖 glass 样式，使内部 fixed
-          定位的 .zart-stage 能相对于 viewport 铺满整个窗口。 */}
-      <Card
-        disableAnimation={webFullscreen}
+      <div
         className={cn(
-          'relative flex flex-none flex-col overflow-hidden min-h-0 bg-transparent',
+          'flex flex-col items-center overflow-y-auto px-2 py-3 md:px-4 md:py-6',
           webFullscreen
-            ? 'h-full w-full !rounded-none !border-0 !bg-black !p-0 !shadow-none !backdrop-filter-none'
-            : 'w-full max-w-6xl p-3 md:p-6'
+            ? 'fixed inset-0 z-[100] h-screen min-h-0 items-stretch p-0 overflow-hidden'
+            : 'min-h-[calc(100vh-64px)]'
         )}
       >
-        {roomContent}
-      </Card>
+        {/* 网页全屏时仍然使用 Card，避免容器类型切换导致 WatchTogetherPanel 重新挂载、
+          ArtPlayer 重建而重新加载视频。通过 !important 覆盖 glass 样式，使内部 fixed
+          定位的 .zart-stage 能相对于 viewport 铺满整个窗口。 */}
+        <Card
+          disableAnimation={webFullscreen}
+          className={cn(
+            'relative flex flex-none flex-col overflow-hidden min-h-0 bg-transparent',
+            webFullscreen
+              ? 'h-full w-full !rounded-none !border-0 !bg-black !p-0 !shadow-none !backdrop-filter-none'
+              : 'w-full max-w-6xl p-3 md:p-6'
+          )}
+        >
+          {roomContent}
+        </Card>
 
-      {effectiveControls && !webFullscreen && !isNativeFullscreen && (
-        <div className="w-full max-w-6xl flex-none mt-2 md:mt-4">
-          {(() => {
-            if (controlChildren.length === 1) {
-              // 共享状态下评论区单独在下方时限制高度，避免无限撑开
-              return (
-                <div
-                  className={isSharing ? 'h-[360px] md:h-[500px]' : 'h-full'}
-                >
-                  {controlChildren[0]}
-                </div>
-              )
-            }
-            // 三个控制卡片固定等高 340px，内部内容各自滚动。
-            // 桌面端三列平铺；移动端改为横向滚动，避免纵向堆叠占用过多空间。
-            return (
-              <>
-                {/* 移动端：横向滚动卡片，顶部显示 Tab 标签便于切换 */}
-                <div className="flex flex-col gap-2 lg:hidden">
-                  {controlChildren.length > 1 && (
-                    <div className="flex items-center justify-between gap-1 px-1">
-                      <div className="flex flex-1 items-center justify-center gap-1">
-                        {mobileCardLabels.map((label, index) => (
-                          <button
-                            key={index}
-                            type="button"
-                            aria-label={`切换到${label}`}
-                            onClick={() => scrollToMobileCard(index)}
-                            className={cn(
-                              'min-w-[4rem] rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200',
-                              activeControlIndex === index
-                                ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md'
-                                : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                            )}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                      <button
-                        onClick={toggleRightPanel}
-                        aria-label={isRightPanelOpen ? '收起侧栏' : '展开侧栏'}
-                        aria-expanded={isRightPanelOpen}
-                        title={isRightPanelOpen ? '收起侧栏' : '展开侧栏'}
-                        className="glass flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 hover:scale-105 active:scale-95"
-                        style={{
-                          borderColor: 'var(--md-sys-color-outline-variant)',
-                          color: isRightPanelOpen
-                            ? 'var(--md-sys-color-primary)'
-                            : 'var(--md-sys-color-on-surface-variant)',
-                        }}
-                      >
-                        {isRightPanelOpen ? (
-                          <PanelRightClose className="h-4 w-4" />
-                        ) : (
-                          <PanelRight className="h-4 w-4" />
-                        )}
-                      </button>
-                    </div>
-                  )}
+        {effectiveControls && !webFullscreen && !isNativeFullscreen && (
+          <div className="w-full max-w-6xl flex-none mt-2 md:mt-4">
+            {(() => {
+              if (controlChildren.length === 1) {
+                // 共享状态下评论区单独在下方时限制高度，避免无限撑开
+                return (
                   <div
-                    ref={mobileCardsScrollRef}
-                    className="flex h-[340px] snap-x snap-mandatory gap-3 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]"
-                    onScroll={handleMobileCardsScroll}
+                    className={isSharing ? 'h-[360px] md:h-[500px]' : 'h-full'}
+                  >
+                    {controlChildren[0]}
+                  </div>
+                )
+              }
+              // 三个控制卡片固定等高 340px，内部内容各自滚动。
+              // 桌面端三列平铺；移动端改为横向滚动，避免纵向堆叠占用过多空间。
+              return (
+                <>
+                  {/* 移动端：横向滚动卡片，顶部显示 Tab 标签便于切换 */}
+                  <div className="flex flex-col gap-2 lg:hidden">
+                    {controlChildren.length > 1 && (
+                      <div className="flex items-center justify-between gap-1 px-1">
+                        <div className="flex flex-1 items-center justify-center gap-1">
+                          {mobileCardLabels.map((label, index) => (
+                            <button
+                              key={index}
+                              type="button"
+                              aria-label={`切换到${label}`}
+                              onClick={() => scrollToMobileCard(index)}
+                              className={cn(
+                                'min-w-[4rem] rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200',
+                                activeControlIndex === index
+                                  ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md'
+                                  : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                              )}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={toggleRightPanel}
+                          aria-label={
+                            isRightPanelOpen ? '收起侧栏' : '展开侧栏'
+                          }
+                          aria-expanded={isRightPanelOpen}
+                          title={isRightPanelOpen ? '收起侧栏' : '展开侧栏'}
+                          className="glass flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 hover:scale-105 active:scale-95"
+                          style={{
+                            borderColor: 'var(--md-sys-color-outline-variant)',
+                            color: isRightPanelOpen
+                              ? 'var(--md-sys-color-primary)'
+                              : 'var(--md-sys-color-on-surface-variant)',
+                          }}
+                        >
+                          {isRightPanelOpen ? (
+                            <PanelRightClose className="h-4 w-4" />
+                          ) : (
+                            <PanelRight className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                    )}
+                    <div
+                      ref={mobileCardsScrollRef}
+                      className="flex h-[340px] snap-x snap-mandatory gap-3 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]"
+                      onScroll={handleMobileCardsScroll}
+                    >
+                      {controlChildren.map((child, index) => (
+                        <div
+                          key={index}
+                          className="h-full w-[80vw] max-w-[320px] flex-shrink-0 snap-start"
+                        >
+                          {child}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* 桌面端：根据卡片数量动态列数，避免少量卡片时宽度过小。
+                    1 张 → 单列占满；2 张 → 两列；3 张及以上 → 三列。 */}
+                  <div
+                    className={cn(
+                      'hidden h-[340px] gap-4 lg:grid',
+                      controlChildren.length === 1 && 'lg:grid-cols-1',
+                      controlChildren.length === 2 && 'lg:grid-cols-2',
+                      controlChildren.length >= 3 && 'lg:grid-cols-3'
+                    )}
                   >
                     {controlChildren.map((child, index) => (
-                      <div
-                        key={index}
-                        className="h-full w-[80vw] max-w-[320px] flex-shrink-0 snap-start"
-                      >
-                        {child}
-                      </div>
+                      <Fragment key={index}>{child}</Fragment>
                     ))}
                   </div>
-                </div>
-                {/* 桌面端：根据卡片数量动态列数，避免少量卡片时宽度过小。
-                    1 张 → 单列占满；2 张 → 两列；3 张及以上 → 三列。 */}
-                <div
-                  className={cn(
-                    'hidden h-[340px] gap-4 lg:grid',
-                    controlChildren.length === 1 && 'lg:grid-cols-1',
-                    controlChildren.length === 2 && 'lg:grid-cols-2',
-                    controlChildren.length >= 3 && 'lg:grid-cols-3'
-                  )}
-                >
-                  {controlChildren.map((child, index) => (
-                    <Fragment key={index}>{child}</Fragment>
-                  ))}
-                </div>
-              </>
-            )
-          })()}
-        </div>
-      )}
-    </div>
-    {/* 离开房间确认对话框（useRoomExitGuard 提供） */}
-    {exitGuardModal}
+                </>
+              )
+            })()}
+          </div>
+        )}
+      </div>
+      {/* 离开房间确认对话框（useRoomExitGuard 提供） */}
+      {exitGuardModal}
     </>
   )
 }
