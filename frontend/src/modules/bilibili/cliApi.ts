@@ -75,11 +75,30 @@ interface CliResolveResponse {
   currentPage?: number
 }
 
+/** CLI 代理连接失败（网络不可达 / CORS / 进程未启动） */
+export class CliConnectionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CliConnectionError'
+  }
+}
+
+/** CLI 代理解析失败（后端返回错误或响应数据不完整） */
+export class CliResolveError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CliResolveError'
+  }
+}
+
 /**
  * 通过本地 CLI 代理解析 B站 视频。
  *
  * CLI 使用用户自己的 Cookie 向后端 /api/cli/resolve 请求，可获取大会员等高画质地址。
  * 解析成功后，本函数将返回的 CDN URL 重写为 CLI 代理 URL，浏览器直接请求本地即可播放。
+ *
+ * 失败时抛出 CliConnectionError（网络不可达）或 CliResolveError（解析失败），
+ * 调用方可据此决定是否回退到服务器端解析。
  *
  * @param proxyUrl CLI 本地代理地址，例如 http://127.0.0.1:9333
  * @param bvid BV 号
@@ -113,14 +132,31 @@ export async function resolveBilibiliViaCli(
     params.set('forceDash', 'true')
   }
 
-  const res = await fetch(`${base}/resolve?${params.toString()}`, {
-    method: 'GET',
-  })
+  let res: Response
+  try {
+    res = await fetch(`${base}/resolve?${params.toString()}`, {
+      method: 'GET',
+    })
+  } catch {
+    // fetch 抛出 TypeError：网络不可达、CORS 被拦截、进程未启动等
+    throw new CliConnectionError(
+      'CLI 代理连接失败，请确认本地 zcontrol-cli 已启动'
+    )
+  }
 
-  const data = (await res.json()) as CliResolveResponse
+  let data: CliResolveResponse
+  try {
+    data = (await res.json()) as CliResolveResponse
+  } catch {
+    throw new CliResolveError(
+      `CLI 代理返回了无效响应（HTTP ${res.status}）`
+    )
+  }
 
   if (!res.ok || data.success === false || !data.videoUrl) {
-    throw new Error(data.message || 'CLI 解析 B站 视频失败')
+    throw new CliResolveError(
+      data.message || `CLI 解析 B站 视频失败（HTTP ${res.status}）`
+    )
   }
 
   const resolved: ResolvedSource = {
