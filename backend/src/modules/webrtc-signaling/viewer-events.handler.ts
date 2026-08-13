@@ -27,36 +27,41 @@ export class ViewerEventsHandler implements SocketEventHandler {
         payload: { roomId: string },
         callback?: (response: { success: boolean; message?: string }) => void,
       ) => {
-        if (!socket.rooms.has(payload.roomId)) {
-          return callback?.({ success: false, message: '不在该房间中' });
+        try {
+          if (!socket.rooms.has(payload.roomId)) {
+            return callback?.({ success: false, message: '不在该房间中' });
+          }
+
+          const sessionRepo = AppDataSource.getRepository(Session);
+          const sharer = await sessionRepo.findOneBy({
+            roomId: payload.roomId,
+            role: 'sharer',
+            endedAt: IsNull(),
+          });
+          if (!sharer) {
+            return callback?.({ success: false, message: '分享端不在线' });
+          }
+
+          console.log(
+            `[viewer-ready] forward from viewer=${socket.id} to sharer=${sharer.socketId} room=${payload.roomId}`,
+          );
+          io.to(sharer.socketId).emit('viewer-ready', {
+            from: socket.id,
+          });
+
+          // 推送影片列表与当前影片
+          io.to(socket.id).emit('movie-list', {
+            movies: roomStateService.getMovies(payload.roomId),
+          });
+          io.to(socket.id).emit('current-movie', {
+            movieId: roomStateService.getCurrentMovieId(payload.roomId),
+          });
+
+          callback?.({ success: true });
+        } catch (err) {
+          console.error('[viewer-ready] error:', err);
+          callback?.({ success: false, message: '处理失败' });
         }
-
-        const sessionRepo = AppDataSource.getRepository(Session);
-        const sharer = await sessionRepo.findOneBy({
-          roomId: payload.roomId,
-          role: 'sharer',
-          endedAt: IsNull(),
-        });
-        if (!sharer) {
-          return callback?.({ success: false, message: '分享端不在线' });
-        }
-
-        console.log(
-          `[viewer-ready] forward from viewer=${socket.id} to sharer=${sharer.socketId} room=${payload.roomId}`,
-        );
-        io.to(sharer.socketId).emit('viewer-ready', {
-          from: socket.id,
-        });
-
-        // 推送影片列表与当前影片
-        io.to(socket.id).emit('movie-list', {
-          movies: roomStateService.getMovies(payload.roomId),
-        });
-        io.to(socket.id).emit('current-movie', {
-          movieId: roomStateService.getCurrentMovieId(payload.roomId),
-        });
-
-        callback?.({ success: true });
       },
     );
 
@@ -67,18 +72,23 @@ export class ViewerEventsHandler implements SocketEventHandler {
         payload: { roomId: string },
         callback?: (response: { success: boolean; message?: string }) => void,
       ) => {
-        if (!(await roomPermissionService.isRoomHost(socket, payload.roomId))) {
-          return callback?.({ success: false, message: '无权限' });
+        try {
+          if (!(await roomPermissionService.isRoomHost(socket, payload.roomId))) {
+            return callback?.({ success: false, message: '无权限' });
+          }
+
+          console.log(
+            `[sharer-ready] broadcast from sharer=${socket.id} to room=${payload.roomId}`,
+          );
+          socket.to(payload.roomId).emit('sharer-ready', {
+            roomId: payload.roomId,
+          });
+
+          callback?.({ success: true });
+        } catch (err) {
+          console.error('[sharer-ready] error:', err);
+          callback?.({ success: false, message: '处理失败' });
         }
-
-        console.log(
-          `[sharer-ready] broadcast from sharer=${socket.id} to room=${payload.roomId}`,
-        );
-        socket.to(payload.roomId).emit('sharer-ready', {
-          roomId: payload.roomId,
-        });
-
-        callback?.({ success: true });
       },
     );
   }

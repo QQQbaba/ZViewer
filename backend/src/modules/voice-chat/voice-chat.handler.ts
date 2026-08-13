@@ -103,28 +103,36 @@ export class VoiceChatHandler implements SocketEventHandler {
       mediaTs?: number;
       encoded?: boolean;
     }) => {
-      const members = voiceMembers.get(payload.roomId);
-      if (!members || !members.has(socket.id)) return;
+      try {
+        const members = voiceMembers.get(payload.roomId);
+        if (!members || !members.has(socket.id)) return;
 
-      socket.to(payload.roomId).emit('voice-audio-data', {
-        from: socket.id,
-        data: payload.data,
-        sampleRate: payload.sampleRate,
-        timestamp: payload.timestamp,
-        mediaTs: payload.mediaTs,
-        encoded: payload.encoded,
-      });
+        socket.to(payload.roomId).emit('voice-audio-data', {
+          from: socket.id,
+          data: payload.data,
+          sampleRate: payload.sampleRate,
+          timestamp: payload.timestamp,
+          mediaTs: payload.mediaTs,
+          encoded: payload.encoded,
+        });
+      } catch (err) {
+        console.error('[voice-audio-data] error:', err);
+      }
     });
 
     // --- 语音编解码器配置转发 ---
     socket.on('voice-codec-config', (payload: { roomId: string; description: ArrayBuffer }) => {
-      const members = voiceMembers.get(payload.roomId);
-      if (!members || !members.has(socket.id)) return;
+      try {
+        const members = voiceMembers.get(payload.roomId);
+        if (!members || !members.has(socket.id)) return;
 
-      socket.to(payload.roomId).emit('voice-codec-config', {
-        from: socket.id,
-        description: payload.description,
-      });
+        socket.to(payload.roomId).emit('voice-codec-config', {
+          from: socket.id,
+          description: payload.description,
+        });
+      } catch (err) {
+        console.error('[voice-codec-config] error:', err);
+      }
     });
 
     // --- 断开连接时自动清理语音聊天状态 ---

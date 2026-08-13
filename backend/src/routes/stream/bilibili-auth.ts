@@ -151,8 +151,13 @@ router.get('/bilibili/qr/poll', async (req: AuthenticatedRequest, res) => {
 
 // 查询当前登录状态
 router.get('/bilibili/login-status', async (req: AuthenticatedRequest, res) => {
-  const userId = req.user?.userId;
-  res.json({ success: true, loggedIn: !!(await getUserCookie(userId)) });
+  try {
+    const userId = req.user?.userId;
+    res.json({ success: true, loggedIn: !!(await getUserCookie(userId)) });
+  } catch (err) {
+    console.error('login-status error:', err);
+    res.status(500).json({ success: false, message: '查询登录状态失败' });
+  }
 });
 
 // Cookie 登录 B站（手动粘贴 Cookie）
@@ -211,13 +216,18 @@ router.post('/bilibili/cookie-login', async (req: AuthenticatedRequest, res) => 
 
 // 退出 B站登录
 router.post('/bilibili/logout', async (req: AuthenticatedRequest, res) => {
-  const userId = req.user?.userId;
-  if (userId !== undefined && userId !== null) {
-    const userIdStr = String(userId);
-    await clearCredential(userIdStr);
-    invalidateUserInfo(userIdStr);
+  try {
+    const userId = req.user?.userId;
+    if (userId !== undefined && userId !== null) {
+      const userIdStr = String(userId);
+      await clearCredential(userIdStr);
+      invalidateUserInfo(userIdStr);
+    }
+    res.json({ success: true, message: '已退出登录' });
+  } catch (err) {
+    console.error('bilibili logout error:', err);
+    res.status(500).json({ success: false, message: '退出登录失败' });
   }
-  res.json({ success: true, message: '已退出登录' });
 });
 
 // 获取当前登录 B站 账号信息

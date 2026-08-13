@@ -42,6 +42,8 @@ export class PlaybackBroadcasterService {
       void playbackMemoryService.cleanupStaleCache();
       void import('../room/room-state.service').then(({ roomStateService }) => {
         roomStateService.cleanupStaleStates();
+      }).catch((err) => {
+        console.error('[cleanup] room-state 动态导入失败:', err);
       });
     }, 30000);
   }
