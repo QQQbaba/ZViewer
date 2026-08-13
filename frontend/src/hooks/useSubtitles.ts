@@ -230,9 +230,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     async (movieId: number): Promise<number> => {
       if (!isHost) return 0
       try {
-        const res = await apiFetch(
-          `/api/subtitles/search?movieId=${movieId}`
-        )
+        const res = await apiFetch(`/api/subtitles/search?movieId=${movieId}`)
         const data = (await res.json()) as {
           success: boolean
           subtitles?: { filename: string; format: string; content: string }[]
@@ -280,12 +278,19 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     async (filePath: string): Promise<number> => {
       if (!isHost) return 0
 
-      let tracks: { index: number; language: string | null; title: string | null }[]
+      let tracks: {
+        index: number
+        language: string | null
+        title: string | null
+      }[]
       try {
         const resolved = await resolveServerFile(filePath)
         tracks = resolved.subtitleTracks ?? []
       } catch (err) {
-        console.error('[useSubtitles] resolve server file for embedded subtitles failed:', err)
+        console.error(
+          '[useSubtitles] resolve server file for embedded subtitles failed:',
+          err
+        )
         return 0
       }
       if (tracks.length === 0) return 0
@@ -298,7 +303,11 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
           const label = track.title || track.language || `轨道 ${track.index}`
           loaded.push({ cues, label, lang: track.language || undefined })
         } catch (err) {
-          console.error('[useSubtitles] extract embedded subtitle failed:', track.index, err)
+          console.error(
+            '[useSubtitles] extract embedded subtitle failed:',
+            track.index,
+            err
+          )
         }
       }
 
@@ -308,8 +317,10 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         const next: SubtitleState = {
           ...prev,
           subtitleTracks: [...prev.subtitleTracks, ...loaded],
-          subtitleEnabled: prev.subtitleEnabled || prev.subtitleTracks.length === 0,
-          activeTrackIndex: prev.subtitleTracks.length === 0 ? 0 : prev.activeTrackIndex,
+          subtitleEnabled:
+            prev.subtitleEnabled || prev.subtitleTracks.length === 0,
+          activeTrackIndex:
+            prev.subtitleTracks.length === 0 ? 0 : prev.activeTrackIndex,
         }
         broadcast(next)
         return next

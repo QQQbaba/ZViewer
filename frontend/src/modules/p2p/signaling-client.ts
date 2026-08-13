@@ -9,11 +9,7 @@
  */
 import type { Socket } from 'socket.io-client'
 import { P2P_SIGNAL_MARK } from './constants'
-import type {
-  P2PSignalPayload,
-  P2PRole,
-  SignalEnvelope,
-} from './types'
+import type { P2PSignalPayload, P2PRole, SignalEnvelope } from './types'
 
 function isP2PSignal(data: unknown): data is P2PSignalPayload {
   return (
@@ -30,10 +26,7 @@ export class SignalingClient {
   private readonly handlers: {
     onOffer: (from: string, sdp: RTCSessionDescriptionInit) => void
     onAnswer: (from: string, sdp: RTCSessionDescriptionInit) => void
-    onIceCandidate: (
-      from: string,
-      candidate: RTCIceCandidateInit
-    ) => void
+    onIceCandidate: (from: string, candidate: RTCIceCandidateInit) => void
   }
 
   constructor(
@@ -42,10 +35,7 @@ export class SignalingClient {
     handlers: {
       onOffer: (from: string, sdp: RTCSessionDescriptionInit) => void
       onAnswer: (from: string, sdp: RTCSessionDescriptionInit) => void
-      onIceCandidate: (
-        from: string,
-        candidate: RTCIceCandidateInit
-      ) => void
+      onIceCandidate: (from: string, candidate: RTCIceCandidateInit) => void
     }
   ) {
     this.socket = socket
@@ -117,9 +107,7 @@ export class SignalingClient {
     this.handlers.onAnswer(envelope.from, envelope.data.sdp)
   }
 
-  private handleIceCandidate = (
-    envelope: SignalEnvelope<unknown>
-  ): void => {
+  private handleIceCandidate = (envelope: SignalEnvelope<unknown>): void => {
     if (!isP2PSignal(envelope.data) || !envelope.data.candidate) return
     this.handlers.onIceCandidate(envelope.from, envelope.data.candidate)
   }

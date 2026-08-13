@@ -50,11 +50,7 @@ import {
   extractRootKey,
   listServerRoots,
 } from './serverFilesApi'
-import type {
-  FfmpegStatus,
-  ServerFileEntry,
-  ServerFileRoot,
-} from './types'
+import type { FfmpegStatus, ServerFileEntry, ServerFileRoot } from './types'
 
 /** 需要大会员的清晰度 qn 列表 */
 const VIP_ONLY_QNS = [112, 116, 120, 125, 126, 127]
@@ -236,11 +232,7 @@ export function BilibiliDownloadModal({
 
   // 完全关闭
   const handleClose = () => {
-    if (
-      stage === 'parsing' ||
-      stage === 'downloading' ||
-      stage === 'merging'
-    )
+    if (stage === 'parsing' || stage === 'downloading' || stage === 'merging')
       return
     resetToInput()
     setUrl('')
@@ -753,11 +745,7 @@ export function BilibiliDownloadModal({
                 size="sm"
                 icon={<Download className="h-4 w-4" />}
                 onClick={() => void handleDownload()}
-                disabled={
-                  !!stage ||
-                  readonly ||
-                  (requiresDash && !canUseDash)
-                }
+                disabled={!!stage || readonly || (requiresDash && !canUseDash)}
               >
                 开始下载
               </Button>

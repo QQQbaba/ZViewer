@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type Artplayer from 'artplayer'
-import { cn } from '@/lib/utils'
+import { cn, formatDuration } from '@/lib/utils'
 import { PlayerControlBar } from './PlayerControlBar'
 import { Text } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
@@ -52,17 +52,6 @@ import {
   requestFullscreen,
   onFullscreenChange,
 } from '@/lib/fullscreen-utils'
-
-// 格式化跳转时间用于提示信息（mm:ss 或 h:mm:ss）
-function formatSeekTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return '00:00'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  const mm = m.toString().padStart(2, '0')
-  const ss = s.toString().padStart(2, '0')
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
-}
 
 interface WatchTogetherCoreProps {
   roomId: string
@@ -870,7 +859,7 @@ export function WatchTogetherCore({
         // 自动通过模式下申请时已提示“已跳转”，此处不再重复提示
         if (!autoApproveRef.current) {
           addPlayerNotice(
-            `房主已同意跳转到 ${formatSeekTime(data.time ?? 0)}`,
+            `房主已同意跳转到 ${formatDuration(data.time ?? 0)}`,
             'success'
           )
         }
@@ -968,7 +957,7 @@ export function WatchTogetherCore({
   }, [socket, setMode])
 
   // ── 申请审批操作（与重构前一致）─────────────────────────
-  const handleApproveJoin = () => {
+  const handleApproveJoin = useCallback(() => {
     if (!confirmJoin) return
     const viewerSocketId = confirmJoin.viewerSocketId
     if (!socket || !viewerSocketId) return
@@ -984,9 +973,9 @@ export function WatchTogetherCore({
       }
     )
     setConfirmJoin(null)
-  }
+  }, [confirmJoin, socket])
 
-  const handleRejectJoin = () => {
+  const handleRejectJoin = useCallback(() => {
     if (!confirmJoin) return
     const viewerSocketId = confirmJoin.viewerSocketId
     if (!socket || !viewerSocketId) return
@@ -1002,9 +991,9 @@ export function WatchTogetherCore({
       }
     )
     setConfirmJoin(null)
-  }
+  }, [confirmJoin, socket])
 
-  const handleAcceptSeek = () => {
+  const handleAcceptSeek = useCallback(() => {
     if (!seekRequest) return
     const { viewerSocketIds, time } = seekRequest
     if (!socket || viewerSocketIds.length === 0) return
@@ -1019,9 +1008,9 @@ export function WatchTogetherCore({
       )
     }
     setSeekRequest(null)
-  }
+  }, [seekRequest, socket, videoRef, roomId])
 
-  const handleRejectSeek = () => {
+  const handleRejectSeek = useCallback(() => {
     if (!seekRequest) return
     const { viewerSocketIds } = seekRequest
     if (!socket || viewerSocketIds.length === 0) return
@@ -1033,9 +1022,9 @@ export function WatchTogetherCore({
       )
     }
     setSeekRequest(null)
-  }
+  }, [seekRequest, socket, roomId])
 
-  const handleAcceptPause = () => {
+  const handleAcceptPause = useCallback(() => {
     if (!pauseRequest) return
     const { viewerSocketIds } = pauseRequest
     if (!socket || viewerSocketIds.length === 0) return
@@ -1048,9 +1037,9 @@ export function WatchTogetherCore({
       )
     }
     setPauseRequest(null)
-  }
+  }, [pauseRequest, socket, videoRef, roomId])
 
-  const handleRejectPause = () => {
+  const handleRejectPause = useCallback(() => {
     if (!pauseRequest) return
     const { viewerSocketIds } = pauseRequest
     if (!socket || viewerSocketIds.length === 0) return
@@ -1062,9 +1051,9 @@ export function WatchTogetherCore({
       )
     }
     setPauseRequest(null)
-  }
+  }, [pauseRequest, socket, roomId])
 
-  const handleAcceptPlay = () => {
+  const handleAcceptPlay = useCallback(() => {
     if (!playRequest) return
     const { viewerSocketIds } = playRequest
     if (!socket || viewerSocketIds.length === 0) return
@@ -1079,9 +1068,9 @@ export function WatchTogetherCore({
       )
     }
     setPlayRequest(null)
-  }
+  }, [playRequest, socket, videoRef, roomId])
 
-  const handleRejectPlay = () => {
+  const handleRejectPlay = useCallback(() => {
     if (!playRequest) return
     const { viewerSocketIds } = playRequest
     if (!socket || viewerSocketIds.length === 0) return
@@ -1093,7 +1082,7 @@ export function WatchTogetherCore({
       )
     }
     setPlayRequest(null)
-  }
+  }, [playRequest, socket, roomId])
 
   // ── 观众申请发起（与重构前一致）─────────────────────────
   const handleRequestSeek = useCallback(
@@ -1392,110 +1381,126 @@ export function WatchTogetherCore({
   // React Compiler 误报：以下 push 操作构建的是纯渲染数据（通知列表），
   // 回调在后续事件处理中执行，不存在 render 期间读取 ref 的问题。
   /* eslint-disable react-hooks/refs */
-  const requestNotifications: RequestNotificationItem[] = []
-  if (confirmJoin) {
-    requestNotifications.push({
-      id: 'join',
-      title: '观看请求',
-      okText: '允许',
-      cancelText: '拒绝',
-      onOk: handleApproveJoin,
-      onCancel: handleRejectJoin,
-      autoCloseMs: 12000,
-      content: (
-        <>
-          有观看者请求加入房间（
-          <span style={{ color: 'var(--md-sys-color-primary)' }}>
-            {confirmJoin.viewerSocketId.slice(0, 8)}
-          </span>
-          ），是否允许？
-        </>
-      ),
-    })
-  }
-  if (seekRequest) {
-    requestNotifications.push({
-      id: 'seek',
-      title: '跳转申请',
-      okText: '同意',
-      cancelText: '拒绝',
-      onOk: handleAcceptSeek,
-      onCancel: handleRejectSeek,
-      autoCloseMs: 12000,
-      content: (
-        <>
-          观众{' '}
-          <span style={{ color: 'var(--md-sys-color-primary)' }}>
-            {seekRequest.viewerUsernames[0] ||
-              seekRequest.viewerSocketIds[0].slice(0, 8)}
-            {seekRequest.viewerSocketIds.length > 1
-              ? ` 等 ${seekRequest.viewerSocketIds.length} 位观众`
-              : ''}
-          </span>{' '}
-          申请跳转到{' '}
-          <span style={{ color: 'var(--md-sys-color-primary)' }}>
-            {formatSeekTime(seekRequest.time)}
-          </span>
-        </>
-      ),
-    })
-  }
-  if (pauseRequest) {
-    requestNotifications.push({
-      id: 'pause',
-      title: '暂停申请',
-      okText: '同意',
-      cancelText: '拒绝',
-      onOk: handleAcceptPause,
-      onCancel: handleRejectPause,
-      autoCloseMs: 12000,
-      content: (
-        <>
-          观众{' '}
-          <span style={{ color: 'var(--md-sys-color-primary)' }}>
-            {pauseRequest.viewerUsernames[0] ||
-              pauseRequest.viewerSocketIds[0].slice(0, 8)}
-            {pauseRequest.viewerSocketIds.length > 1
-              ? ` 等 ${pauseRequest.viewerSocketIds.length} 位观众`
-              : ''}
-          </span>{' '}
-          申请暂停播放
-        </>
-      ),
-    })
-  }
-  if (playRequest) {
-    requestNotifications.push({
-      id: 'play',
-      title: '播放申请',
-      okText: '同意',
-      cancelText: '拒绝',
-      onOk: handleAcceptPlay,
-      onCancel: handleRejectPlay,
-      autoCloseMs: 12000,
-      content: (
-        <>
-          观众{' '}
-          <span style={{ color: 'var(--md-sys-color-primary)' }}>
-            {playRequest.viewerUsernames[0] ||
-              playRequest.viewerSocketIds[0].slice(0, 8)}
-            {playRequest.viewerSocketIds.length > 1
-              ? ` 等 ${playRequest.viewerSocketIds.length} 位观众`
-              : ''}
-          </span>{' '}
-          申请继续播放
-        </>
-      ),
-    })
-  }
+  const requestNotifications: RequestNotificationItem[] = useMemo(() => {
+    const list: RequestNotificationItem[] = []
+    if (confirmJoin) {
+      list.push({
+        id: 'join',
+        title: '观看请求',
+        okText: '允许',
+        cancelText: '拒绝',
+        onOk: handleApproveJoin,
+        onCancel: handleRejectJoin,
+        autoCloseMs: 12000,
+        content: (
+          <>
+            有观看者请求加入房间（
+            <span style={{ color: 'var(--md-sys-color-primary)' }}>
+              {confirmJoin.viewerSocketId.slice(0, 8)}
+            </span>
+            ），是否允许？
+          </>
+        ),
+      })
+    }
+    if (seekRequest) {
+      list.push({
+        id: 'seek',
+        title: '跳转申请',
+        okText: '同意',
+        cancelText: '拒绝',
+        onOk: handleAcceptSeek,
+        onCancel: handleRejectSeek,
+        autoCloseMs: 12000,
+        content: (
+          <>
+            观众{' '}
+            <span style={{ color: 'var(--md-sys-color-primary)' }}>
+              {seekRequest.viewerUsernames[0] ||
+                seekRequest.viewerSocketIds[0].slice(0, 8)}
+              {seekRequest.viewerSocketIds.length > 1
+                ? ` 等 ${seekRequest.viewerSocketIds.length} 位观众`
+                : ''}
+            </span>{' '}
+            申请跳转到{' '}
+            <span style={{ color: 'var(--md-sys-color-primary)' }}>
+              {formatDuration(seekRequest.time)}
+            </span>
+          </>
+        ),
+      })
+    }
+    if (pauseRequest) {
+      list.push({
+        id: 'pause',
+        title: '暂停申请',
+        okText: '同意',
+        cancelText: '拒绝',
+        onOk: handleAcceptPause,
+        onCancel: handleRejectPause,
+        autoCloseMs: 12000,
+        content: (
+          <>
+            观众{' '}
+            <span style={{ color: 'var(--md-sys-color-primary)' }}>
+              {pauseRequest.viewerUsernames[0] ||
+                pauseRequest.viewerSocketIds[0].slice(0, 8)}
+              {pauseRequest.viewerSocketIds.length > 1
+                ? ` 等 ${pauseRequest.viewerSocketIds.length} 位观众`
+                : ''}
+            </span>{' '}
+            申请暂停播放
+          </>
+        ),
+      })
+    }
+    if (playRequest) {
+      list.push({
+        id: 'play',
+        title: '播放申请',
+        okText: '同意',
+        cancelText: '拒绝',
+        onOk: handleAcceptPlay,
+        onCancel: handleRejectPlay,
+        autoCloseMs: 12000,
+        content: (
+          <>
+            观众{' '}
+            <span style={{ color: 'var(--md-sys-color-primary)' }}>
+              {playRequest.viewerUsernames[0] ||
+                playRequest.viewerSocketIds[0].slice(0, 8)}
+              {playRequest.viewerSocketIds.length > 1
+                ? ` 等 ${playRequest.viewerSocketIds.length} 位观众`
+                : ''}
+            </span>{' '}
+            申请继续播放
+          </>
+        ),
+      })
+    }
+    return list
+  }, [
+    confirmJoin,
+    seekRequest,
+    pauseRequest,
+    playRequest,
+    handleApproveJoin,
+    handleRejectJoin,
+    handleAcceptSeek,
+    handleRejectSeek,
+    handleAcceptPause,
+    handleRejectPause,
+    handleAcceptPlay,
+    handleRejectPlay,
+  ])
   /* eslint-enable react-hooks/refs */
 
-  const handleCloseNotification = (id: string) => {
+  const handleCloseNotification = useCallback((id: string) => {
     if (id === 'join') setConfirmJoin(null)
     else if (id === 'seek') setSeekRequest(null)
     else if (id === 'pause') setPauseRequest(null)
     else if (id === 'play') setPlayRequest(null)
-  }
+  }, [])
 
   return (
     <>

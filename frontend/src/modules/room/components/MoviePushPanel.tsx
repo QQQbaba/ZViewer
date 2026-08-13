@@ -56,10 +56,7 @@ import {
   resolveBilibiliWithOptions,
   filterQualitiesByVip,
 } from '@/modules/bilibili/bilibiliApi'
-import {
-  extractBvid,
-  resolveBilibiliViaCli,
-} from '@/modules/bilibili/cliApi'
+import { extractBvid, resolveBilibiliViaCli } from '@/modules/bilibili/cliApi'
 import { getActiveCliProxyUrl } from '@/modules/room/watch-together/movie-source-resolver'
 import {
   resolveOpenList,
@@ -758,10 +755,8 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           true
         )
       } else {
-        resolved = await resolveBilibili(
-          url.trim(),
-          undefined,
-          (_step, msg) => setResolveProgress(msg)
+        resolved = await resolveBilibili(url.trim(), undefined, (_step, msg) =>
+          setResolveProgress(msg)
         )
       }
       setResolvedMovie(resolved)
@@ -1948,8 +1943,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         >
           <div className="flex max-h-[400px] flex-col gap-1.5 overflow-y-auto">
             {resolvedMovie.pages.map((page) => {
-              const isSelected =
-                page.page === (resolvedMovie.currentPage ?? 1)
+              const isSelected = page.page === (resolvedMovie.currentPage ?? 1)
               return (
                 <div
                   key={page.page}

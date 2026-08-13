@@ -191,9 +191,10 @@ export function VoiceChatPanel({
                           className="h-full rounded-full transition-[width] duration-75"
                           style={{
                             width: `${Math.max(2, audioLevel * 100)}%`,
-                            backgroundColor: audioLevel > 0.05
-                              ? 'var(--md-sys-color-primary)'
-                              : 'var(--md-sys-color-outline)',
+                            backgroundColor:
+                              audioLevel > 0.05
+                                ? 'var(--md-sys-color-primary)'
+                                : 'var(--md-sys-color-outline)',
                           }}
                         />
                       </div>

@@ -151,12 +151,12 @@ export class P2PTunnel implements P2PTunnelInstance {
   handleAnswer(_from: string, sdp: RTCSessionDescriptionInit): void {
     const pc = this.pc
     if (!pc) return
-    void pc.setRemoteDescription(new RTCSessionDescription(sdp)).catch(
-      (err) => {
+    void pc
+      .setRemoteDescription(new RTCSessionDescription(sdp))
+      .catch((err) => {
         console.error('[P2PTunnel] setRemoteDescription(answer) error:', err)
         this.failWithFallback()
-      }
-    )
+      })
   }
 
   /** 双向收到 ICE candidate */

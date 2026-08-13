@@ -1,5 +1,14 @@
 import { useRef, useState } from 'react'
-import { ChevronDown, Check, Plus, Upload, ScanSearch, Loader2, FolderOpen, FileText } from 'lucide-react'
+import {
+  ChevronDown,
+  Check,
+  Plus,
+  Upload,
+  ScanSearch,
+  Loader2,
+  FolderOpen,
+  FileText,
+} from 'lucide-react'
 import { Input } from '@/components/ui/Input'
 import { Switch } from '@/components/ui/Switch'
 import { Slider } from '@/components/ui/Slider'
@@ -40,7 +49,11 @@ interface SettingsPanelProps {
   onSelectSubtitleTrack?: (index: number) => void
   onAddSubtitleUrl?: (url: string, label?: string) => void
   onAddSubtitleFile?: (file: File) => void
-  onAddSubtitleContent?: (content: string, filename: string, format: string) => void
+  onAddSubtitleContent?: (
+    content: string,
+    filename: string,
+    format: string
+  ) => void
   onChangeSubtitleFontSize?: (size: number) => void
   onChangeSubtitleOffset?: (offset: number) => void
   onAutoSearchSubtitles?: () => Promise<number>
@@ -102,7 +115,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const isDanmakuView = !!danmakuStyle && (!isHost || settingsTab === 'danmaku')
   const isSubtitleView = isHost && (settingsTab === 'subtitle' || !danmakuStyle)
   const showAdvancedPanel = advancedOpen && isDanmakuView
-  const showBrowserPanel = browserOpen && isSubtitleView && browseMovieId != null
+  const showBrowserPanel =
+    browserOpen && isSubtitleView && browseMovieId != null
 
   const handleAddSubtitleUrl = () => {
     const url = subtitleUrlInput.trim()
@@ -139,7 +153,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
     setEmbeddedMsg('')
     try {
       const count = await onLoadEmbeddedSubtitles()
-      setEmbeddedMsg(count > 0 ? `提取 ${count} 条内嵌字幕` : '未检测到内嵌字幕')
+      setEmbeddedMsg(
+        count > 0 ? `提取 ${count} 条内嵌字幕` : '未检测到内嵌字幕'
+      )
     } catch {
       setEmbeddedMsg('提取失败')
     } finally {
@@ -436,17 +452,19 @@ export function SettingsPanel(props: SettingsPanelProps) {
                           )}
                         </>
                       )}
-                      {canAutoSearchSubtitles && browseMovieId != null && onAddSubtitleContent && (
-                        <Button
-                          variant={browserOpen ? 'primary' : 'secondary'}
-                          size="sm"
-                          className="h-7 w-full justify-center gap-1 text-xs"
-                          icon={<FolderOpen className="h-3 w-3" />}
-                          onClick={() => setBrowserOpen((v) => !v)}
-                        >
-                          {browserOpen ? '关闭浏览' : '浏览目录'}
-                        </Button>
-                      )}
+                      {canAutoSearchSubtitles &&
+                        browseMovieId != null &&
+                        onAddSubtitleContent && (
+                          <Button
+                            variant={browserOpen ? 'primary' : 'secondary'}
+                            size="sm"
+                            className="h-7 w-full justify-center gap-1 text-xs"
+                            icon={<FolderOpen className="h-3 w-3" />}
+                            onClick={() => setBrowserOpen((v) => !v)}
+                          >
+                            {browserOpen ? '关闭浏览' : '浏览目录'}
+                          </Button>
+                        )}
                     </div>
                   )}
                 </div>

@@ -9,7 +9,13 @@
  *   GET /api/subtitles/load?movieId=&path=    读取字幕内容
  */
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronLeft, Folder, FileText, Loader2, FileQuestion } from 'lucide-react'
+import {
+  ChevronLeft,
+  Folder,
+  FileText,
+  Loader2,
+  FileQuestion,
+} from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -102,7 +108,11 @@ export function SubtitleBrowser({ movieId, onSelect }: SubtitleBrowserProps) {
           setError(data.message || '加载字幕失败')
           return
         }
-        onSelect(data.content, data.filename || entry.name, data.format || 'srt')
+        onSelect(
+          data.content,
+          data.filename || entry.name,
+          data.format || 'srt'
+        )
       } catch (err) {
         setError(err instanceof Error ? err.message : '网络错误')
       } finally {
@@ -183,7 +193,8 @@ export function SubtitleBrowser({ movieId, onSelect }: SubtitleBrowserProps) {
                   onClick={() => handleEntryClick(entry)}
                   className={cn(
                     'flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
-                    clickable && 'hover:bg-[var(--md-sys-color-surface-container-highest)]',
+                    clickable &&
+                      'hover:bg-[var(--md-sys-color-surface-container-highest)]',
                     !clickable && 'cursor-default opacity-40',
                     entry.isSubtitle &&
                       'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)] hover:bg-[var(--md-sys-color-primary-container)]',

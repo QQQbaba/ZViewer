@@ -54,7 +54,7 @@ export function useRoomExitGuard() {
       setPendingPath(targetPath)
       setConfirmOpen(true)
     },
-    [needsGuard, navigate],
+    [needsGuard, navigate]
   )
 
   /** 确认离开：房主关闭房间，清除房间状态，导航到目标路径 */
@@ -64,7 +64,8 @@ export function useRoomExitGuard() {
     if (socket && activeRoomId) {
       // 通过 sessionStorage 判断是否为房主
       try {
-        const isHost = sessionStorage.getItem('zcontrol-host-room') === activeRoomId
+        const isHost =
+          sessionStorage.getItem('zcontrol-host-room') === activeRoomId
         if (isHost) {
           socket.emit('close-room', () => {
             /* ack */
@@ -107,12 +108,12 @@ export function useRoomExitGuard() {
         <div
           className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full"
           style={{
-            backgroundColor: 'var(--md-sys-color-error-container)',
+            backgroundColor: 'var(--md-sys-color-primary-container)',
           }}
         >
           <LogOut
             className="h-5 w-5"
-            style={{ color: 'var(--md-sys-color-on-error-container)' }}
+            style={{ color: 'var(--md-sys-color-on-primary-container)' }}
           />
         </div>
         <div className="flex-1">

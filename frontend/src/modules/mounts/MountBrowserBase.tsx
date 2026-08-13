@@ -12,7 +12,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { Text } from '@/components/ui/Typography'
-import { cn } from '@/lib/utils'
+import { cn, formatFileSize } from '@/lib/utils'
 
 export interface DirectoryEntry {
   name: string
@@ -29,14 +29,6 @@ interface MountBrowserBaseProps<T extends DirectoryEntry> {
   onClose: () => void
   onConfirm: (paths: string[]) => void
   browse: (mountId: number, path?: string) => Promise<T[]>
-}
-
-function formatSize(size?: number): string {
-  if (size === undefined || size === null) return ''
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
-  return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 function EntrySkeleton() {
@@ -193,7 +185,7 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
           <>
             {entry.size !== undefined && (
               <span className="shrink-0 text-[13px] text-[var(--md-sys-color-on-surface-variant)]">
-                {formatSize(entry.size)}
+                {formatFileSize(entry.size)}
               </span>
             )}
             {(showCheckbox || isSelected) && (

@@ -176,7 +176,12 @@ export async function resolveServerFile(
 export async function extractEmbeddedSubtitle(
   path: string,
   streamIndex: number
-): Promise<{ content: string; format: string; label: string; language: string | null }> {
+): Promise<{
+  content: string
+  format: string
+  label: string
+  language: string | null
+}> {
   const res = await apiFetch(
     `/api/server-files/extract-subtitle?path=${encodeURIComponent(path)}&index=${streamIndex}`
   )
@@ -448,7 +453,9 @@ export async function uploadFfmpeg(file: File): Promise<FfmpegStatus> {
 // ============ FFmpeg 状态检测与在线安装 ============
 
 /** 检测服务器 FFmpeg 状态。 */
-export async function checkFfmpeg(force: boolean = false): Promise<FfmpegStatus> {
+export async function checkFfmpeg(
+  force: boolean = false
+): Promise<FfmpegStatus> {
   const query = force ? '?force=true' : ''
   const res = await apiFetch(`/api/server-files/ffmpeg-status${query}`)
   const data = (await res.json()) as FfmpegStatus & { success?: boolean }

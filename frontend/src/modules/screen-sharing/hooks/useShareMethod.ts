@@ -1,9 +1,6 @@
 import { useEffect } from 'react'
 import type { Socket } from 'socket.io-client'
-import {
-  useRoomStore,
-  type ShareMethod,
-} from '@/store/roomStore'
+import { useRoomStore, type ShareMethod } from '@/store/roomStore'
 
 export type { ShareMethod }
 

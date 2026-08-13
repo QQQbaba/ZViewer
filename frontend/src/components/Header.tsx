@@ -259,6 +259,31 @@ export function Header() {
     }
   }
 
+  const handleDownloadCli = useCallback(() => {
+    const ua = navigator.userAgent.toLowerCase()
+    const isWindows = /windows nt|win32|win64/.test(ua)
+    const isMac = /macintosh|mac os x/.test(ua)
+    const isLinux = /linux/.test(ua)
+    if (isWindows) {
+      const a = document.createElement('a')
+      a.href = '/zviewer-cli-windows-amd64.exe'
+      a.download = 'zviewer-cli-windows-amd64.exe'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } else if (isMac || isLinux) {
+      window.open(
+        'https://github.com/Zero-wyc/ZViewerCLI',
+        '_blank',
+        'noopener,noreferrer'
+      )
+    } else {
+      message.info(
+        '请前往 https://github.com/Zero-wyc/ZViewerCLI 下载对应版本 CLI'
+      )
+    }
+  }, [])
+
   const menuItems: {
     icon: React.ReactNode
     label: string
@@ -322,30 +347,7 @@ export function Header() {
           </a>
           <button
             type="button"
-            onClick={() => {
-              const ua = navigator.userAgent.toLowerCase()
-              const isWindows = /windows nt|win32|win64/.test(ua)
-              const isMac = /macintosh|mac os x/.test(ua)
-              const isLinux = /linux/.test(ua)
-              if (isWindows) {
-                const a = document.createElement('a')
-                a.href = '/zviewer-cli-windows-amd64.exe'
-                a.download = 'zviewer-cli-windows-amd64.exe'
-                document.body.appendChild(a)
-                a.click()
-                document.body.removeChild(a)
-              } else if (isMac || isLinux) {
-                window.open(
-                  'https://github.com/Zero-wyc/ZViewerCLI',
-                  '_blank',
-                  'noopener,noreferrer'
-                )
-              } else {
-                message.info(
-                  '请前往 https://github.com/Zero-wyc/ZViewerCLI 下载对应版本 CLI'
-                )
-              }
-            }}
+            onClick={handleDownloadCli}
             className="p-2 rounded-[var(--md-sys-shape-corner)] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] bg-[var(--glass-bg)] text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]"
             style={{
               border: '1px solid var(--md-sys-color-outline)',

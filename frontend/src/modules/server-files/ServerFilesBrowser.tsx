@@ -10,20 +10,13 @@ import {
   extractRootKey,
 } from './serverFilesApi'
 import type { ServerFileEntry, ServerFileRoot } from './types'
+import { formatFileSize } from '@/lib/utils'
 
 interface ServerFilesBrowserProps {
   open: boolean
   onClose: () => void
   onSelectFile?: (path: string) => void
   selectable?: boolean
-}
-
-function formatSize(size?: number): string {
-  if (size === undefined || size === null) return ''
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
-  return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 export default function ServerFilesBrowser({
@@ -237,7 +230,7 @@ export default function ServerFilesBrowser({
                   <span className="truncate text-sm">{entry.name}</span>
                   {entry.size !== undefined && entry.type === 'file' && (
                     <span className="ml-auto shrink-0 text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                      {formatSize(entry.size)}
+                      {formatFileSize(entry.size)}
                     </span>
                   )}
                 </div>

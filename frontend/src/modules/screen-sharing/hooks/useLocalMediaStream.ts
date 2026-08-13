@@ -162,7 +162,11 @@ export function useLocalMediaStream(
       if (useTestStream) {
         message.info('测试模式：使用摄像头画面代替屏幕共享')
         mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { ...videoConstraints, width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: {
+            ...videoConstraints,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
           audio: shareSystemAudio,
         })
       } else {

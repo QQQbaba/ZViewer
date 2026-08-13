@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
+import { formatDuration } from '@/lib/utils'
 import { useShallow } from 'zustand/react/shallow'
 import { useSocket } from '@/hooks/useSocket'
 import { message } from '@/components/ui/message'
@@ -36,17 +37,6 @@ import {
   UrlExpiredError,
   DownloadAbortedError,
 } from '@/modules/player/services/buffer-mode'
-
-// 格式化跳转时间用于提示信息（mm:ss 或 h:mm:ss）
-function formatSeekTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return '00:00'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  const mm = m.toString().padStart(2, '0')
-  const ss = s.toString().padStart(2, '0')
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
-}
 
 export type SourceType =
   'url' | 'webdav' | 'ftp' | 'openlist' | 'smb' | 'bilibili' | string
@@ -733,13 +723,10 @@ export function useWatchTogether({
   // 观众端完全依赖 handleState 接收房主广播的 sourceUrl/audioUrl 进行 MSE attach，
   // 不独立解析（避免与房主状态冲突导致黑屏）。
   useEffect(() => {
-    ;(window as unknown as { __wtDebug?: unknown[] }).__wtDebug = (window as unknown as { __wtDebug?: unknown[] }).__wtDebug || []
-    ;(window as unknown as { __wtDebug?: unknown[] }).__wtDebug!.push({ step: 'effect', currentMovieId, isHost: isHostRef.current, moviesCount: movies.length })
     if (!currentMovieId) return
     if (!isHostRef.current) return
     const movie = movies.find((m) => m.id === currentMovieId)
     if (!movie) return
-    ;(window as unknown as { __wtDebug?: unknown[] }).__wtDebug!.push({ step: 'movieFound', id: movie.id, sourceType: movie.sourceType, format: movie.format, url: movie.url?.slice(0, 80) })
 
     // 避免 movies 列表刷新时重复加载同一部影片
     if (
@@ -892,7 +879,7 @@ export function useWatchTogether({
             broadcastState(state)
             sendControl('pause')
           }
-          message.info(`已恢复到 ${formatSeekTime(recoveryTime)}（已暂停）`)
+          message.info(`已恢复到 ${formatDuration(recoveryTime)}（已暂停）`)
         } else {
           video.currentTime = 0
           if (video.paused) {

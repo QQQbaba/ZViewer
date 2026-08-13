@@ -25,24 +25,14 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatDuration } from '@/lib/utils'
 import { DanmakuInput } from '@/components/VideoPlayer/parts/DanmakuInput'
 import type { WatchTogetherState } from '@/modules/sync-playback/types'
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const VOLUME_STORAGE_KEY = 'zc-player-volume'
 
-function formatMediaTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return '00:00'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  const mm = m.toString().padStart(2, '0')
-  const ss = s.toString().padStart(2, '0')
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
-}
-
-/** 弹幕开关图标：圆角屏幕内带“弹”字，关闭时叠加斜线。 */
+/** 弹幕开关图标：圆角屏幕内带"弹"字，关闭时叠加斜线。 */
 function DanmakuIcon({ off }: { off?: boolean }) {
   return (
     <svg
@@ -557,9 +547,9 @@ export function PlayerControlBar({
                 left: `${serverProgress * 100}%`,
                 opacity: Math.min(1, Math.max(0.35, absDiffSeconds / 3)),
               }}
-              title={`${canControl ? '服务器进度' : '房主进度'}: ${formatMediaTime(watchTogether.currentTime)}${
+              title={`${canControl ? '服务器进度' : '房主进度'}: ${formatDuration(watchTogether.currentTime)}${
                 absDiffSeconds > 0.5
-                  ? ` (${serverTimeDiff > 0 ? '落后' : '超前'} ${formatMediaTime(absDiffSeconds)})`
+                  ? ` (${serverTimeDiff > 0 ? '落后' : '超前'} ${formatDuration(absDiffSeconds)})`
                   : ''
               }`}
             >
@@ -621,9 +611,9 @@ export function PlayerControlBar({
 
           {/* 时间 */}
           <div className="select-none px-0.5 md:px-1 text-[10px] md:text-xs font-medium tabular-nums text-[var(--md-sys-color-on-surface)]">
-            <span>{formatMediaTime(currentTime)}</span>
+            <span>{formatDuration(currentTime)}</span>
             <span className="mx-0.5 opacity-60">/</span>
-            <span className="opacity-80">{formatMediaTime(duration)}</span>
+            <span className="opacity-80">{formatDuration(duration)}</span>
           </div>
 
           {/* 弹幕开关：开启时不显示底色，通过图标是否带斜线区分状态 */}

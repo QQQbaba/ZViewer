@@ -108,55 +108,52 @@ export const AnnotationLayer = forwardRef<
    * 在当前 canvas 上绘制单条笔画。
    * 使用归一化坐标 (0~1) × canvas CSS 尺寸，DPR 缩放由 ctx.scale 处理。
    */
-  const renderStroke = useCallback(
-    (stroke: AnnotationStroke) => {
-      const canvas = canvasRef.current
-      const ctx = ctxRef.current
-      if (!canvas || !ctx) return
+  const renderStroke = useCallback((stroke: AnnotationStroke) => {
+    const canvas = canvasRef.current
+    const ctx = ctxRef.current
+    if (!canvas || !ctx) return
 
-      const w = canvas.clientWidth
-      const h = canvas.clientHeight
-      if (!w || !h) return
+    const w = canvas.clientWidth
+    const h = canvas.clientHeight
+    if (!w || !h) return
 
-      ctx.save()
-      if (stroke.type === 'erase') {
-        ctx.globalCompositeOperation = 'destination-out'
-        ctx.strokeStyle = 'rgba(0,0,0,1)'
-        ctx.lineWidth = (stroke.width ?? 3) * 3
-      } else {
-        ctx.globalCompositeOperation = 'source-over'
-        ctx.strokeStyle = stroke.color ?? '#f76f53'
-        ctx.fillStyle = stroke.color ?? '#f76f53'
-        ctx.lineWidth = stroke.width ?? 3
-      }
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
+    ctx.save()
+    if (stroke.type === 'erase') {
+      ctx.globalCompositeOperation = 'destination-out'
+      ctx.strokeStyle = 'rgba(0,0,0,1)'
+      ctx.lineWidth = (stroke.width ?? 3) * 3
+    } else {
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.strokeStyle = stroke.color ?? '#f76f53'
+      ctx.fillStyle = stroke.color ?? '#f76f53'
+      ctx.lineWidth = stroke.width ?? 3
+    }
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
 
-      if (stroke.type === 'text' && stroke.text) {
-        const fontSize = Math.max(14, (stroke.width ?? 3) * 5)
-        ctx.font = `${fontSize}px sans-serif`
-        ctx.fillText(stroke.text, (stroke.x ?? 0) * w, (stroke.y ?? 0) * h)
-      } else if (stroke.points && stroke.points.length > 1) {
-        ctx.beginPath()
-        stroke.points.forEach((p, i) => {
-          const px = p.x * w
-          const py = p.y * h
-          if (i === 0) ctx.moveTo(px, py)
-          else ctx.lineTo(px, py)
-        })
-        ctx.stroke()
-      } else if (stroke.points && stroke.points.length === 1) {
-        // 单点：画一个小圆点
-        const p = stroke.points[0]
-        ctx.beginPath()
-        ctx.arc(p.x * w, p.y * h, ctx.lineWidth / 2, 0, Math.PI * 2)
-        ctx.fillStyle = ctx.strokeStyle
-        ctx.fill()
-      }
-      ctx.restore()
-    },
-    []
-  )
+    if (stroke.type === 'text' && stroke.text) {
+      const fontSize = Math.max(14, (stroke.width ?? 3) * 5)
+      ctx.font = `${fontSize}px sans-serif`
+      ctx.fillText(stroke.text, (stroke.x ?? 0) * w, (stroke.y ?? 0) * h)
+    } else if (stroke.points && stroke.points.length > 1) {
+      ctx.beginPath()
+      stroke.points.forEach((p, i) => {
+        const px = p.x * w
+        const py = p.y * h
+        if (i === 0) ctx.moveTo(px, py)
+        else ctx.lineTo(px, py)
+      })
+      ctx.stroke()
+    } else if (stroke.points && stroke.points.length === 1) {
+      // 单点：画一个小圆点
+      const p = stroke.points[0]
+      ctx.beginPath()
+      ctx.arc(p.x * w, p.y * h, ctx.lineWidth / 2, 0, Math.PI * 2)
+      ctx.fillStyle = ctx.strokeStyle
+      ctx.fill()
+    }
+    ctx.restore()
+  }, [])
 
   /**
    * 全量重绘：清空 canvas → 按 strokesRef 顺序逐条绘制。

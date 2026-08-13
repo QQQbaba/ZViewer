@@ -147,7 +147,11 @@ export function usePlayerSource(
 
   const attachSource = useCallback(
     async (video: HTMLVideoElement, source: PlayerSource) => {
-      console.log('[attachSource] called:', { url: source.url?.slice(0, 80), format: source.format, appliedSourceUrl: appliedSourceUrlRef.current?.slice(0, 80) })
+      console.log('[attachSource] called:', {
+        url: source.url?.slice(0, 80),
+        format: source.format,
+        appliedSourceUrl: appliedSourceUrlRef.current?.slice(0, 80),
+      })
       if (!source.url) {
         console.log('[attachSource] source.url is empty, returning')
         return

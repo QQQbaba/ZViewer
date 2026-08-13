@@ -55,7 +55,8 @@ export function Modal({
     const prevPaddingRight = document.body.style.paddingRight
     document.body.style.overflow = 'hidden'
     // 补偿滚动条消失后的宽度跳变
-    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
+    const scrollbarWidth =
+      window.innerWidth - document.documentElement.clientWidth
     if (scrollbarWidth > 0) {
       document.body.style.paddingRight = `${scrollbarWidth}px`
     }

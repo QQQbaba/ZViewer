@@ -45,14 +45,7 @@ import {
 } from './serverFilesApi'
 import type { ServerFileEntry, ServerFileRoot, SystemDirEntry } from './types'
 import { DirPickerSidePanel } from './DirPickerSidePanel'
-
-function formatSize(size?: number): string {
-  if (size === undefined || size === null) return ''
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
-  return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`
-}
+import { formatFileSize } from '@/lib/utils'
 
 export default function ServerFileManager() {
   const [entries, setEntries] = useState<ServerFileEntry[]>([])
@@ -681,7 +674,7 @@ export default function ServerFileManager() {
                 </Text>
                 {entry.type === 'file' && entry.size !== undefined && (
                   <Text className="text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
-                    {formatSize(entry.size)}
+                    {formatFileSize(entry.size)}
                   </Text>
                 )}
               </div>

@@ -67,10 +67,7 @@ export function useP2PTunnel({
       setP2pPC(tunnel.getPeerConnection())
     }
 
-    const handleStatusChange = (
-      status: P2PStatus,
-      didFallback: boolean
-    ) => {
+    const handleStatusChange = (status: P2PStatus, didFallback: boolean) => {
       setP2pStatus(status)
       if (status === 'idle' || status === 'failed') {
         setP2pEnabled(false)

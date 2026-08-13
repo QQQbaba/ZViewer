@@ -21,9 +21,7 @@ import { RequestNotification } from '@/components/ui/RequestNotification'
 import type { RequestNotificationItem } from '@/components/ui/RequestNotification'
 import { useShareMethod } from '../hooks/useShareMethod'
 import { useStreamStatus } from '../hooks/useStreamStatus'
-import WebrtcSharePage, {
-  type P2PStateSnapshot,
-} from './WebrtcSharePage'
+import WebrtcSharePage, { type P2PStateSnapshot } from './WebrtcSharePage'
 import { StreamPushPage } from './StreamPushPage'
 
 interface SharePageProps {

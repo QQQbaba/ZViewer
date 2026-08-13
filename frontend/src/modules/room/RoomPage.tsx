@@ -109,7 +109,13 @@ function RoomPage() {
       setRecoveredPlayback(null)
       prevRoomIdRef.current = roomId
     }
-  }, [roomId, resetRoomStore, setDanmakuRoomId, setDanmakuTracks, setDanmakuMeta])
+  }, [
+    roomId,
+    resetRoomStore,
+    setDanmakuRoomId,
+    setDanmakuTracks,
+    setDanmakuMeta,
+  ])
   const { socket } = useSocket()
   const username = useAuthStore((state) => state.user?.username)
   const [hostPeerConnection, setHostPeerConnection] =

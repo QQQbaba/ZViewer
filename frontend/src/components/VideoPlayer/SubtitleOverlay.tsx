@@ -24,8 +24,12 @@ interface SubtitleOverlayProps {
 }
 
 /** 计算字幕元素的 CSS transform */
-function getTransform(line: number, align: 'left' | 'center' | 'right'): string {
-  const translateX = align === 'center' ? '-50%' : align === 'right' ? '-100%' : '0%'
+function getTransform(
+  line: number,
+  align: 'left' | 'center' | 'right'
+): string {
+  const translateX =
+    align === 'center' ? '-50%' : align === 'right' ? '-100%' : '0%'
   const translateY = line > 50 ? '-100%' : '0%'
   return `translate(${translateX}, ${translateY})`
 }

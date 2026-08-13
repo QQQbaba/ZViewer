@@ -113,9 +113,14 @@ function int16ToFloat32(int16: Int16Array): Float32Array {
 }
 
 /** 将 BufferSource 转换为 ArrayBuffer */
-function bufferSourceToArrayBuffer(source: ArrayBuffer | ArrayBufferView): ArrayBuffer {
+function bufferSourceToArrayBuffer(
+  source: ArrayBuffer | ArrayBufferView
+): ArrayBuffer {
   if (source instanceof ArrayBuffer) return source
-  return source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength) as ArrayBuffer
+  return source.buffer.slice(
+    source.byteOffset,
+    source.byteOffset + source.byteLength
+  ) as ArrayBuffer
 }
 
 /** 接收端每个远端用户的播放状态 */
@@ -302,70 +307,73 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
   // ==================== 接收端播放 ====================
 
   /** 为远端用户创建播放链路（含 Opus 解码器） */
-  const ensurePeerPlayback = useCallback((socketId: string): PeerPlaybackState | null => {
-    const ctx = playbackContextRef.current
-    const master = masterGainRef.current
-    if (!ctx || !master) return null
+  const ensurePeerPlayback = useCallback(
+    (socketId: string): PeerPlaybackState | null => {
+      const ctx = playbackContextRef.current
+      const master = masterGainRef.current
+      if (!ctx || !master) return null
 
-    let state = peerStatesRef.current.get(socketId)
-    if (state) return state
+      let state = peerStatesRef.current.get(socketId)
+      if (state) return state
 
-    const gainNode = ctx.createGain()
-    const peerVolume = peerVolumesRef.current.get(socketId) ?? 1
-    gainNode.gain.value = peerVolume
+      const gainNode = ctx.createGain()
+      const peerVolume = peerVolumesRef.current.get(socketId) ?? 1
+      gainNode.gain.value = peerVolume
 
-    const analyser = ctx.createAnalyser()
-    analyser.fftSize = 256
-    analyser.smoothingTimeConstant = 0.6
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.6
 
-    gainNode.connect(analyser)
-    analyser.connect(master)
+      gainNode.connect(analyser)
+      analyser.connect(master)
 
-    state = {
-      gainNode,
-      analyser,
-      nextStartTime: 0,
-      queueLength: 0,
-      lastReceiveTime: 0,
-      lastLatency: 0,
-    }
-
-    // Opus 模式下创建解码器
-    if (OPUS_SUPPORTED) {
-      try {
-        const decoder = new AudioDecoder({
-          output: (audioData: AudioData) => {
-            const numFrames = audioData.numberOfFrames
-            let float32: Float32Array
-
-            // 根据 AudioData 格式提取 PCM 数据
-            if (audioData.format === 's16-planar') {
-              const int16 = new Int16Array(numFrames)
-              audioData.copyTo(int16, { planeIndex: 0 })
-              float32 = int16ToFloat32(int16)
-            } else {
-              // f32-planar 或其他格式
-              float32 = new Float32Array(numFrames)
-              audioData.copyTo(float32, { planeIndex: 0 })
-            }
-
-            playAudioChunk(socketId, float32, audioData.sampleRate)
-            audioData.close()
-          },
-          error: (e: DOMException) => {
-            console.error('[voice] AudioDecoder error for', socketId, e)
-          },
-        })
-        state.decoder = decoder as unknown as AudioDecoder
-        state.decoderConfigured = false
-      } catch (err) {
-        console.error('[voice] failed to create AudioDecoder:', err)
+      state = {
+        gainNode,
+        analyser,
+        nextStartTime: 0,
+        queueLength: 0,
+        lastReceiveTime: 0,
+        lastLatency: 0,
       }
-    }
 
-    peerStatesRef.current.set(socketId, state)
-    return state
-  }, [])
+      // Opus 模式下创建解码器
+      if (OPUS_SUPPORTED) {
+        try {
+          const decoder = new AudioDecoder({
+            output: (audioData: AudioData) => {
+              const numFrames = audioData.numberOfFrames
+              let float32: Float32Array
+
+              // 根据 AudioData 格式提取 PCM 数据
+              if (audioData.format === 's16-planar') {
+                const int16 = new Int16Array(numFrames)
+                audioData.copyTo(int16, { planeIndex: 0 })
+                float32 = int16ToFloat32(int16)
+              } else {
+                // f32-planar 或其他格式
+                float32 = new Float32Array(numFrames)
+                audioData.copyTo(float32, { planeIndex: 0 })
+              }
+
+              playAudioChunk(socketId, float32, audioData.sampleRate)
+              audioData.close()
+            },
+            error: (e: DOMException) => {
+              console.error('[voice] AudioDecoder error for', socketId, e)
+            },
+          })
+          state.decoder = decoder as unknown as AudioDecoder
+          state.decoderConfigured = false
+        } catch (err) {
+          console.error('[voice] failed to create AudioDecoder:', err)
+        }
+      }
+
+      peerStatesRef.current.set(socketId, state)
+      return state
+    },
+    []
+  )
 
   /** 配置远端用户的 Opus 解码器 */
   const configurePeerDecoder = useCallback(
@@ -648,11 +656,15 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       if (OPUS_SUPPORTED) {
         try {
           const encoder = new AudioEncoder({
-            output: (chunk: EncodedAudioChunk, metadata: EncodedAudioChunkMetadata) => {
+            output: (
+              chunk: EncodedAudioChunk,
+              metadata: EncodedAudioChunkMetadata
+            ) => {
               // 处理编解码器配置（description）
               if (metadata?.decoderConfig?.description) {
                 const descBuf = bufferSourceToArrayBuffer(
-                  metadata.decoderConfig.description as ArrayBuffer | ArrayBufferView
+                  metadata.decoderConfig.description as
+                    ArrayBuffer | ArrayBufferView
                 )
                 codecDescriptionRef.current = descBuf
 
@@ -692,7 +704,10 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
           encoderTimestampRef.current = 0
           console.log('[voice] Opus encoder configured at', OPUS_BITRATE, 'bps')
         } catch (err) {
-          console.error('[voice] failed to create AudioEncoder, falling back to PCM:', err)
+          console.error(
+            '[voice] failed to create AudioEncoder, falling back to PCM:',
+            err
+          )
           audioEncoderRef.current = null
         }
       }
@@ -797,7 +812,14 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       localStreamRef.current = null
       setJoining(false)
     }
-  }, [joining, micEnabled, username, ensurePeerPlayback, setupLocalAnalyser, startLevelDetection])
+  }, [
+    joining,
+    micEnabled,
+    username,
+    ensurePeerPlayback,
+    setupLocalAnalyser,
+    startLevelDetection,
+  ])
 
   const leave = useCallback(() => {
     const currentSocket = socketRef.current
@@ -844,17 +866,14 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
     }
   }, [])
 
-  const setGlobalVolume = useCallback(
-    (value: number) => {
-      const clamped = Math.max(0, Math.min(1, value))
-      setGlobalVolumeState(clamped)
-      globalVolumeRef.current = clamped
-      if (masterGainRef.current) {
-        masterGainRef.current.gain.value = clamped
-      }
-    },
-    []
-  )
+  const setGlobalVolume = useCallback((value: number) => {
+    const clamped = Math.max(0, Math.min(1, value))
+    setGlobalVolumeState(clamped)
+    globalVolumeRef.current = clamped
+    if (masterGainRef.current) {
+      masterGainRef.current.gain.value = clamped
+    }
+  }, [])
 
   const setPeerVolume = useCallback(
     (socketId: string, value: number) => {
@@ -978,7 +997,12 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       ensurePeerPlayback(payload.socketId)
 
       // 新成员加入时，重新发送编解码器配置
-      if (OPUS_SUPPORTED && codecDescriptionRef.current && currentSocket && currentRoomId) {
+      if (
+        OPUS_SUPPORTED &&
+        codecDescriptionRef.current &&
+        currentSocket &&
+        currentRoomId
+      ) {
         currentSocket.emit('voice-codec-config', {
           roomId: currentRoomId,
           description: codecDescriptionRef.current,
@@ -1010,7 +1034,13 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatResult {
       socket.off('voice-user-joined', handleVoiceUserJoined)
       socket.off('voice-user-left', handleVoiceUserLeft)
     }
-  }, [socket, handleVoiceAudioData, handleVoiceCodecConfig, handleVoiceUserJoined, handleVoiceUserLeft])
+  }, [
+    socket,
+    handleVoiceAudioData,
+    handleVoiceCodecConfig,
+    handleVoiceUserJoined,
+    handleVoiceUserLeft,
+  ])
 
   // 组件卸载或房间变化时自动离开
   useEffect(() => {
