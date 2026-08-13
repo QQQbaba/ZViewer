@@ -13,6 +13,7 @@ import type {
 } from './types';
 import { createWebSelectorProvider, createRssProvider } from './provider';
 import { proxyGitHubUrl } from '../../utils/githubCdn';
+import { fetchText } from './httpClient';
 // 本地 fallback 订阅（当 sub.creamycake.org 被 Cloudflare TLS 拦截时使用）
 import defaultCss1 from './default-css1.json';
 import defaultBt1 from './default-bt1.json';
@@ -44,18 +45,21 @@ export async function fetchSubscription(
 ): Promise<AniSubsSubscription> {
   const proxiedUrl = proxyGitHubUrl(url);
   try {
-    const res = await fetch(proxiedUrl, {
+    // 使用 fetchText（带 PowerShell fallback）而非原生 fetch，
+    // 解决 Cloudflare TLS 指纹拦截问题
+    const result = await fetchText(proxiedUrl, {
       headers: {
         'User-Agent': DEFAULT_USER_AGENT,
         Accept: 'application/json',
       },
+      timeoutMs: 30000,
     });
-    if (!res.ok) {
+    if (!result.ok) {
       throw new Error(
-        `获取 ani-subs 订阅失败 [${res.status}]: ${proxiedUrl}`,
+        `获取 ani-subs 订阅失败 [${result.status}]: ${proxiedUrl}${result.error ? ` (${result.error})` : ''}`,
       );
     }
-    return res.json() as Promise<AniSubsSubscription>;
+    return JSON.parse(result.body) as AniSubsSubscription;
   } catch (err) {
     // 远程获取失败（Cloudflare TLS 拦截 / 超时 / 网络错误），尝试本地 fallback
     const fallback = getLocalFallback(url);

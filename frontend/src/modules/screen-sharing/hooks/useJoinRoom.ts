@@ -125,6 +125,20 @@ export function useJoinRoom(options: UseJoinRoomOptions): UseJoinRoomResult {
         { roomId: targetRoomId, password },
         (response: RequestJoinResponse) => {
           if (response.success) {
+            // 房主身份恢复：后端检测到当前用户是房间 owner，已自动恢复房主身份。
+            // 写入 sessionStorage 标记并刷新页面，让 RoomPage 重新以房主身份渲染。
+            if (response.data?.isHost) {
+              try {
+                sessionStorage.setItem('zcontrol-host-room', targetRoomId)
+              } catch {
+                // ignore
+              }
+              message.success('已恢复房主身份')
+              // 刷新页面，触发 RoomPage 以房主身份重新渲染
+              window.location.reload()
+              return
+            }
+
             // AckResponse 标准格式：mode 在 data 字段内
             const mode = response.data?.mode ?? 'screen-share'
             setRoomMode(mode)
