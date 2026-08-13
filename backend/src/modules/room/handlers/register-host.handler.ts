@@ -37,6 +37,28 @@ export class RegisterHostHandler implements SocketEventHandler {
       async (payload: RegisterHostPayload, callback: AckCallback) => {
         try {
           const userId: number = socket.data.userId;
+
+          // 重复加入检测：同一账户不能在多个标签页同时进入同一房间。
+          // 房主重连（旧 socket 已断开）时 session 会被复用，不会触发此拒绝。
+          if (userId != null) {
+            const existingSession = await roomSessionService.findActiveSessionByUser(
+              payload.roomId,
+              userId,
+            );
+            if (existingSession && existingSession.socketId !== socket.id) {
+              const oldSocket = io.sockets.sockets.get(existingSession.socketId);
+              if (oldSocket && oldSocket.connected) {
+                return safeAck(callback, {
+                  success: false,
+                  code: 'ALREADY_IN_ROOM',
+                  message: '该账户已在此房间内，不能同时打开多个标签页',
+                });
+              }
+              // 旧 socket 已断开但 session 未清理：结束旧 session，放行
+              await roomSessionService.endSession(existingSession.socketId);
+            }
+          }
+
           const result = await roomSessionService.registerHost(
             socket,
             payload.roomId,

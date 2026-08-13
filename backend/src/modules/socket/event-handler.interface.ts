@@ -125,7 +125,7 @@ export class SocketBroadcaster {
 }
 
 /** Ack 回调类型 */
-export type AckResponse = { success: boolean; message?: string; data?: unknown };
+export type AckResponse = { success: boolean; message?: string; code?: string; data?: unknown };
 export type AckCallback = (response: AckResponse) => void;
 
 /** 安全执行 ack 回调 */

@@ -60,6 +60,29 @@ export class ViewerJoinHandler implements SocketEventHandler {
             return safeAck(callback, { success: false, message: '房间已关闭' });
           }
 
+          // 重复加入检测：同一账户（非 guest）不能在多个标签页同时进入同一房间。
+          // 如果发现旧 session 但其 socket 已断开（session 未清理），先结束旧 session 再放行。
+          const currentUserId: number | null = socket.data.userId ?? null;
+          if (currentUserId != null) {
+            const existingSession = await roomSessionService.findActiveSessionByUser(
+              payload.roomId,
+              currentUserId,
+            );
+            if (existingSession && existingSession.socketId !== socket.id) {
+              // 检查旧 socket 是否仍连接
+              const oldSocket = io.sockets.sockets.get(existingSession.socketId);
+              if (oldSocket && oldSocket.connected) {
+                return safeAck(callback, {
+                  success: false,
+                  code: 'ALREADY_IN_ROOM',
+                  message: '该账户已在此房间内，不能同时打开多个标签页',
+                });
+              }
+              // 旧 socket 已断开但 session 未清理：结束旧 session，放行
+              await roomSessionService.endSession(existingSession.socketId);
+            }
+          }
+
           // 房主身份恢复：如果当前用户是房间 owner 或房间无 owner 记录，
           // 说明房主关闭标签页/浏览器后重新进入，sessionStorage 标记已丢失，
           // 走了观众流程。此时应自动恢复房主身份，而非创建 viewer session。
@@ -135,7 +158,7 @@ export class ViewerJoinHandler implements SocketEventHandler {
 
           // 免审批：直接加入房间
           if (room.requireApproval === false) {
-            await roomSessionService.admitViewer(socket, payload.roomId);
+            await roomSessionService.admitViewer(socket, payload.roomId, currentUserId);
 
             // 推送房间信息给新观众
             io.to(socket.id).emit('join-approved', {
@@ -193,7 +216,7 @@ export class ViewerJoinHandler implements SocketEventHandler {
             } catch { /* ignore */ }
             if (approvedList.includes(viewerUserId)) {
               // 已批准用户直接加入，无需再次审批
-              await roomSessionService.admitViewer(socket, payload.roomId);
+              await roomSessionService.admitViewer(socket, payload.roomId, currentUserId);
 
               io.to(socket.id).emit('join-approved', {
                 roomId: payload.roomId,
