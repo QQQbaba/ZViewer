@@ -2,7 +2,7 @@
 
 > 多人同步观影、追番与远程共享平台。
 
-ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影。房主控制播放进度，观众实时跟随；支持 Bilibili、WebDAV、FTP、OpenList、MP4 直链等多种视频源，并内置屏幕共享、弹幕、评论、语音聊天等互动能力。
+**[English](README.en.md)** | 中文
 
 <p align="left">
   <a href="LICENSE">
@@ -23,11 +23,12 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 
 ---
 
+[Telegram](https://t.me/Zero_251) [QQ](https://qm.qq.com/q/MuKPRVz8wc)
+
 ## 目录
 
 - [功能特性](#功能特性)
 - [快速开始](#快速开始)
-- [部署方式](#部署方式)
 - [端口说明](#端口说明)
 - [HTTPS 与证书](#https-与证书)
 - [Docker 部署](#docker-部署)
@@ -51,8 +52,9 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 
 - 创建或加入房间，与好友同步观看。
 - 房主拥有播放控制权：播放、暂停、跳转、倍速。观众可申请控制，房主确认后执行。
+- 房主离线时观众自动进入"自主控制模式"，可直接控制播放器；房主重连后自动恢复申请模式。
 - 播放记忆：房主短暂断线后，由服务器继续广播当前状态，观众无需中断观看。
-- 房主离线超时自动关房（10 分钟），期间观众可自由控制。
+- 房主离线超时自动关房（10 分钟）。
 
 ### 多源视频解析
 
@@ -68,13 +70,13 @@ ZViewer 让一群人在不同地点也能像坐在一起一样看番、看电影
 
 - 评论面板与弹幕系统：支持 Bilibili 官方弹幕、DandanPlay 弹幕、自定义弹幕轨道。
 - 播放状态同步：房主操作实时同步给所有观众。
-- 观众申请：观众可申请跳转进度或暂停，房主在播放器左上角查看通知。
-- 语音聊天：房主可配置语音比特率（32/96/128/192 kbps），观众实时收听。
+- 观众可申请暂停或跳转，房主在播放器左上角查看通知并决定是否通过。
+- 语音聊天：房主开启后，观众实时收听（固定 128kbps 比特率）。
 
 ### 屏幕共享与推流
 
-- 基于 WebRTC 的屏幕共享，分享端可共享屏幕或视频画面。
-- OBS RTMP 推流支持，配合 Node Media Server 提供 HTTP-FLV 拉流。
+- 基于 WebRTC 的屏幕共享，支持分享端共享屏幕或视频画面。
+- OBS RTMP 推流支持，配合 Node Media Server 提供 HTTP-FLV 拉流（通过后端 `/live` 代理）。
 
 ### 主题系统
 
@@ -125,13 +127,7 @@ start.bat start        # 启动服务
 ./start-prod.sh status
 ```
 
-启动后访问 `http://localhost:3333`（HTTP 模式）或 `https://localhost:3333`（HTTPS 模式）。
-
-### 一键启动脚本详解
-
-源码版（`start-prod.*`）与单文件版（`start.bat` / `start.sh`）功能一致，均提供交互菜单与命令行两种模式。
-
-交互菜单：
+### 交互菜单
 
 ```
 ========================================
@@ -149,7 +145,7 @@ start.bat start        # 启动服务
   0) 退出
 ```
 
-命令行用法：
+### 命令行用法
 
 | 命令 | 说明 |
 |---|---|
@@ -163,17 +159,24 @@ start.bat start        # 启动服务
 | `build` | 构建前后端（源码版） |
 | `help` / `menu` | 帮助 / 交互菜单 |
 
+### 启动后访问
+
+| 模式 | 地址 |
+|------|------|
+| HTTP | `http://localhost:3333` |
+| HTTPS | `https://localhost:3333` |
+
 ---
 
 ## 端口说明
 
 | 服务 | 端口 | 说明 |
 |---|---|---|
-| 后端服务（统一入口） | 3333 | HTTP / HTTPS API、WebSocket、前端静态文件、SPA 回退 |
+| 后端服务（统一入口） | 3333 | HTTP/HTTPS API、WebSocket、前端静态文件、SPA 回退、`/live` HTTP-FLV 代理 |
 | RTMP 推流 | 3334 | OBS 推流端口（独立端口，RTMP 为 TCP 二进制协议，无法与 HTTP 复用） |
-| HTTP-FLV 拉流 | 3335 | 直播流播放（Node Media Server，通过后端 `/live` 代理转发） |
+| HTTP-FLV 拉流 | 3335 | 内部端口（Node Media Server），仅容器内使用，不对外暴露 |
 
-HTTP 模式下，用户通过 `http://localhost:3333` 访问所有功能。后端统一处理 API 请求、前端静态资源、WebSocket 实时通信，并将 `/live` 路径反向代理到内部 HTTP-FLV 服务，无需额外配置。
+生产模式下，**仅 3333 端口对外暴露**。后端统一处理 API 请求、前端静态资源、WebSocket 实时通信，并将 `/live` 路径反向代理到内部 HTTP-FLV 服务，无需额外配置。
 
 ---
 
@@ -207,8 +210,6 @@ start.bat cert 192.168.1.1
 start.bat cert example.com --force
 ```
 
-HTTPS 模式下后端统一提供前端页面和 API，访问 `https://localhost:3333`。
-
 ### 申请 Let's Encrypt 证书的前置条件
 
 1. 域名已解析到本机公网 IP，或公网 IP 直接指向本机。
@@ -216,6 +217,8 @@ HTTPS 模式下后端统一提供前端页面和 API，访问 `https://localhost
 3. 正式环境有速率限制（每域名每周 5 张），调试可用 `--staging` 测试环境。
 
 证书文件位于 `config/ssl/`（`cert.pem` 证书链、`key.pem` 私钥、`acme-account.key` ACME 账号）。
+
+HTTPS 模式下后端统一提供前端页面和 API，访问 `https://localhost:3333`。
 
 ---
 
@@ -236,14 +239,12 @@ docker run -d \
 
 ### Docker Compose
 
-创建 `docker-compose.yml`：
-
 ```yaml
 services:
   zviewer:
     image: zerowyc0721/zviewer:latest
     ports:
-      - "3333:3333"   # 后端统一入口（API + WebSocket + 前端页面）
+      - "3333:3333"   # 统一入口（API + WebSocket + 前端页面 + /live HTTP-FLV 代理）
       - "3334:3334"   # RTMP 推流 (OBS)
     volumes:
       - zviewer-data:/app/config
@@ -253,15 +254,7 @@ volumes:
   zviewer-data:
 ```
 
-然后启动：
-
-```bash
-docker compose up -d
-```
-
 ### 自行构建
-
-如需自行构建镜像，项目已包含 `Dockerfile.linux-single` 和 `docker-compose.linux-single.yml`（使用 `build` 而非 `image`），构建方法：
 
 ```bash
 docker build -t zviewer -f Dockerfile.linux-single .
@@ -378,7 +371,7 @@ ZViewer/
 | `JWT_ACCESS_EXPIRES_IN` | Access Token 有效期 | `15m` |
 | `JWT_REFRESH_EXPIRES_IN` | Refresh Token 有效期 | `7d` |
 | `RTMP_PORT` | RTMP 推流端口 | `3334` |
-| `HTTP_FLV_PORT` | HTTP-FLV 拉流端口 | `3335` |
+| `HTTP_FLV_PORT` | HTTP-FLV 拉流端口（内部使用） | `3335` |
 
 ### 前端构建
 
@@ -408,7 +401,7 @@ ZViewer/
 
 ### Bilibili
 
-解析 BV 号或视频链接，支持 DASH 音视频合并播放、清晰度切换、大会员专享内容。可在管理后台配置 Bilibili 登录凭证以获取大会员清晰度。
+解析 BV 号或视频链接，支持 DASH 音视频合并播放、清晰度切换、大会员专享内容。可在管理后台配置 Bilibili 登录凭证以获取大会员清晰度。支持 ZViewerCLI 本地代理以使用本地 Cookie 获取高画质地址。
 
 ### 直链与挂载
 
