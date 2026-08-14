@@ -29,7 +29,6 @@ const readline = require('readline');
 const ROOT = path.resolve(__dirname);
 const BACKEND = path.join(ROOT, 'backend');
 const FRONTEND = path.join(ROOT, 'frontend');
-const FRONTEND_SERVER = path.join(ROOT, 'frontend-server');
 const DIST_EXE = path.join(ROOT, 'dist');
 const PKG_CONFIG = path.join(ROOT, 'package.json');
 const PACKAGING_DIR = path.join(ROOT, 'packaging');
@@ -221,17 +220,14 @@ async function showInteractiveMenu() {
     }
   }
 
-  // 第二步：确认是否构建前端
-  const buildFrontend = await askQuestion(rl, '是否构建前端 (y/n) [默认: y]: ');
-  const shouldBuildFrontend = buildFrontend !== 'n' && buildFrontend !== 'N';
-
-  // 第三步：确认是否构建后端
+  // 第二步：确认是否构建后端
+  // 前端始终需要构建（统一端口后由后端托管前端静态文件）
   const buildBackend = await askQuestion(rl, '是否构建后端 (y/n) [默认: y]: ');
   const shouldBuildBackend = buildBackend !== 'n' && buildBackend !== 'N';
 
   rl.close();
 
-  return { platformKeys, shouldBuildFrontend, shouldBuildBackend };
+  return { platformKeys, shouldBuildBackend };
 }
 
 // ==================== 构建逻辑 ====================
@@ -302,81 +298,7 @@ function buildBackend() {
   return backendDist;
 }
 
-function packageFrontend(targetPlatforms, frontendDist) {
-  console.log('');
-  console.log('>>> 打包前端服务 exe...');
-
-  // 清理 frontend-server/node_modules 残留
-  const frontendServerNodeModules = path.join(FRONTEND_SERVER, 'node_modules');
-  if (fs.existsSync(frontendServerNodeModules)) {
-    log('清理 frontend-server/node_modules...');
-    fs.rmSync(frontendServerNodeModules, { recursive: true, force: true });
-  }
-
-  const entry = path.join(FRONTEND_SERVER, 'server.js');
-  if (!fs.existsSync(entry)) {
-    error(`前端服务入口不存在: ${entry}`);
-    process.exit(1);
-  }
-
-  const results = [];
-
-  for (const platform of targetPlatforms) {
-    for (const target of platform.targets) {
-      const outputFolder = path.join(DIST_EXE, platform.folder);
-      const outputName = `zviewer-frontend${target.includes('win') ? '.exe' : ''}`;
-      const outputPath = path.join(outputFolder, outputName);
-
-      fs.mkdirSync(outputFolder, { recursive: true });
-
-      log(`打包前端 → ${target} (${platform.label})...`);
-
-      const cmd = [
-        'npx', 'pkg',
-        JSON.stringify(entry),
-        '--targets', target,
-        '--output', JSON.stringify(outputPath),
-        // 禁用 v8 bytecode cache：Windows 上 cross-compile 的 Linux 产物
-        // 会因 host/target V8 不匹配在目标平台启动即崩（V8 rejected bytecode cache）
-        '--public',
-        '--public-packages', '"*"',
-      ].join(' ');
-
-      try {
-        execSync(cmd, { cwd: ROOT, stdio: 'inherit' });
-      } catch (e) {
-        warn(`前端打包失败 (${target}): ${e.message}`);
-        continue;
-      }
-
-      if (!fs.existsSync(outputPath)) {
-        warn(`前端打包失败：未生成 ${outputPath}`);
-        continue;
-      }
-
-      // 复制前端静态资源
-      const outputFrontendDist = path.join(outputFolder, 'frontend', 'dist');
-      if (fs.existsSync(outputFrontendDist)) {
-        fs.rmSync(outputFrontendDist, { recursive: true, force: true });
-      }
-      copyDirSync(frontendDist, outputFrontendDist);
-
-      const stats = fs.statSync(outputPath);
-      results.push({
-        type: '前端',
-        platform: platform.label,
-        target,
-        path: outputPath,
-        size: stats.size,
-      });
-      success(`前端 ${target}: ${outputPath} (${formatBytes(stats.size)})`);
-    }
-  }
-
-  return results;
-}
-
-function packageBackend(targetPlatforms) {
+function packageBackend(targetPlatforms, frontendDist) {
   console.log('');
   console.log('>>> 打包后端 exe...');
 
@@ -423,7 +345,7 @@ function packageBackend(targetPlatforms) {
         continue;
       }
 
-      // 复制后端 .env；保留 PORT/FRONTEND_PORT 等端口配置，
+      // 复制后端 .env；保留 PORT 等端口配置，
       // 由启动脚本（start.sh / start-win.ps1）读取并按需覆盖 exe 的环境变量。
       // CI 环境中 backend/.env 被 .gitignore 排除，回退到 .env.example。
       const envDest = path.join(outputFolder, '.env');
@@ -443,6 +365,14 @@ function packageBackend(targetPlatforms) {
           log('已创建空 .env（未找到 .env / .env.example）');
         }
       }
+
+      // 复制前端静态文件到产物目录（统一端口：后端 exe 托管 frontend/dist）
+      const outputFrontendDist = path.join(outputFolder, 'frontend', 'dist');
+      if (fs.existsSync(outputFrontendDist)) {
+        fs.rmSync(outputFrontendDist, { recursive: true, force: true });
+      }
+      copyDirSync(frontendDist, outputFrontendDist);
+      log(`已复制前端静态文件: frontend/dist/ (${getDirSize(outputFrontendDist)})`);
 
       const stats = fs.statSync(outputPath);
       results.push({
@@ -605,7 +535,6 @@ async function main() {
 
   // 解析命令行参数或交互式选择
   let platformKeys = null;
-  let shouldBuildFrontend = true;
   let shouldBuildBackend = true;
   let isCustom = false;
 
@@ -654,7 +583,6 @@ async function main() {
   } else if (!platformKeys) {
     const menu = await showInteractiveMenu();
     platformKeys = menu.platformKeys;
-    shouldBuildFrontend = menu.shouldBuildFrontend;
     shouldBuildBackend = menu.shouldBuildBackend;
   }
 
@@ -666,18 +594,8 @@ async function main() {
 
   const allResults = [];
 
-  // 1. 构建前端
-  let frontendDist = null;
-  if (shouldBuildFrontend) {
-    frontendDist = buildFrontend();
-  } else {
-    frontendDist = path.join(FRONTEND, 'dist');
-    if (!fs.existsSync(frontendDist) || !fs.existsSync(path.join(frontendDist, 'index.html'))) {
-      error('前端构建产物不存在');
-      process.exit(1);
-    }
-    log('使用现有前端构建产物');
-  }
+  // 1. 构建前端（统一端口后由后端托管前端静态文件，前端始终需要构建）
+  const frontendDist = buildFrontend();
 
   // 2. 构建后端
   if (shouldBuildBackend) {
@@ -691,19 +609,13 @@ async function main() {
     log('使用现有后端编译产物');
   }
 
-  // 3. 打包前端 exe
-  if (shouldBuildFrontend) {
-    const frontendResults = packageFrontend(targetPlatforms, frontendDist);
-    allResults.push(...frontendResults);
-  }
-
-  // 4. 打包后端 exe
+  // 3. 打包后端 exe（含复制 frontend/dist 到产物目录）
   if (shouldBuildBackend) {
-    const backendResults = packageBackend(targetPlatforms);
+    const backendResults = packageBackend(targetPlatforms, frontendDist);
     allResults.push(...backendResults);
   }
 
-  // 5. 输出汇总
+  // 4. 输出汇总
 
   // 打包证书生成工具（一键启动脚本用它签证书）
   packageCertTool(targetPlatforms);

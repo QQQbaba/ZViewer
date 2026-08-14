@@ -274,6 +274,134 @@ export function BilibiliParseSettings({
             border: '1px solid var(--md-sys-color-outline-variant)',
           }}
         >
+          {/* CLI 本地高画质代理 */}
+          <div
+            className={cn(
+              'rounded-[var(--md-sys-shape-corner)] p-1.5 transition-opacity',
+              displayP2pEnabled && 'pointer-events-none opacity-40'
+            )}
+            style={{
+              backgroundColor: 'var(--md-sys-color-surface-container-high)',
+            }}
+          >
+            <div className="flex items-center gap-1.5">
+              <div
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+                style={{
+                  background:
+                    'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-tertiary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-secondary) 18%, transparent))',
+                }}
+              >
+                <MonitorSmartphone
+                  className="h-3 w-3"
+                  style={{ color: 'var(--md-sys-color-tertiary)' }}
+                />
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span
+                  className="text-[10px] font-bold leading-tight"
+                  style={{ color: 'var(--md-sys-color-on-surface)' }}
+                >
+                  CLI 高画质代理
+                </span>
+                <span
+                  className="text-[8px] font-medium uppercase tracking-wide"
+                  style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+                >
+                  LOCAL PROXY
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span
+                  className="inline-block h-1 w-1 rounded-full"
+                  style={{
+                    backgroundColor: cliAgent.available
+                      ? 'var(--md-sys-color-tertiary)'
+                      : displayCliEnabled
+                        ? 'var(--md-sys-color-error)'
+                        : 'var(--md-sys-color-outline)',
+                    boxShadow: cliAgent.available
+                      ? '0 0 4px var(--md-sys-color-tertiary)'
+                      : 'none',
+                  }}
+                />
+                <span
+                  className="text-[9px] font-medium"
+                  style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+                >
+                  {cliAgent.available
+                    ? '已连接'
+                    : displayCliEnabled
+                      ? '未连接'
+                      : '未启用'}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-1.5 grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                disabled={displayP2pEnabled}
+                onClick={() => handleCliChange(false)}
+                className={cn(
+                  'rounded-md py-1 text-[10px] font-semibold transition-all',
+                  displayP2pEnabled && 'cursor-not-allowed opacity-40',
+                  !displayCliEnabled
+                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
+                    : 'bg-[var(--md-sys-color-surface-container)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                )}
+              >
+                关闭
+              </button>
+              <button
+                type="button"
+                disabled={displayP2pEnabled}
+                onClick={() => handleCliChange(true)}
+                className={cn(
+                  'rounded-md py-1 text-[10px] font-semibold transition-all',
+                  displayP2pEnabled && 'cursor-not-allowed opacity-40',
+                  displayCliEnabled
+                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
+                    : 'bg-[var(--md-sys-color-surface-container)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                )}
+              >
+                启用
+              </button>
+            </div>
+
+            <div
+              className={cn(
+                'mt-1 text-[9px] leading-snug',
+                cliUnavailable && 'text-[var(--md-sys-color-error)]'
+              )}
+              style={
+                cliUnavailable
+                  ? undefined
+                  : { color: 'var(--md-sys-color-on-surface-variant)' }
+              }
+            >
+              {displayP2pEnabled
+                ? 'P2P 与 CLI 代理互斥，请关闭 P2P 后再启用 CLI'
+                : displayCliEnabled
+                  ? cliAgent.available
+                    ? `已连接本地代理 ${cliAgent.agentInfo?.version ?? ''}`
+                    : '已启用但未检测到本地 CLI，请先启动本地代理以播放 DASH 高画质'
+                  : '使用本地 zcontrol-cli 获取大会员等高画质'}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenCliSetup}
+              className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-md bg-[var(--md-sys-color-surface-container)] px-2 py-1 text-[10px] font-semibold text-[var(--md-sys-color-on-surface-variant)] transition-all hover:bg-[var(--md-sys-color-surface-container-highest)]"
+              style={{
+                border: '1px solid var(--md-sys-color-outline)',
+              }}
+            >
+              <ExternalLink className="h-3 w-3" />
+              打开 CLI 配置页
+            </button>
+          </div>
+
           {/* 播放模式 */}
           <div>
             <div
@@ -433,134 +561,6 @@ export function BilibiliParseSettings({
                 </div>
               </div>
             )}
-          </div>
-
-          {/* CLI 本地高画质代理 */}
-          <div
-            className={cn(
-              'rounded-[var(--md-sys-shape-corner)] p-1.5 transition-opacity',
-              displayP2pEnabled && 'pointer-events-none opacity-40'
-            )}
-            style={{
-              backgroundColor: 'var(--md-sys-color-surface-container-high)',
-            }}
-          >
-            <div className="flex items-center gap-1.5">
-              <div
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
-                style={{
-                  background:
-                    'linear-gradient(135deg, color-mix(in srgb, var(--md-sys-color-tertiary) 22%, transparent), color-mix(in srgb, var(--md-sys-color-secondary) 18%, transparent))',
-                }}
-              >
-                <MonitorSmartphone
-                  className="h-3 w-3"
-                  style={{ color: 'var(--md-sys-color-tertiary)' }}
-                />
-              </div>
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span
-                  className="text-[10px] font-bold leading-tight"
-                  style={{ color: 'var(--md-sys-color-on-surface)' }}
-                >
-                  CLI 高画质代理
-                </span>
-                <span
-                  className="text-[8px] font-medium uppercase tracking-wide"
-                  style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-                >
-                  LOCAL PROXY
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span
-                  className="inline-block h-1 w-1 rounded-full"
-                  style={{
-                    backgroundColor: cliAgent.available
-                      ? 'var(--md-sys-color-tertiary)'
-                      : displayCliEnabled
-                        ? 'var(--md-sys-color-error)'
-                        : 'var(--md-sys-color-outline)',
-                    boxShadow: cliAgent.available
-                      ? '0 0 4px var(--md-sys-color-tertiary)'
-                      : 'none',
-                  }}
-                />
-                <span
-                  className="text-[9px] font-medium"
-                  style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-                >
-                  {cliAgent.available
-                    ? '已连接'
-                    : displayCliEnabled
-                      ? '未连接'
-                      : '未启用'}
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-1.5 grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                disabled={displayP2pEnabled}
-                onClick={() => handleCliChange(false)}
-                className={cn(
-                  'rounded-md py-1 text-[10px] font-semibold transition-all',
-                  displayP2pEnabled && 'cursor-not-allowed opacity-40',
-                  !displayCliEnabled
-                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
-                    : 'bg-[var(--md-sys-color-surface-container)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                )}
-              >
-                关闭
-              </button>
-              <button
-                type="button"
-                disabled={displayP2pEnabled}
-                onClick={() => handleCliChange(true)}
-                className={cn(
-                  'rounded-md py-1 text-[10px] font-semibold transition-all',
-                  displayP2pEnabled && 'cursor-not-allowed opacity-40',
-                  displayCliEnabled
-                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-sm'
-                    : 'bg-[var(--md-sys-color-surface-container)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
-                )}
-              >
-                启用
-              </button>
-            </div>
-
-            <div
-              className={cn(
-                'mt-1 text-[9px] leading-snug',
-                cliUnavailable && 'text-[var(--md-sys-color-error)]'
-              )}
-              style={
-                cliUnavailable
-                  ? undefined
-                  : { color: 'var(--md-sys-color-on-surface-variant)' }
-              }
-            >
-              {displayP2pEnabled
-                ? 'P2P 与 CLI 代理互斥，请关闭 P2P 后再启用 CLI'
-                : displayCliEnabled
-                  ? cliAgent.available
-                    ? `已连接本地代理 ${cliAgent.agentInfo?.version ?? ''}`
-                    : '已启用但未检测到本地 CLI，请先启动本地代理以播放 DASH 高画质'
-                  : '使用本地 zcontrol-cli 获取大会员等高画质'}
-            </div>
-
-            <button
-              type="button"
-              onClick={handleOpenCliSetup}
-              className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-md bg-[var(--md-sys-color-surface-container)] px-2 py-1 text-[10px] font-semibold text-[var(--md-sys-color-on-surface-variant)] transition-all hover:bg-[var(--md-sys-color-surface-container-highest)]"
-              style={{
-                border: '1px solid var(--md-sys-color-outline)',
-              }}
-            >
-              <ExternalLink className="h-3 w-3" />
-              打开 CLI 配置页
-            </button>
           </div>
         </div>
       )}

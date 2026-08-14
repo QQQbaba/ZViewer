@@ -599,25 +599,18 @@ if exist "%PS1%" (
   :: 回退到 start.bat start（传递 start 参数避免进入交互菜单）
   start "" /b "%ROOT%\\start.bat" start
 ) else (
-  :: 最终回退：直接启动 exe，手动设置环境变量
-  :: 从 .env 读取端口（若存在），否则使用默认值
+  :: 最终回退：直接启动后端 exe，手动设置环境变量
+  :: 统一端口：前后端共用同一端口（默认 3333），由后端托管前端静态文件
   echo [更新脚本] 未找到 start.ps1/start.bat，直接启动 exe
   if exist "%ROOT%\\.env" (
     for /f "usebackq tokens=1,* delims==" %%a in ("%ROOT%\\.env") do (
       if /i "%%a"=="PORT" set "PORT=%%b"
-      if /i "%%a"=="FRONTEND_PORT" set "FRONTEND_PORT=%%b"
     )
   )
   if not defined PORT set "PORT=3333"
-  if not defined FRONTEND_PORT set "FRONTEND_PORT=4173"
   set "NODE_ENV=production"
   set "HOST=::"
   start "" /D "%ROOT%" "%ROOT%\\zviewer-backend.exe"
-  :: 等待后端启动
-  ping 127.0.0.1 -n 6 >nul
-  set "BACKEND_URL=http://localhost:!PORT!"
-  set "HOST=0.0.0.0"
-  start "" /D "%ROOT%" "%ROOT%\\zviewer-frontend.exe"
 )
 
 echo [更新脚本] 更新完成，服务正在启动... %date% %time%
@@ -729,22 +722,17 @@ cd "$ROOT"
 if [ -f "$ROOT/start.sh" ]; then
   nohup ./start.sh start > /dev/null 2>&1 &
 else
-  # 回退方案：start.sh 不存在时直接启动 exe，手动设置环境变量
+  # 回退方案：start.sh 不存在时直接启动后端 exe，手动设置环境变量
+  # 统一端口：前后端共用同一端口（默认 3333），由后端托管前端静态文件
   echo "[更新脚本] 未找到 start.sh，直接启动 exe"
   # 从 .env 读取端口（若存在），否则使用默认值
   ENV_PORT=""
-  ENV_FRONTEND_PORT=""
   if [ -f "$ROOT/.env" ]; then
     ENV_PORT=$(grep -E '^PORT=' "$ROOT/.env" | head -n 1 | cut -d= -f2- | tr -d '"' | xargs)
-    ENV_FRONTEND_PORT=$(grep -E '^FRONTEND_PORT=' "$ROOT/.env" | head -n 1 | cut -d= -f2- | tr -d '"' | xargs)
   fi
   PORT="\${ENV_PORT:-3333}"
-  FRONTEND_PORT="\${ENV_FRONTEND_PORT:-4173}"
   PORT="$PORT" NODE_ENV=production HOST=:: \
     nohup "$ROOT/zviewer-backend" > /dev/null 2>&1 &
-  sleep 3
-  PORT="$FRONTEND_PORT" BACKEND_URL="http://localhost:$PORT" HOST=0.0.0.0 \
-    nohup "$ROOT/zviewer-frontend" > /dev/null 2>&1 &
 fi
 
 echo "[更新脚本] 更新完成，服务正在启动... $(date)"

@@ -148,14 +148,19 @@ export function useLocalMediaStream(
       const useTestStream =
         new URLSearchParams(window.location.search).get('testStream') === 'true'
 
-      // 使用更强的帧率约束：max 设置硬上限，ideal 设置期望值。
-      // 注意：屏幕共享场景下浏览器会在画面静止时主动降帧（节能优化），
-      // 这是浏览器层行为，无法通过约束完全消除。
+      // 帧率约束：max 设置硬上限，ideal 设置期望值。
+      // 屏幕共享场景下浏览器会在画面静止时主动降帧（节能优化），
       // 后续通过 contentHint='motion' + 编码器 maxFramerate 共同保证输出帧率。
+      //
+      // 分辨率约束：仅使用 ideal，不设置 max。
+      // Firefox 对 getDisplayMedia 的 max 约束解释与 Chrome 不同：
+      // 当 max 恰好等于显示器原生分辨率时，Firefox 会将其视为严格约束，
+      // 在无法精确匹配时回退到下一级标准分辨率（通常是 720p）。
+      // 移除 max 后，Firefox 和 Chrome 都会以 ideal 为目标选择最接近的可用分辨率。
       const videoConstraints: MediaTrackConstraints = {
         frameRate: { ideal: frameRate, max: frameRate },
-        width: { ideal: 1920, max: 1920 },
-        height: { ideal: 1080, max: 1080 },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
       }
 
       let mediaStream: MediaStream
@@ -197,10 +202,46 @@ export function useLocalMediaStream(
       // 对视频轨道应用目标帧率约束并设置 contentHint
       // - contentHint='motion' 告知浏览器/编码器内容为动态画面，避免静止检测降帧
       // - applyConstraints 使用 max 硬约束帧率上限，避免编码器超过目标帧率浪费带宽
+      // - 分辨率兜底：部分浏览器（尤其 Firefox）在 getDisplayMedia 时可能返回
+      //   低于 ideal 的分辨率（如 720p），此处尝试通过 applyConstraints 提升到 1080p
       // - 必须 await 确保 PC 建立前约束已生效
       await Promise.all(
         mediaStream.getVideoTracks().map(async (track) => {
           track.contentHint = 'motion'
+          const settingsBefore = track.getSettings()
+          console.log(
+            '[useLocalMediaStream] track settings before applyConstraints:',
+            settingsBefore
+          )
+
+          // 分辨率兜底：如果浏览器返回的分辨率低于 1080p，尝试提升
+          // applyConstraints 对分辨率的调整能力有限（取决于捕获源），
+          // 但在某些场景下能从 720p 提升到 1080p
+          if (
+            settingsBefore.width &&
+            settingsBefore.height &&
+            (settingsBefore.width < 1920 || settingsBefore.height < 1080)
+          ) {
+            try {
+              await track.applyConstraints({
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+              })
+              const afterResolution = track.getSettings()
+              console.log(
+                '[useLocalMediaStream] resolution upgrade attempt:',
+                `${settingsBefore.width}x${settingsBefore.height}`,
+                '->',
+                `${afterResolution.width}x${afterResolution.height}`
+              )
+            } catch (err) {
+              console.warn(
+                '[useLocalMediaStream] applyConstraints resolution error:',
+                err
+              )
+            }
+          }
+
           try {
             await track.applyConstraints({
               frameRate: { max: frameRate },
@@ -210,7 +251,9 @@ export function useLocalMediaStream(
               '[useLocalMediaStream] applied frameRate constraint, actual:',
               settings.frameRate,
               'target:',
-              frameRate
+              frameRate,
+              'resolution:',
+              `${settings.width}x${settings.height}`
             )
           } catch (err) {
             console.warn(

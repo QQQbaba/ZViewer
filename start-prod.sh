@@ -11,14 +11,13 @@ LOG_DIR="$ROOT_DIR/log"
 PIDS_FILE="$ROOT_DIR/.prod.pids.json"
 
 BACKEND_PORT="${BACKEND_PORT:-}"
-FRONTEND_PORT="${FRONTEND_PORT:-}"
 BACKEND_ONLY=0
 DO_BUILD=0
 HTTPS_MODE=0
 
 # ==================== 工具函数 ====================
 
-# 端口解析：后端 = 环境变量/.env 的 PORT 或默认 3333；前端 = FRONTEND_PORT 或默认 4173
+# 端口解析：统一端口，前后端共用同一端口（默认 3333），由后端托管前端静态文件
 set_ports() {
   if [[ -z "$BACKEND_PORT" ]]; then
     local env_port=""
@@ -29,17 +28,6 @@ set_ports() {
       BACKEND_PORT="$env_port"
     else
       BACKEND_PORT=3333
-    fi
-  fi
-  if [[ -z "$FRONTEND_PORT" ]]; then
-    local env_frontend_port=""
-    if [[ -f "$ROOT_DIR/.env" ]]; then
-      env_frontend_port=$(grep -E '^FRONTEND_PORT=' "$ROOT_DIR/.env" | head -n 1 | cut -d= -f2- | tr -d '"' | xargs)
-    fi
-    if [[ -n "$env_frontend_port" ]]; then
-      FRONTEND_PORT="$env_frontend_port"
-    else
-      FRONTEND_PORT=4173
     fi
   fi
 }
@@ -115,23 +103,18 @@ cmd_start() {
 
   echo "========================================"
   echo "  ZViewer 启动"
-  echo "  后端端口: $BACKEND_PORT"
+  echo "  端口: $BACKEND_PORT"
   if [[ "$HTTPS_MODE" -eq 1 ]]; then
     echo "  模式: HTTPS（自签/可信证书）"
-    echo "  前端端口: $FRONTEND_PORT"
   elif [[ "$BACKEND_ONLY" -eq 1 ]]; then
-    echo "  模式: 仅后端（HTTP）"
+    echo "  模式: 仅后端（不校验前端产物）"
   else
-    echo "  前端端口: $FRONTEND_PORT"
+    echo "  模式: HTTP（后端统一提供 API + 前端静态文件）"
   fi
   echo "========================================"
 
   if port_in_use "$BACKEND_PORT"; then
-    echo "  错误：后端端口 $BACKEND_PORT 已被占用" >&2
-    exit 1
-  fi
-  if [[ "$BACKEND_ONLY" -eq 0 ]] && port_in_use "$FRONTEND_PORT"; then
-    echo "  错误：前端端口 $FRONTEND_PORT 已被占用" >&2
+    echo "  错误：端口 $BACKEND_PORT 已被占用" >&2
     exit 1
   fi
 
@@ -144,12 +127,13 @@ cmd_start() {
   fi
 
   local backend_artifact="$BACKEND_DIR/dist/index.js"
-  local frontend_artifact="$FRONTEND_DIR/dist/index.html"
   if [[ ! -f "$backend_artifact" ]]; then
     echo "  错误：后端构建产物缺失: $backend_artifact" >&2
     exit 1
   fi
+  # 后端统一托管前端静态文件，需 frontend/dist 存在；BackendOnly 模式跳过此检查
   if [[ "$BACKEND_ONLY" -eq 0 ]]; then
+    local frontend_artifact="$FRONTEND_DIR/dist/index.html"
     if [[ ! -f "$frontend_artifact" ]]; then
       echo "  错误：前端构建产物缺失: $frontend_artifact" >&2
       exit 1
@@ -170,9 +154,6 @@ cmd_start() {
 
   # 启动前清空旧日志，避免混叠
   : > "$LOG_DIR/backend.log"
-  if [[ "$BACKEND_ONLY" -eq 0 ]]; then
-    : > "$LOG_DIR/frontend.log"
-  fi
 
   echo "  启动后端..."
   pushd "$BACKEND_DIR" >/dev/null
@@ -183,8 +164,7 @@ cmd_start() {
   local backend_pid=$!
   popd >/dev/null
 
-  # 等待后端就绪（TypeORM 初始化 + NMS 启动需要数秒），
-  # 避免前端先就绪时页面请求被 ECONNREFUSED
+  # 等待后端就绪（TypeORM 初始化 + NMS 启动需要数秒）
   echo "  等待后端就绪..."
   if ! wait_port_ready "$BACKEND_PORT"; then
     echo "  错误：后端在 30 秒内未就绪，请检查日志: $LOG_DIR/backend.log" >&2
@@ -192,64 +172,21 @@ cmd_start() {
     return 1
   fi
 
+  node -e "
+    const fs = require('fs');
+    fs.writeFileSync('$PIDS_FILE', JSON.stringify({
+      backend: { pid: $backend_pid },
+      frontend: null
+    }, null, 2));
+  "
+
+  echo "  后端 PID: $backend_pid"
   if [[ "$HTTPS_MODE" -eq 1 ]]; then
-    # HTTPS 模式：后端使用 HTTPS，前端单独启动在 4173 端口
-    # Vite preview 代理通过 VITE_API_TARGET 指向 HTTPS 后端
-    echo "  启动前端..."
-    pushd "$FRONTEND_DIR" >/dev/null
-    VITE_API_TARGET="https://localhost:$BACKEND_PORT" \
-      nohup npx vite preview --port "$FRONTEND_PORT" --host > "$LOG_DIR/frontend.log" 2>&1 &
-    local frontend_pid=$!
-    popd >/dev/null
-
-    node -e "
-      const fs = require('fs');
-      fs.writeFileSync('$PIDS_FILE', JSON.stringify({
-        backend: { pid: $backend_pid },
-        frontend: { pid: $frontend_pid }
-      }, null, 2));
-    "
-
-    echo "  后端 PID: $backend_pid"
-    echo "  前端 PID: $frontend_pid"
-    echo "  HTTPS 后端: https://localhost:$BACKEND_PORT"
-    echo "  访问  : http://localhost:$FRONTEND_PORT"
-    echo "  日志  : $LOG_DIR/"
-  elif [[ "$BACKEND_ONLY" -eq 1 ]]; then
-    # 仅后端模式：不启动前端
-    node -e "
-      const fs = require('fs');
-      fs.writeFileSync('$PIDS_FILE', JSON.stringify({
-        backend: { pid: $backend_pid },
-        frontend: null
-      }, null, 2));
-    "
-    echo "  后端 PID: $backend_pid"
-    echo "  访问  : http://localhost:$BACKEND_PORT   （仅后端，未启动前端）"
-    echo "  日志  : $LOG_DIR/"
+    echo "  访问  : https://localhost:$BACKEND_PORT"
   else
-    echo "  启动前端..."
-    pushd "$FRONTEND_DIR" >/dev/null
-    # HTTP 模式：显式设置 VITE_API_TARGET 指向当前后端端口（默认 3333），
-    # 否则修改 PORT 后 Vite preview 代理仍打到默认 3333
-    VITE_API_TARGET="http://localhost:$BACKEND_PORT" \
-      nohup npx vite preview --port "$FRONTEND_PORT" --host > "$LOG_DIR/frontend.log" 2>&1 &
-    local frontend_pid=$!
-    popd >/dev/null
-
-    node -e "
-      const fs = require('fs');
-      fs.writeFileSync('$PIDS_FILE', JSON.stringify({
-        backend: { pid: $backend_pid },
-        frontend: { pid: $frontend_pid }
-      }, null, 2));
-    "
-
-    echo "  后端 PID: $backend_pid"
-    echo "  前端 PID: $frontend_pid"
-    echo "  访问  : http://localhost:$FRONTEND_PORT"
-    echo "  日志  : $LOG_DIR/"
+    echo "  访问  : http://localhost:$BACKEND_PORT"
   fi
+  echo "  日志  : $LOG_DIR/"
 }
 
 cmd_build() {
@@ -264,12 +201,14 @@ cmd_stop() {
     backend_pid=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PIDS_FILE','utf8')).backend.pid||'')}catch{}" 2>/dev/null || true)
     frontend_pid=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PIDS_FILE','utf8')).frontend?.pid||'')}catch{}" 2>/dev/null || true)
     [[ -n "$backend_pid" ]] && kill "$backend_pid" 2>/dev/null || true
+    # 兼容旧版 pids 文件中可能记录的前端进程
     [[ -n "$frontend_pid" ]] && kill "$frontend_pid" 2>/dev/null || true
     rm -f "$PIDS_FILE"
   fi
   pkill -f "node.*backend/dist" 2>/dev/null || true
+  # 兜底：按统一端口清理（含历史遗留的 vite preview 进程）
   pkill -f "vite preview" 2>/dev/null || true
-  kill_port "$FRONTEND_PORT"
+  kill_port "$BACKEND_PORT"
   echo "  已停止"
 }
 
@@ -281,27 +220,23 @@ cmd_restart() {
 cmd_status() {
   set_ports
   if [[ -f "$PIDS_FILE" ]]; then
-    local backend_pid frontend_pid
+    local backend_pid
     backend_pid=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PIDS_FILE','utf8')).backend.pid||'')}catch{}" 2>/dev/null || true)
-    frontend_pid=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$PIDS_FILE','utf8')).frontend?.pid||'')}catch{}" 2>/dev/null || true)
     echo "  后端 PID: $backend_pid (端口 $BACKEND_PORT)"
-    if [[ -n "$frontend_pid" ]]; then
-      echo "  前端 PID: $frontend_pid (端口 $FRONTEND_PORT)"
-    else
-      echo "  前端: 未启动（仅后端 / HTTPS 模式）"
-    fi
   else
     echo "  未运行"
   fi
+
+  local backend_artifact="$BACKEND_DIR/dist/index.js"
+  local frontend_artifact="$FRONTEND_DIR/dist/index.html"
+  echo "  构建产物:"
+  echo "    后端: $([[ -f "$backend_artifact" ]] && echo '存在' || echo '缺失')"
+  echo "    前端: $([[ -f "$frontend_artifact" ]] && echo '存在' || echo '缺失')"
 }
 
 cmd_logs() {
-  local target="${1:-backend}"
-  if [[ "$target" == "frontend" ]]; then
-    tail -f "$LOG_DIR/frontend.log"
-  else
-    tail -f "$LOG_DIR/backend.log"
-  fi
+  # 统一端口后仅保留后端日志（前端静态文件由后端托管，无独立日志）
+  tail -f "$LOG_DIR/backend.log"
 }
 
 # ==================== 证书 ====================
@@ -372,7 +307,7 @@ do_cert() {
   return 0
 }
 
-# HTTPS 启动：交互选择证书类型 → 签发 → 以 HTTPS 启动（后端 HTTPS，前端 4173）
+# HTTPS 启动：交互选择证书类型 → 签发 → 以 HTTPS 启动（后端 HTTPS，统一端口托管前端）
 do_https() {
   local cert_script="$ROOT_DIR/scripts/generate-cert.js"
   if [[ ! -f "$cert_script" ]]; then
@@ -403,17 +338,17 @@ usage() {
   stop               停止服务
   restart            重启服务
   status             查看运行状态
-  logs [backend|frontend]  查看日志（默认 backend）
+  logs               查看后端日志
   cert               一键签发 SSL 证书（localhost / 公网域名或公网 IP(Let's Encrypt)）
-  https              签发证书后以 HTTPS 启动（后端 HTTPS，前端 4173）
+  https              签发证书后以 HTTPS 启动
   menu               交互菜单（无参数时自动进入）
   help               显示此帮助
 
 start/restart/backend 选项:
       --build             启动前执行构建
-      --https             使用 HTTPS（后端 HTTPS，前端仍为 4173）
+      --https             使用 HTTPS
 
-端口: 后端默认取 .env 的 PORT（否则 3333），前端固定 4173
+端口: 默认取 .env 的 PORT（否则 3333），前后端共用同一端口
 EOF
 }
 
