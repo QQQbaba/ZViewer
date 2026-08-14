@@ -125,10 +125,21 @@ export function createMovieRouter(io: SocketIOServer): Router {
     async (req: AuthenticatedRequest, res: Response) => {
       try {
         const roomId = req.params.roomId as string;
-        const { orders } = req.body as { orders?: { id: number; order: number }[] };
-
-        if (!Array.isArray(orders)) {
-          res.status(400).json({ success: false, message: 'orders 必须是数组' });
+        const body = req.body as {
+          orders?: { id: number; order: number }[];
+          orderedIds?: unknown;
+        };
+        // 兼容两种排序格式：
+        // - orderedIds: number[]（前端 roomStore.reorderMovies 使用的格式）
+        // - orders: { id, order }[]（显式指定 order 值）
+        let orders: { id: number; order: number }[] | undefined = undefined;
+        if (Array.isArray(body.orders)) {
+          orders = body.orders;
+        } else if (Array.isArray(body.orderedIds)) {
+          orders = body.orderedIds.map((id, i) => ({ id: Number(id), order: i }));
+        }
+        if (!orders) {
+          res.status(400).json({ success: false, message: 'orders/orderedIds 必须是数组' });
           return;
         }
 
