@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$SourceDir = '../ZViewerCLI',
     [string]$OutputDir = 'ZViewerCLI'
 )

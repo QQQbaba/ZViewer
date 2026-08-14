@@ -2,23 +2,23 @@
 # ZViewer 一键启动脚本（单文件 exe 版，Linux）
 # 命令：start | stop | restart | status | logs | cert | https | help | menu
 # 无参数时进入交互菜单。
-#
-# 统一端口：前后端共用同一端口（默认 3333），由后端 exe 托管 frontend/dist 静态文件，
-# 无需独立的前端 exe。
 
 cd "$(dirname "$0")" || exit 1
 
 ROOT_DIR=$(pwd)
 BACKEND_BIN="$ROOT_DIR/zviewer-backend"
+FRONTEND_BIN="$ROOT_DIR/zviewer-frontend"
 CERT_BIN="$ROOT_DIR/zviewer-cert"
 LOG_DIR="$ROOT_DIR/log"
 PIDS_FILE="$ROOT_DIR/.prod.pids.json"
 ENV_FILE="$ROOT_DIR/.env"
 
 DEFAULT_PORT=3333
+DEFAULT_FRONTEND_PORT=4173
 DEFAULT_RTMP_PORT=3334
 DEFAULT_FLV_PORT=3335
 BACKEND_PORT="${BACKEND_PORT:-}"
+FRONTEND_PORT="${FRONTEND_PORT:-}"
 BACKEND_ONLY=0
 HTTPS_MODE=0
 CERT_HOST=""
@@ -27,7 +27,7 @@ CERT_FORCE=""
 # ==================== 工具函数 ====================
 
 # 从 .env / 环境变量读取端口，优先级：环境变量 > .env > 默认值
-# 统一端口 PORT（默认 3333）、RTMP/HTTP-FLV（默认 3334/3335）
+# 后端 PORT（默认 3333）、前端 FRONTEND_PORT（默认 4173）、RTMP/HTTP-FLV（默认 3334/3335）
 env_port_value() {
   local key="$1"
   local default="$2"
@@ -45,13 +45,20 @@ resolve_ports() {
   if [ -z "$BACKEND_PORT" ]; then
     BACKEND_PORT="$(env_port_value PORT "$DEFAULT_PORT")"
   fi
+  if [ -z "$FRONTEND_PORT" ]; then
+    FRONTEND_PORT="$(env_port_value FRONTEND_PORT "$DEFAULT_FRONTEND_PORT")"
+  fi
   RTMP_PORT="$(env_port_value RTMP_PORT "$DEFAULT_RTMP_PORT")"
   HTTP_FLV_PORT="$(env_port_value HTTP_FLV_PORT "$DEFAULT_FLV_PORT")"
 }
 
 write_pids() {
-  # $1=backend_pid
-  printf '{"backend":{"pid":%s},"frontend":null}\n' "$1" > "$PIDS_FILE"
+  # $1=backend_pid $2=frontend_pid（可为空）
+  if [ -n "$2" ]; then
+    printf '{"backend":{"pid":%s},"frontend":{"pid":%s}}\n' "$1" "$2" > "$PIDS_FILE"
+  else
+    printf '{"backend":{"pid":%s},"frontend":null}\n' "$1" > "$PIDS_FILE"
+  fi
 }
 
 read_pid() { # $1=backend|frontend
@@ -70,7 +77,7 @@ port_in_use() {
   fi
 }
 
-# 等待端口开始监听（后端初始化需要数秒）
+# 等待端口开始监听（后端初始化需要数秒，避免前端先就绪后页面请求被拒）
 wait_port_ready() {
   local port="$1"
   local timeout="${2:-30}"
@@ -183,29 +190,27 @@ do_start() {
   resolve_ports
   echo "========================================"
   echo "  ZViewer 启动"
-  echo "  端口: $BACKEND_PORT"
+  echo "  后端端口: $BACKEND_PORT"
   if [ "$HTTPS_MODE" -eq 1 ]; then
     echo "  模式: HTTPS（可信/自签证书）"
+    echo "  前端端口: $FRONTEND_PORT"
   elif [ "$BACKEND_ONLY" -eq 1 ]; then
-    echo "  模式: 仅后端（不校验前端产物）"
+    echo "  模式: 仅后端（HTTP）"
   else
-    echo "  模式: HTTP（后端统一提供 API + 前端静态文件）"
+    echo "  前端端口: $FRONTEND_PORT"
   fi
   echo "========================================"
 
   if ! has_exe "$BACKEND_BIN" "后端程序 zviewer-backend"; then return 1; fi
+  if [ "$BACKEND_ONLY" -ne 1 ] && ! has_exe "$FRONTEND_BIN" "前端程序 zviewer-frontend"; then return 1; fi
 
   if port_in_use "$BACKEND_PORT"; then
-    echo "  [错误] 端口 $BACKEND_PORT 已被占用"
+    echo "  [错误] 后端端口 $BACKEND_PORT 已被占用"
     return 1
   fi
-
-  # 后端统一托管前端静态文件，需 frontend/dist 存在；BackendOnly 模式跳过此检查
-  if [ "$BACKEND_ONLY" -ne 1 ]; then
-    if [ ! -f "$ROOT_DIR/frontend/dist/index.html" ]; then
-      echo "  [错误] 前端构建产物缺失: $ROOT_DIR/frontend/dist/index.html"
-      return 1
-    fi
+  if [ "$BACKEND_ONLY" -ne 1 ] && port_in_use "$FRONTEND_PORT"; then
+    echo "  [错误] 前端端口 $FRONTEND_PORT 已被占用"
+    return 1
   fi
 
   # HTTPS 模式：先签发证书
@@ -243,7 +248,9 @@ do_start() {
     return 1
   fi
 
-  write_pids "$local_backend_pid"
+  # 单端口统一服务：后端同时提供 API + 前端静态文件 + Socket.IO，
+  # 无需单独启动前端进程。RTMP/HTTP-FLV 仍为独立流媒体端口。
+  write_pids "$local_backend_pid" ""
   echo "  后端 PID: $local_backend_pid"
   if [ "$HTTPS_MODE" -eq 1 ]; then
     echo "  访问  : https://localhost:$BACKEND_PORT"
@@ -261,11 +268,11 @@ do_stop() {
   bp=$(read_pid backend)
   fp=$(read_pid frontend)
   [ -n "$bp" ] && kill "$bp" 2>/dev/null
-  # 兼容旧版 pids 文件中可能记录的前端进程
   [ -n "$fp" ] && kill "$fp" 2>/dev/null
   rm -f "$PIDS_FILE"
   resolve_ports
   kill_port "$BACKEND_PORT"
+  kill_port "$FRONTEND_PORT"
   echo "  已停止"
 }
 
@@ -280,27 +287,45 @@ do_status() {
   echo "  ZViewer 运行状态"
   echo "========================================"
   resolve_ports
-  local bp backend_running
+  local bp fp backend_running frontend_running
   bp=$(read_pid backend)
+  fp=$(read_pid frontend)
   backend_running="否"
+  frontend_running="否"
   if [ -n "$bp" ] && kill -0 "$bp" 2>/dev/null; then backend_running="是"; fi
+  if [ -n "$fp" ] && kill -0 "$fp" 2>/dev/null; then frontend_running="是"; fi
 
-  echo "  服务:"
+  echo "  后端:"
   echo "    配置端口: $BACKEND_PORT"
   echo "    端口监听: $(if port_in_use "$BACKEND_PORT"; then echo 是; else echo 否; fi)"
   if [ -n "$bp" ]; then
     echo "    记录 PID: $bp ($(if [ "$backend_running" = "是" ]; then echo 运行中; else echo 未运行; fi))"
   fi
-
+  echo "  前端:"
+  echo "    配置端口: $FRONTEND_PORT"
+  if [ -n "$fp" ]; then
+    echo "    端口监听: $(if port_in_use "$FRONTEND_PORT"; then echo 是; else echo 否; fi)"
+    echo "    记录 PID: $fp ($(if [ "$frontend_running" = "是" ]; then echo 运行中; else echo 未运行; fi))"
+  elif [ -f "$PIDS_FILE" ] && grep -q '"frontend":null' "$PIDS_FILE"; then
+    echo "    模式: 仅后端（未启动前端）"
+  else
+    echo "    端口监听: $(if port_in_use "$FRONTEND_PORT"; then echo 是; else echo 否; fi)"
+  fi
   echo "  程序:"
   echo "    后端: $(if [ -f "$BACKEND_BIN" ]; then echo 存在; else echo 缺失; fi)"
-  echo "    前端: $(if [ -f "$ROOT_DIR/frontend/dist/index.html" ]; then echo 存在; else echo 缺失; fi)"
+  echo "    前端: $(if [ -f "$FRONTEND_BIN" ]; then echo 存在; else echo 缺失; fi)"
   echo "    证书: $(if [ -f "$ROOT_DIR/config/ssl/cert.pem" ]; then echo 存在; else echo 缺失; fi)"
 }
 
 do_logs() {
-  # 统一端口后仅保留后端日志（前端静态文件由后端托管，无独立日志）
-  local log_file="$LOG_DIR/backend.log"
+  local target="$1"
+  if [ -z "$target" ]; then target="backend"; fi
+  local log_file
+  if [ "$target" = "frontend" ]; then
+    log_file="$LOG_DIR/frontend.log"
+  else
+    log_file="$LOG_DIR/backend.log"
+  fi
   if [ -f "$log_file" ]; then
     tail -n 50 "$log_file"
   else
@@ -315,27 +340,27 @@ usage() {
 用法: $0 {start|backend|stop|restart|status|logs|cert|https|help|menu} [选项]
 
 命令:
-  start              启动服务（加 --https 使用 HTTPS）
-  backend            仅启动后端（加 --https 使用 HTTPS）
+  start              启动服务（HTTP 前后端统一由后端 3333 提供；加 --https 使用 HTTPS）
+  backend            仅启动后端（单端口模式下与 start 等价）
   stop               停止服务
   restart            重启服务
   status             查看运行状态
-  logs               查看后端日志
+  logs [backend|frontend]  查看日志（默认 backend）
   cert [host]        一键签发 SSL 证书（localhost / 公网域名或公网 IP(Let's Encrypt)）
-  https [host]       签发证书后以 HTTPS 启动
+  https [host]       签发证书后以 HTTPS 启动（后端统一提供前后端）
   help               显示此帮助
   menu               交互菜单（无参数时自动进入）
 
 start/restart/cert/https 选项:
-      --https              start 时使用 HTTPS
+      --https              start 时使用 HTTPS（后端统一提供前后端）
       --force              证书强制重新签发
 
-端口: 默认取 .env 的 PORT（否则 3333），前后端共用同一端口
+端口: 后端统一 3333（前后端同端口，前端由后端托管）
 
 示例:
   ./start.sh                    # 交互菜单
-  ./start.sh start              # HTTP 启动
-  ./start.sh backend            # 仅启动后端
+  ./start.sh start              # HTTP 启动（访问 http://localhost:3333）
+  ./start.sh backend            # 启动后端（同样访问 http://localhost:3333）
   ./start.sh https example.com  # 申请 Let's Encrypt 证书后 HTTPS 启动
   ./start.sh cert example.com --force  # 为公网域名或公网 IP 强制重新签发 Let's Encrypt 证书
 EOF
@@ -348,7 +373,7 @@ do_menu() {
     echo "  ZViewer 服务管理（单文件版）"
     echo "========================================"
     echo ""
-    echo "  1) 启动服务"
+    echo "  1) 启动服务 (HTTP)"
     echo "  2) 仅启动后端"
     echo "  3) 停止服务"
     echo "  4) 重启服务"
@@ -387,7 +412,7 @@ wait_key() {
 
 # ==================== 参数解析 ====================
 
-# start/https 参数：--https/--force/host
+# start/https 参数：--https/--force/host（端口已固定，不支持自定义）
 parse_start_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -442,7 +467,7 @@ case "$CMD" in
     do_status
     ;;
   logs)
-    do_logs
+    do_logs "${2:-backend}"
     ;;
   cert)
     shift

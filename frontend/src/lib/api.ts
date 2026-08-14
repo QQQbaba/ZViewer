@@ -69,7 +69,6 @@ const rawApiUrl = normalizeUrl(import.meta.env.VITE_API_URL || '')
 const rawSocketUrl = normalizeUrl(import.meta.env.VITE_SOCKET_URL || '')
 const rawFlvBaseUrl = normalizeUrl(import.meta.env.VITE_FLV_BASE_URL || '')
 const rawRtmpPort = (import.meta.env.VITE_RTMP_PORT || '3334').toString()
-const rawFlvPort = (import.meta.env.VITE_HTTP_FLV_PORT || '3335').toString()
 
 /** 从 localStorage 实时读取自定义值，避免模块加载后取值陈旧 */
 function getStored(key: string): string | null {
@@ -93,12 +92,10 @@ function computeSocketUrl(): string {
 }
 
 function computeFlvBaseUrl(): string {
+  // 统一端口后默认使用相对路径（即 /live），由后端反向代理到 NMS HTTP-FLV 端口，
+  // 无需单独暴露 NMS 端口。仅当用户显式自定义或通过 VITE_FLV_BASE_URL 指定时才用绝对地址。
   return ensureProtocol(
-    getStored(CUSTOM_FLV_BASE_URL_KEY) ||
-      rawFlvBaseUrl ||
-      (window.location.protocol === 'https:'
-        ? ''
-        : `http://${window.location.hostname}:${rawFlvPort}`)
+    getStored(CUSTOM_FLV_BASE_URL_KEY) || rawFlvBaseUrl || ''
   )
 }
 
@@ -121,9 +118,8 @@ export let SOCKET_URL = computeSocketUrl()
 
 /**
  * 当前生效的 HTTP-FLV 拉流基础地址。
- * 未单独设置时按页面协议推断：
- * - HTTPS 生产环境默认使用相对路径 ''（由 Nginx/Caddy 反向代理到 Node Media Server）
- * - HTTP 开发环境默认直连 `http://host:3335`
+ * 默认使用相对路径 ''（即 /live），由后端反向代理到 Node Media Server（HTTP_FLV_PORT）。
+ * 统一端口后无需单独暴露 NMS 端口；如需独立子域名可显式设置。
  */
 export let FLV_BASE_URL = computeFlvBaseUrl()
 

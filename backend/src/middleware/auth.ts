@@ -71,19 +71,20 @@ function isRequestSecure(req: Request): boolean {
  *
  * 浏览器 SameSite 同站判定规则（MDN：SameSite cookies）：
  * - 同站 = 相同 scheme（http/https）+ 相同 registrable domain（域名或 IP），**端口不影响同站**
- * - 例：http://example.com:4173 与 http://example.com:3333 是【同站】
+ * - 例：http://example.com:3000 与 http://example.com:3333 是【同站】
  *   （同 scheme、同域名，仅端口不同，SameSite=Lax 的 cookie 可正常携带）
  *   https://example.com 与 http://example.com 则是【跨站】（scheme 不同）
  *
  * 为什么必须忽略端口：
- * 前端（4173）与后端（3333）同域名不同端口是常见部署（Nginx 反代或直连）。
+ * 统一端口后前后端共用同一端口（默认 3333），但浏览器 SameSite 判定本身也忽略端口，
+ * 因此即使历史部署中前后端使用不同端口（如前端 4173、后端 3333）也是同站。
  * 若按"端口不同即跨站"判定，会错误地把同站请求标记为跨站：
  * - HTTPS 下会错误设置 SameSite=None（同站不需要，且部分代理/浏览器对 None 敏感）
  * - HTTP 下虽因浏览器同站判定忽略端口而侥幸可用，但逻辑错误
  *
  * 兼容反向代理：
- * - Nginx 反代时请求 Host 可能被改写为内网地址（localhost:3333），
- *   优先读取 X-Forwarded-Host（Nginx 常用 proxy_set_header X-Forwarded-Host $host）
+ * - 反代时请求 Host 可能被改写为内网地址（localhost:3333），
+ *   优先读取 X-Forwarded-Host（反代常用 proxy_set_header X-Forwarded-Host $host）
  *   或直接比较 X-Forwarded-Proto 与 Origin 的 scheme。
  */
 function isCrossSiteRequest(req: Request): boolean {

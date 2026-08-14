@@ -3,6 +3,9 @@
 
 # ZViewer 一键启动脚本（单文件 exe 版，Windows）
 # 命令：start | backend | stop | restart | status | logs | cert | https | help | menu
+#
+# 统一端口：前后端共用同一端口（默认 3333），由后端 exe 托管 frontend/dist 静态文件，
+# 无需独立的前端 exe。
 
 param(
     [Parameter(Position = 0)]
@@ -13,7 +16,7 @@ param(
     [string]$HostArg = '',            # cert/https 的域名或 IP（缺省则交互选择）
 
     [switch]$Force,                   # 证书强制重新签发
-    [switch]$Https                    # start 时使用 HTTPS（后端 HTTPS，前端仍为 4173）
+    [switch]$Https                    # start 时使用 HTTPS
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,7 +27,6 @@ $ErrorActionPreference = "Stop"
 $rootDir = $PSScriptRoot
 if (-not $rootDir) { $rootDir = (Get-Location).Path }
 $backendExe = Join-Path $rootDir "zviewer-backend.exe"
-$frontendExe = Join-Path $rootDir "zviewer-frontend.exe"
 $certExe = Join-Path $rootDir "zviewer-cert.exe"
 $logDir = Join-Path $rootDir "log"
 $pidsFile = Join-Path $rootDir ".prod.pids.json"
@@ -37,10 +39,10 @@ function Read-PidsFile {
     try { return Get-Content $pidsFile -Raw | ConvertFrom-Json } catch { return $null }
 }
 
-function Write-PidsFile($backendPid, $frontendPid) {
+function Write-PidsFile($backendPid) {
     @{
         backend  = @{ pid = $backendPid }
-        frontend = @{ pid = $frontendPid }
+        frontend = $null
     } | ConvertTo-Json -Depth 3 | Set-Content -Path $pidsFile -Encoding UTF8
 }
 
@@ -49,7 +51,7 @@ function Test-PortInUse($localPort) {
     return $null -ne $conn
 }
 
-# 等待端口开始监听（后端初始化需要数秒，避免前端先就绪后页面请求被拒）
+# 等待端口开始监听（后端初始化需要数秒）
 function Wait-PortReady {
     param([int]$Port, [int]$TimeoutSeconds = 30)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -68,7 +70,7 @@ function Stop-ProcessByPort($localPort) {
 }
 
 # 从 .env / 环境变量读取端口（与后端 dotenv 行为一致）
-# 优先级：环境变量 > .env > 默认值（后端 3333，前端 4173）
+# 优先级：环境变量 > .env > 默认值（统一端口 3333）
 function Read-PortValue {
     param([string]$Key)
     $envVal = [Environment]::GetEnvironmentVariable($Key)
@@ -84,10 +86,9 @@ function Read-PortValue {
 }
 
 function Set-Ports {
-    $backendEnv = Read-PortValue -Key 'PORT'
-    $frontendEnv = Read-PortValue -Key 'FRONTEND_PORT'
-    $script:BackendPort = if ($backendEnv) { $backendEnv } else { 3333 }
-    $script:FrontendPort = if ($frontendEnv) { $frontendEnv } else { 4173 }
+    # 统一端口：前后端共用同一端口（默认 3333），由后端托管前端静态文件
+    $portEnv = Read-PortValue -Key 'PORT'
+    $script:Port = if ($portEnv) { $portEnv } else { 3333 }
 }
 
 function Test-Exe([string]$Exe, [string]$Name) {
@@ -99,7 +100,6 @@ function Test-Exe([string]$Exe, [string]$Name) {
     return $true
 }
 
-# 解析端口：显式参数 > 持久化 > .env / 默认
 # ==================== 证书 ====================
 
 # 交互选择证书签发类型（localhost / 公网域名）
@@ -206,27 +206,30 @@ function Invoke-Start([switch]$BackendOnly) {
 
     Write-Host "========================================"
     Write-Host "  ZViewer 启动"
-    Write-Host "  后端端口: $BackendPort"
+    Write-Host "  端口: $Port"
     if ($Https) {
-        Write-Host "  模式: HTTPS（可信/自签证书）"
-        Write-Host "  前端端口: $FrontendPort"
+      Write-Host "  模式: HTTPS（可信/自签证书）"
     } elseif ($BackendOnly) {
-        Write-Host "  模式: 仅后端（HTTP）"
+      Write-Host "  模式: 仅后端（不校验前端产物）"
     } else {
-        Write-Host "  前端端口: $FrontendPort"
+      Write-Host "  模式: HTTP（后端统一提供 API + 前端静态文件）"
     }
     Write-Host "========================================"
 
     if (-not (Test-Exe $backendExe "后端程序 zviewer-backend.exe")) { return 1 }
-    if (-not $BackendOnly -and -not (Test-Exe $frontendExe "前端程序 zviewer-frontend.exe")) { return 1 }
 
-    if (Test-PortInUse $BackendPort) {
-        Write-Host "  [错误] 后端端口 $BackendPort 已被占用" -ForegroundColor Red
+    if (Test-PortInUse $Port) {
+        Write-Host "  [错误] 端口 $Port 已被占用" -ForegroundColor Red
         return 1
     }
-    if (-not $BackendOnly -and (Test-PortInUse $FrontendPort)) {
-        Write-Host "  [错误] 前端端口 $FrontendPort 已被占用" -ForegroundColor Red
+
+    # 后端统一托管前端静态文件，需 frontend/dist 存在；BackendOnly 模式跳过此检查
+    if (-not $BackendOnly) {
+      $frontendArtifact = Join-Path $rootDir "frontend\dist\index.html"
+      if (-not (Test-Path $frontendArtifact)) {
+        Write-Host "  [错误] 前端构建产物缺失: $frontendArtifact" -ForegroundColor Red
         return 1
+      }
     }
 
     # HTTPS 模式：先签发证书
@@ -244,16 +247,12 @@ function Invoke-Start([switch]$BackendOnly) {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     "" | Set-Content "$logDir/backend.log" -Encoding UTF8
     "" | Set-Content "$logDir/backend.err.log" -Encoding UTF8
-    if (-not $BackendOnly) {
-        "" | Set-Content "$logDir/frontend.log" -Encoding UTF8
-        "" | Set-Content "$logDir/frontend.err.log" -Encoding UTF8
-    }
 
     Write-Host "  启动后端..."
     $rtmpEnv = Read-PortValue -Key 'RTMP_PORT'
     $flvEnv = Read-PortValue -Key 'HTTP_FLV_PORT'
     $backendEnv = @{
-        PORT = "$BackendPort"
+        PORT = "$Port"
         NODE_ENV = "production"
         HOST = "::"
         RTMP_PORT = if ($rtmpEnv) { "$rtmpEnv" } else { "3334" }
@@ -263,54 +262,19 @@ function Invoke-Start([switch]$BackendOnly) {
     $backend = Start-ExeWithEnv -FilePath $backendExe -EnvVars $backendEnv  `
         -OutFile "$logDir/backend.log" -ErrFile "$logDir/backend.err.log"
 
-    # 等待后端就绪（TypeORM 初始化 + NMS 启动需要数秒），
-    # 避免前端先就绪时页面请求被 ECONNREFUSED
+    # 等待后端就绪（TypeORM 初始化 + NMS 启动需要数秒）
     Write-Host "  等待后端就绪..."
-    if (-not (Wait-PortReady $BackendPort)) {
+    if (-not (Wait-PortReady $Port)) {
         Write-Host "  错误：后端在 30 秒内未就绪，请检查日志: $logDir\backend.err.log" -ForegroundColor Red
         Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
         exit 1
     }
 
-    if ($Https) {
-        # HTTPS 模式：后端使用 HTTPS，前端单独启动在 4173 端口
-        Write-Host "  启动前端..."
-        $frontendEnv = @{
-            PORT = "$FrontendPort"
-            BACKEND_URL = "https://localhost:$BackendPort"
-            HOST = "0.0.0.0"
-        }
-        $frontend = Start-ExeWithEnv -FilePath $frontendExe -EnvVars $frontendEnv  `
-            -OutFile "$logDir/frontend.log" -ErrFile "$logDir/frontend.err.log"
-
-        Write-PidsFile -backendPid $backend.Id -frontendPid $frontend.Id
-        Write-Host "  后端 PID: $($backend.Id)"
-        Write-Host "  前端 PID: $($frontend.Id)"
-        Write-Host "  HTTPS 后端: https://localhost:$BackendPort"
-        Write-Host "  访问  : http://localhost:$FrontendPort"
-        Write-Host "  日志  : $logDir/"
-    } elseif ($BackendOnly) {
-        # 仅后端模式：不启动前端
-        Write-PidsFile -backendPid $backend.Id -frontendPid $null
-        Write-Host "  后端 PID: $($backend.Id)"
-        Write-Host "  访问  : http://localhost:$BackendPort   （仅后端，未启动前端）"
-        Write-Host "  日志  : $logDir/"
-    } else {
-        Write-Host "  启动前端..."
-        $frontendEnv = @{
-            PORT = "$FrontendPort"
-            BACKEND_URL = "http://localhost:$BackendPort"
-            HOST = "0.0.0.0"
-        }
-        $frontend = Start-ExeWithEnv -FilePath $frontendExe -EnvVars $frontendEnv  `
-            -OutFile "$logDir/frontend.log" -ErrFile "$logDir/frontend.err.log"
-
-        Write-PidsFile -backendPid $backend.Id -frontendPid $frontend.Id
-        Write-Host "  后端 PID: $($backend.Id)"
-        Write-Host "  前端 PID: $($frontend.Id)"
-        Write-Host "  访问  : http://localhost:$FrontendPort"
-        Write-Host "  日志  : $logDir/"
-    }
+    Write-PidsFile -backendPid $backend.Id
+    Write-Host "  后端 PID: $($backend.Id)"
+    $protocol = if ($Https) { 'https' } else { 'http' }
+    Write-Host "  访问  : ${protocol}://localhost:$Port"
+    Write-Host "  日志  : $logDir/"
     return 0
 }
 
@@ -322,15 +286,15 @@ function Invoke-Stop {
         if ($existing.backend -and $existing.backend.pid) {
             Stop-Process -Id $existing.backend.pid -Force -ErrorAction SilentlyContinue
         }
+        # 兼容旧版 pids 文件中可能记录的前端进程
         if ($existing.frontend -and $existing.frontend.pid) {
             Stop-Process -Id $existing.frontend.pid -Force -ErrorAction SilentlyContinue
         }
         Remove-Item $pidsFile -Force -ErrorAction SilentlyContinue
     }
-    # 兜底：按端口清理
+    # 兜底：按统一端口清理
     Set-Ports
-    Stop-ProcessByPort $BackendPort
-    Stop-ProcessByPort $FrontendPort
+    Stop-ProcessByPort $Port
     Write-Host "  已停止"
 }
 
@@ -348,46 +312,29 @@ function Invoke-Status {
     Set-Ports
     $existing = Read-PidsFile
     $backendRunning = $false
-    $frontendRunning = $false
     if ($existing -and $existing.backend -and $existing.backend.pid) {
         $backendRunning = $null -ne (Get-Process -Id $existing.backend.pid -ErrorAction SilentlyContinue)
     }
-    if ($existing -and $existing.frontend -and $existing.frontend.pid) {
-        $frontendRunning = $null -ne (Get-Process -Id $existing.frontend.pid -ErrorAction SilentlyContinue)
-    }
 
-    $backendListen = Test-PortInUse $BackendPort
-    $frontendListen = Test-PortInUse $FrontendPort
+    $backendListen = Test-PortInUse $Port
 
-    Write-Host "  后端:"
-    Write-Host "    配置端口: $BackendPort"
+    Write-Host "  服务:"
+    Write-Host "    配置端口: $Port"
     Write-Host "    端口监听: $(if ($backendListen) { '是' } else { '否' })"
     if ($existing -and $existing.backend -and $existing.backend.pid) {
         Write-Host "    记录 PID: $($existing.backend.pid) ($(if ($backendRunning) { '运行中' } else { '未运行' }))"
     }
 
-    Write-Host "  前端:"
-    Write-Host "    配置端口: $FrontendPort"
-    if ($existing -and $existing.frontend -and $existing.frontend.pid) {
-        Write-Host "    端口监听: $(if ($frontendListen) { '是' } else { '否' })"
-        Write-Host "    记录 PID: $($existing.frontend.pid) ($(if ($frontendRunning) { '运行中' } else { '未运行' }))"
-    } elseif ($existing -and $null -eq $existing.frontend) {
-        Write-Host "    模式: 仅后端 / HTTPS（未启动前端）"
-    } else {
-        Write-Host "    端口监听: $(if ($frontendListen) { '是' } else { '否' })"
-    }
-
+    $frontendArtifact = Join-Path $rootDir "frontend\dist\index.html"
     Write-Host "  程序:"
     Write-Host "    后端: $(if (Test-Path $backendExe) { '存在' } else { '缺失' })"
-    Write-Host "    前端: $(if (Test-Path $frontendExe) { '存在' } else { '缺失' })"
+    Write-Host "    前端: $(if (Test-Path $frontendArtifact) { '存在' } else { '缺失' })"
     Write-Host "    证书: $(if (Test-Path (Join-Path $rootDir 'config\ssl\cert.pem')) { '存在' } else { '缺失' })"
 }
 
 function Invoke-Logs {
-    param([string]$LogTarget)
-    if (-not $LogTarget) { $LogTarget = $HostArg }
-    if (-not $LogTarget) { $LogTarget = 'backend' }
-    $logFile = if ($LogTarget -eq 'frontend') { "$logDir/frontend.log" } else { "$logDir/backend.log" }
+    # 统一端口后仅保留后端日志（前端静态文件由后端托管，无独立日志）
+    $logFile = "$logDir/backend.log"
     if (Test-Path $logFile) {
         Get-Content $logFile -Tail 50
     } else {
@@ -401,26 +348,26 @@ function Show-Help {
     Write-Host "用法: .\start.bat {start|backend|stop|restart|status|logs|cert|https|help|menu} [选项]"
     Write-Host ""
     Write-Host "命令:"
-    Write-Host "  start              启动服务（HTTP 前后端；加 -Https 使用 HTTPS）"
+    Write-Host "  start              启动服务（加 -Https 使用 HTTPS）"
     Write-Host "  backend            仅启动后端（加 -Https 使用 HTTPS）"
     Write-Host "  stop               停止服务"
     Write-Host "  restart            重启服务"
     Write-Host "  status             查看运行状态"
-    Write-Host "  logs [backend|frontend]  查看日志（默认 backend）"
+    Write-Host "  logs               查看后端日志"
     Write-Host "  cert [host]        一键签发 SSL 证书（localhost / 公网域名或公网 IP(Let's Encrypt)）"
-    Write-Host "  https [host]       签发证书后以 HTTPS 启动（后端 HTTPS，前端 4173）"
+    Write-Host "  https [host]       签发证书后以 HTTPS 启动"
     Write-Host "  help               显示此帮助"
     Write-Host "  menu               交互菜单（无参数时自动进入）"
     Write-Host ""
     Write-Host "start/restart/cert/https 选项:"
-    Write-Host "  -Https                    start 时使用 HTTPS（后端 HTTPS，前端仍为 4173）"
+    Write-Host "  -Https                    start 时使用 HTTPS"
     Write-Host "  -Force                    证书强制重新签发"
     Write-Host ""
-    Write-Host "端口: 后端 3333，前端 4173"
+    Write-Host "端口: 默认取 .env 的 PORT（否则 3333），前后端共用同一端口"
     Write-Host ""
     Write-Host "示例:"
     Write-Host "  start.bat                  # 交互菜单"
-    Write-Host "  start.bat start            # HTTP 启动（前后端）"
+    Write-Host "  start.bat start            # HTTP 启动"
     Write-Host "  start.bat backend          # 仅启动后端"
     Write-Host "  start.bat https example.com  # 申请 Let's Encrypt 证书后 HTTPS 启动"
     Write-Host "  start.bat cert example.com -Force  # 为公网域名强制重新签发 Let's Encrypt 证书"
@@ -433,14 +380,14 @@ function Show-Menu {
         Write-Host "  ZViewer 服务管理（单文件版）"
         Write-Host "========================================"
         Write-Host ""
-        Write-Host "  1) 启动服务 (HTTP)"
+        Write-Host "  1) 启动服务"
         Write-Host "  2) 仅启动后端"
         Write-Host "  3) 停止服务"
         Write-Host "  4) 重启服务"
         Write-Host "  5) 查看状态"
         Write-Host "  6) 查看日志"
         Write-Host "  7) 一键签发 SSL 证书"
-        Write-Host "  8) HTTPS 启动（自动签发证书，前后端分离）"
+        Write-Host "  8) HTTPS 启动（自动签发证书）"
         Write-Host "  0) 退出"
         Write-Host ""
         $choice = Read-Host "  请输入编号 (0-8)"

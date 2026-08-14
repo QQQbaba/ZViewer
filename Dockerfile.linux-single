@@ -6,9 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 复制单文件产物
+# 复制单文件产物（统一端口：后端托管前端静态文件，无需前端 exe）
 COPY dist/linux/zviewer-backend .
-COPY dist/linux/zviewer-frontend .
 COPY dist/linux/zviewer-cert .
 COPY dist/linux/start.sh .
 COPY dist/linux/.env .
@@ -18,13 +17,11 @@ COPY dist/linux/frontend/dist ./frontend/dist/
 RUN mkdir -p config/ssl config/uploads config/media log
 
 # 暴露端口
-# 3333: 后端 REST API + WebSocket (Socket.IO)
-# 4173: 前端静态文件服务 + API 反向代理
+# 3333: 统一端口 - 后端 REST API + WebSocket (Socket.IO) + 前端静态文件 + /live HTTP-FLV 代理
 # 3334: RTMP 推流端口 (OBS 连接)
-# 3335: HTTP-FLV 拉流端口 (Node-Media-Server)
-EXPOSE 3333 4173 3334 3335
+EXPOSE 3333 3334
 
-# Entrypoint（HTTP 模式，启动前后端，不自动签发证书）
+# Entrypoint（HTTP 模式，仅启动后端，由后端统一提供 API + 前端静态文件）
 COPY docker/entrypoint-linux-single.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
