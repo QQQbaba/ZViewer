@@ -9,6 +9,7 @@
  * 获取带签名的真实下载直链，供"直链模式"使用。
  */
 import type { WebDAVConnectionParams } from './webdav';
+import { latin1RoundTrip } from './webdav';
 import type { UserMount } from '../entities/UserMount';
 
 // OpenList 错误类型：复用 WebDAV 的错误码体系（AUTH_FAILED/UNREACHABLE/NOT_FOUND/TIMEOUT）
@@ -129,25 +130,41 @@ export async function fetchOpenListDirectUrl(
   }
 
   // 2. 调用 /api/fs/get 获取 raw_url
-  const fsRes = await fetch(`${baseUrl}/api/fs/get`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: token } : {}),
-    },
-    body: JSON.stringify({ path: targetPath, password: undefined }),
-  });
-  if (!fsRes.ok) {
-    throw new OpenListError(
-      `获取直链失败: HTTP ${fsRes.status}`,
-      'UNREACHABLE',
-    );
-  }
-  const fsData = (await fsRes.json()) as {
-    code?: number;
-    message?: string;
-    data?: { raw_url?: string; name?: string };
+  const fsGetOnce = async (requestPath: string) => {
+    const fsRes = await fetch(`${baseUrl}/api/fs/get`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: token } : {}),
+      },
+      body: JSON.stringify({ path: requestPath, password: undefined }),
+    });
+    if (!fsRes.ok) {
+      throw new OpenListError(
+        `获取直链失败: HTTP ${fsRes.status}`,
+        'UNREACHABLE',
+      );
+    }
+    return (await fsRes.json()) as {
+      code?: number;
+      message?: string;
+      data?: { raw_url?: string; name?: string };
+    };
   };
+
+  let fsData = await fsGetOnce(targetPath);
+  if (fsData.code !== 200) {
+    // 历史数据兼容：旧版 browse 曾把服务器真名（Latin-1 乱码形态）"修复"为
+    // 理想字符返回前端，影片表中的 path 因此与真名不匹配而 "object not found"。
+    // 用逆变换候选路径重试一次（`！` → `ï¼\x81`）。
+    const fallbackPath = latin1RoundTrip(targetPath);
+    if (fallbackPath) {
+      const retryData = await fsGetOnce(fallbackPath);
+      if (retryData.code === 200) {
+        fsData = retryData;
+      }
+    }
+  }
   if (fsData.code !== 200) {
     const code = fsData.code === 401 ? 'AUTH_FAILED' : 'NOT_FOUND';
     // AList 上游返回的英文错误消息（如 "object not found"）对用户不友好，

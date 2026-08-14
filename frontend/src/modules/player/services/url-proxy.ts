@@ -82,6 +82,41 @@ export function isCliProxyUrl(url: string): boolean {
   return url.startsWith('http://127.0.0.1:') && url.includes('/proxy?url=')
 }
 
+/** 从 localStorage 读取当前 access token（SSR / 非浏览器环境返回空串）。 */
+function getStoredToken(): string {
+  try {
+    return localStorage.getItem('zviewer-access-token') || ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 为本站 /api/ 路径 URL（相对或绝对）附加 access token 查询参数。
+ *
+ * HTTP 环境下后端不写 auth cookie（浏览器禁止非 Secure cookie 场景），
+ * 而 <video> / MSE / hls.js 等媒体请求无法设置 Authorization header，
+ * 因此必须将 token 附加到 URL，后端 extractAccessToken 会优先从查询参数读取。
+ * HTTPS 环境下 cookie 自动携带，附加 token 仅作冗余（两者任一生效即可）。
+ *
+ * 非 /api/ 路径、已带 token 参数或无 token 时原样返回。
+ */
+export function appendAuthToken(url: string): string {
+  let hasQuery: boolean
+  try {
+    const u = new URL(url, window.location.origin)
+    if (!u.pathname.startsWith('/api/')) return url
+    if (u.searchParams.has('token')) return url
+    hasQuery = !!u.search
+  } catch {
+    // 非法 URL，原样返回
+    return url
+  }
+  const token = getStoredToken()
+  if (!token) return url
+  return `${url}${hasQuery ? '&' : '?'}token=${encodeURIComponent(token)}`
+}
+
 /**
  * 将 URL 包装为后端代理 URL（相对路径）。
  * 后端代理会自动添加 Referer/User-Agent 头绕过防盗链，并透传 Range 请求支持断点续传。
@@ -92,12 +127,7 @@ export function isCliProxyUrl(url: string): boolean {
  * 附加到查询参数中，后端 extractAccessToken 会优先从查询参数读取。
  */
 export function buildProxyUrl(url: string): string {
-  let token = ''
-  try {
-    token = localStorage.getItem('zviewer-access-token') || ''
-  } catch {
-    // SSR 或非浏览器环境忽略
-  }
+  const token = getStoredToken()
   const tokenParam = token ? `&token=${encodeURIComponent(token)}` : ''
   return `/api/stream/proxy?url=${encodeURIComponent(url)}${tokenParam}`
 }
@@ -129,11 +159,13 @@ export function resolveProxyUrl(
 ): string {
   if (!url) return url
 
-  // 本站 URL / blob / data 协议：永不代理
-  if (isLocalUrl(url)) return url
+  // 本站 URL / blob / data 协议：永不代理。
+  // /api/ 路径需附加 token：HTTP 环境下无 auth cookie，
+  // 媒体标签无法设置 Authorization header，必须通过查询参数认证。
+  if (isLocalUrl(url)) return appendAuthToken(url)
 
-  // 相对路径（/api/webdav/...）：自动走本站后端，无需包装
-  if (isRelativeUrl(url)) return url
+  // 相对路径（/api/webdav/...）：自动走本站后端，同样附加 token
+  if (isRelativeUrl(url)) return appendAuthToken(url)
 
   const hasHeaders = !!(headers && Object.keys(headers).length > 0)
   const isBili = isBilibiliMediaUrl(url)

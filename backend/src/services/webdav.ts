@@ -63,13 +63,14 @@ function normalizePath(path: string): string {
   // "Request path contains unescaped characters" 错误。
   // 对每段单独 encodeURIComponent，保留 / 分隔符。
   // 先 tryDecode 避免前端已编码过的路径被二次编码。
+  // 注意：不做任何"乱码修复"——路径字符必须与服务器真实文件名逐字节一致，
+  // 否则 PROPFIND/GET 404（部分网盘如 139Cloud 的文件名本身就是 Latin-1 乱码形态）。
   return normalized
     .split('/')
     .map((seg) => {
       if (!seg) return seg;
       try {
-        const decoded = decodeURIComponent(seg);
-        return encodeURIComponent(decoded);
+        return encodeURIComponent(decodeURIComponent(seg));
       } catch {
         return encodeURIComponent(seg);
       }
@@ -96,20 +97,20 @@ function getServerPathPrefix(serverUrl: string): string {
   }
 }
 
-// webdav-client 库在解析 DAV 服务器返回的 XML 时，可能对 href 中的非 ASCII
-// 字符进行了错误的 Latin-1 解码（把 UTF-8 字节当作 Latin-1 字符）。
-// 例如 `！` (U+FF01) 的 UTF-8 字节 `EF BC 81` 被解码为 `ï¼\u0081`。
-// 此函数把这种错误解码的 Latin-1 字符串还原为正确的 UTF-8 字符串。
-function fixLatin1Decoding(str: string): string {
-  if (!str || !/[\u0080-\u00FF]/.test(str)) return str;
+// 历史数据兼容：旧版本曾把服务器真实文件名（本身是 Latin-1 乱码形态，
+// 如 `ï¼\x81`）"修复"为理想字符（`！`）后存入影片表 / 返回给前端。
+// 该形态与服务器真名不匹配导致 404，此函数做逆变换生成候选路径用于重试：
+// `！` U+FF01 → UTF-8 字节 EF BC 81 → 按 Latin-1 解释回 `ï¼\x81`。
+// 仅当结果与原串不同时才有重试价值。
+export function latin1RoundTrip(str: string): string | null {
+  if (!str) return null;
   try {
-    const fixed = Buffer.from(str, 'latin1').toString('utf8');
-    // 仅当修复后确实发生了变化时才返回修复结果，避免误伤已经是 UTF-8 的字符串
-    if (fixed !== str) return fixed;
+    const reversed = Buffer.from(str, 'utf8').toString('latin1');
+    if (reversed !== str && /[\u0080-\u00FF]/.test(reversed)) return reversed;
   } catch {
     // 忽略错误
   }
-  return str;
+  return null;
 }
 
 // 从可能为完整 URL 的 href 中提取 pathname，不使用 new URL().pathname
@@ -125,15 +126,14 @@ function extractPathname(href: string): string {
 
 // 将 DAV 服务器返回的 href 转换为相对 webdav 根的路径
 // 例如 href="/dav/folder1"，serverUrl="http://host/dav"，返回 "/folder1"
-// 返回的是已解码的原始路径（非 URL 编码），由调用方按需编码
+// 返回的是已解码的原始路径（非 URL 编码），由调用方按需编码。
+// 注意：解码后即服务器真实路径，不做任何"乱码修复"——
+// 部分网盘（如 139Cloud）的文件名本身就是 Latin-1 乱码形态，
+// 任何字符变换都会导致后续 PROPFIND/GET 与真实文件名不匹配而 404。
 function hrefToWebDAVPath(href: string, serverUrl: string): string {
   if (!href) return '/';
-  let pathname = href;
-  // 修复 webdav-client 库可能进行的错误 Latin-1 解码
-  pathname = fixLatin1Decoding(pathname);
-  // 提取 pathname（避免使用 new URL().pathname 导致的双重编码）
-  pathname = extractPathname(pathname);
-  // 解码 URL 编码，得到原始路径
+  let pathname = extractPathname(href);
+  // 解码 URL 编码，得到服务器上的真实路径
   try {
     pathname = decodeURIComponent(pathname);
   } catch {
@@ -172,40 +172,56 @@ export async function statWebDAVFile(
       (async () => {
         const connection = createConnection(params);
         const getProperties = promisify(connection.getProperties.bind(connection));
-        // webdav-client getProperties 返回的属性名带 DAV: 命名空间前缀
-        const props = (await getProperties(normalizePath(params.path))) as Record<
-          string,
-          { content?: string | unknown[] }
-        >;
 
-        const lenProp = props['DAV:getcontentlength'];
-        const lenRaw = Array.isArray(lenProp?.content)
-          ? undefined
-          : lenProp?.content;
-        const size = lenRaw !== undefined ? Number(lenRaw) || 0 : 0;
+        const statOnce = async (requestPath: string) => {
+          // webdav-client getProperties 返回的属性名带 DAV: 命名空间前缀
+          const props = (await getProperties(normalizePath(requestPath))) as Record<
+            string,
+            { content?: string | unknown[] }
+          >;
 
-        const nameProp = props['DAV:displayname'];
-        const nameRaw = Array.isArray(nameProp?.content)
-          ? undefined
-          : nameProp?.content;
-        const name =
-          (typeof nameRaw === 'string' && nameRaw) ||
-          params.path.split('/').filter(Boolean).pop() ||
-          '';
+          const lenProp = props['DAV:getcontentlength'];
+          const lenRaw = Array.isArray(lenProp?.content)
+            ? undefined
+            : lenProp?.content;
+          const size = lenRaw !== undefined ? Number(lenRaw) || 0 : 0;
 
-        const mtimeProp = props['DAV:getlastmodified'];
-        const mtimeRaw = Array.isArray(mtimeProp?.content)
-          ? undefined
-          : mtimeProp?.content;
-        const lastModified =
-          typeof mtimeRaw === 'string' ? new Date(mtimeRaw) : undefined;
+          const nameProp = props['DAV:displayname'];
+          const nameRaw = Array.isArray(nameProp?.content)
+            ? undefined
+            : nameProp?.content;
+          const name =
+            (typeof nameRaw === 'string' && nameRaw) ||
+            requestPath.split('/').filter(Boolean).pop() ||
+            '';
 
-        return {
-          name,
-          path: params.path,
-          size,
-          lastModified,
+          const mtimeProp = props['DAV:getlastmodified'];
+          const mtimeRaw = Array.isArray(mtimeProp?.content)
+            ? undefined
+            : mtimeProp?.content;
+          const lastModified =
+            typeof mtimeRaw === 'string' ? new Date(mtimeRaw) : undefined;
+
+          return { name, size, lastModified };
         };
+
+        try {
+          const { name, size, lastModified } = await statOnce(params.path);
+          return { name, path: params.path, size, lastModified };
+        } catch (err) {
+          // 历史数据兼容：影片表中 path 若为旧版"乱码修复"形态（`！`），
+          // 与服务器真名（`ï¼\x81`）不匹配会 404；用逆变换候选路径重试一次。
+          const fallbackPath = latin1RoundTrip(params.path);
+          if (fallbackPath) {
+            try {
+              const { name, size, lastModified } = await statOnce(fallbackPath);
+              return { name, path: fallbackPath, size, lastModified };
+            } catch {
+              // 重试也失败，抛出原始错误
+            }
+          }
+          throw err;
+        }
       })(),
       'WebDAV 连接',
     );
@@ -240,9 +256,8 @@ export function buildWebDAVDirectUrl(
   password?: string,
 ): string {
   const normalizedUrl = normalizeServerUrl(serverUrl);
-  // 修复可能传入的 Latin-1 乱码路径（webdav-client 库的解码 bug）
-  const fixedPath = fixLatin1Decoding(path);
-  const encodedPath = normalizePath(fixedPath);
+  // 路径保持服务器真名原样，不做乱码修复（与 normalizePath 策略一致）
+  const encodedPath = normalizePath(path);
   // WebDAV 协议不支持生成真实直链，仅返回 serverUrl+path 拼接。
   // 若提供了认证信息，嵌入 Basic Auth（http://user:pass@host/path），
   // 让浏览器可以直接播放需要认证的 WebDAV 文件。
@@ -301,7 +316,8 @@ export async function listWebDAVDirectory(
             lastModified?: Date;
           }>;
           return entries.map((entry) => ({
-            name: fixLatin1Decoding(entry.name || ''),
+            // name 保持服务器原样（与 path 同源），不做乱码修复
+            name: entry.name || '',
             // 将 DAV 服务器返回的 href（如 /dav/folder1）转换为相对 webdav 根的路径（/folder1）
             // 避免前端把带前缀的路径回传给后端时造成路径重复（/dav/dav/folder1）导致 404
             path: entry.href
@@ -394,9 +410,11 @@ export async function createWebDAVReadStreamWithRange(
 ): Promise<{ stream: Readable; fileSize: number; start: number; end: number }> {
   const info = await statWebDAVFileCached(params);
   const fileSize = info.size;
+  // info.path 可能是 fallback 修正后的服务器真名路径，流请求必须与其一致
+  const streamPath = info.path || params.path;
 
   if (!rangeHeader || !rangeHeader.trim()) {
-    const stream = createWebDAVReadStream(params);
+    const stream = createWebDAVReadStream({ ...params, path: streamPath });
     return { stream, fileSize, start: 0, end: fileSize - 1 };
   }
 
@@ -412,7 +430,7 @@ export async function createWebDAVReadStreamWithRange(
     },
   ) => Readable;
   const stream = streamFn({
-    url: normalizePath(params.path),
+    url: normalizePath(streamPath),
     method: 'GET',
     headers: {
       Range: `bytes=${start}-${end}`,

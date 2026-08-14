@@ -7,6 +7,7 @@
  * 代理策略由 url-proxy.ts 统一控制（分离式架构）：
  * - B站 DASH m4s / 带防盗链 headers 的源走服务器代理
  * - 其他源（B站 MP4 直链 / webdav / ftp / 用户直链）直连
+ * - 直连失败时（跨域防盗链 / CORS / 403），自动回退到服务器代理重试
  *
  * attach 在 metadata 就绪后 resolve，cleanup 无需额外操作
  * （video 元素本身由调用方管理）。
@@ -16,8 +17,56 @@
  * 并存储到 video.dataset.serverDuration 供 useVideoDuration 回退使用。
  */
 import type { PlayerEngine, PlayerSource, EngineAttachResult } from '../types'
-import { resetVideoElement, waitForMetadata } from '../utils'
-import { resolveProxyUrl } from '../services/url-proxy'
+import { resetVideoElement } from '../utils'
+import {
+  resolveProxyUrl,
+  buildProxyUrl,
+  isLocalUrl,
+  isRelativeUrl,
+  isCliProxyUrl,
+} from '../services/url-proxy'
+
+/**
+ * 等待 video metadata 就绪或 error 事件。
+ *
+ * 与 utils.waitForMetadata 不同，本函数同时监听 error 事件，
+ * 加载失败时 reject 而非永久 pending，使调用方可捕获并回退重试。
+ */
+function waitForMetadataOrError(video: HTMLVideoElement): Promise<void> {
+  if (video.readyState >= 1) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener('loadedmetadata', onLoaded)
+      video.removeEventListener('error', onError)
+    }
+    const onLoaded = () => {
+      cleanup()
+      resolve()
+    }
+    const onError = () => {
+      cleanup()
+      const code = video.error?.code
+      reject(new Error(`video load error (code=${code ?? 'unknown'})`))
+    }
+    video.addEventListener('loadedmetadata', onLoaded, { once: true })
+    video.addEventListener('error', onError, { once: true })
+  })
+}
+
+/**
+ * 判断 URL 是否可以回退到服务器代理。
+ *
+ * 仅对跨域 URL 有效：
+ * - 本站 URL / 相对路径 / blob / data：无需代理
+ * - CLI 代理 URL：已是本地代理
+ * - 已包装的代理 URL：避免重复代理
+ */
+function canFallbackToProxy(url: string): boolean {
+  if (!url) return false
+  if (isLocalUrl(url) || isRelativeUrl(url) || isCliProxyUrl(url)) return false
+  if (url.includes('/api/stream/proxy')) return false
+  return true
+}
 
 export const directEngine: PlayerEngine = {
   type: 'direct',
@@ -46,9 +95,25 @@ export const directEngine: PlayerEngine = {
       // HEAD 请求失败（如 CORS 限制），静默跳过
     }
 
-    video.src = targetUrl
-    video.load()
-    await waitForMetadata(video)
+    // 尝试加载视频：直连失败时回退到服务器代理（绕过跨域防盗链 / CORS）
+    const fallback = canFallbackToProxy(targetUrl)
+
+    const loadOnce = async (url: string): Promise<void> => {
+      video.src = url
+      video.load()
+      await waitForMetadataOrError(video)
+    }
+
+    try {
+      await loadOnce(targetUrl)
+    } catch (err) {
+      if (!fallback) throw err
+      console.warn('[direct-engine] 直连失败，回退到服务器代理:', err)
+      resetVideoElement(video)
+      const proxyUrl = buildProxyUrl(source.url)
+      await loadOnce(proxyUrl)
+    }
+
     return {
       cleanup: () => {
         delete video.dataset.serverDuration
