@@ -21,6 +21,7 @@ import {
   testOpenListMount,
   updateOpenListMount,
 } from './openlistApi'
+import { isInternalOpenListServer } from './isInternal'
 import type { OpenListMount } from './types'
 import OpenListBrowser from './OpenListBrowser'
 
@@ -134,6 +135,17 @@ export default function OpenListMountPanel() {
     },
     []
   )
+
+  // 检测当前服务器地址是否为内网
+  // 内网地址浏览器无法直连，必须强制使用服务器转发
+  const isInternalServer = isInternalOpenListServer(formValues.serverUrl)
+
+  // 当 serverUrl 变化导致内网状态改变时，自动强制 directLink = false
+  useEffect(() => {
+    if (isInternalServer && formValues.directLink) {
+      setFormValues((prev) => ({ ...prev, directLink: false }))
+    }
+  }, [isInternalServer, formValues.directLink])
 
   const handleSubmit = useCallback(async () => {
     const validationErrors = validateForm(formValues)
@@ -383,8 +395,14 @@ export default function OpenListMountPanel() {
           <Switch
             label="使用直链播放（不经过服务端转发）"
             checked={formValues.directLink}
+            disabled={isInternalServer}
             onChange={(e) => updateField('directLink', e.target.checked)}
           />
+          {isInternalServer && (
+            <div className="rounded border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-3 py-2 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+              检测到内网地址，浏览器无法直连，已强制使用服务器转发模式
+            </div>
+          )}
           {submitError && (
             <div className="rounded border border-[var(--md-sys-color-error)] bg-[var(--md-sys-color-error-container)] px-3 py-2 text-xs text-[var(--md-sys-color-on-error-container)]">
               {submitError}
