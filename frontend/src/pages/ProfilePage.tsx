@@ -411,7 +411,7 @@ export default function ProfilePage() {
   const isAdmin = user.role === 'admin' || user.role === 'root'
 
   return (
-    <div className="flex-1 p-4 sm:p-6">
+    <div className="hide-scrollbar h-[calc(100vh-64px)] overflow-y-auto p-4 sm:p-6">
       <Card className="relative mx-auto w-full max-w-2xl">
         <PageBackButton to={-1} />
 
