@@ -22,8 +22,6 @@ import { Tag } from '@/components/ui/Tag'
 
 import { message } from '@/components/ui/message'
 import { useRoomStore } from '@/store/roomStore'
-import { useSocket } from '@/hooks/useSocket'
-import { BilibiliBangumiSelector } from './BilibiliBangumiSelector'
 import { AniSubsSelector } from '@/modules/anisubs/AniSubsSelector'
 import {
   resolveAniSubsEpisode,
@@ -41,7 +39,6 @@ import {
 import {
   resolveBilibili,
   resolveFTP,
-  buildBilibiliVideoUrl,
   buildBilibiliImageProxyUrl,
   getBilibiliQrCode,
   pollBilibiliQrCode,
@@ -149,12 +146,10 @@ interface MoviePushPanelProps {
 }
 
 export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
-  const { socket } = useSocket()
   const userRole = useAuthStore((state) => state.user?.role)
   const { betaFeaturesEnabled, fetchSettings } = useSystemSettingsStore()
   const addMovie = useRoomStore((state) => state.addMovie)
   const fetchMovies = useRoomStore((state) => state.fetchMovies)
-  const setCurrentMovieId = useRoomStore((state) => state.setCurrentMovieId)
   const setPendingPreviewPlay = useRoomStore(
     (state) => state.setPendingPreviewPlay
   )
@@ -206,7 +201,6 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
     null
   )
   const [avatarError, setAvatarError] = useState(false)
-  const [bangumiOpen, setBangumiOpen] = useState(false)
   const [animeOpen, setAnimeOpen] = useState(false)
   const [kazumiOpen, setKazumiOpen] = useState(false)
   const [serverFilesBrowserOpen, setServerFilesBrowserOpen] = useState(false)
@@ -347,53 +341,6 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
       message.error('退出登录失败')
     }
   }, [])
-
-  const handleSelectBangumiEpisode = useCallback(
-    async (bvid: string, cid: number, title: string) => {
-      if (!isHost) {
-        message.info('只有房主可以播放影片')
-        return
-      }
-      if (!roomId) {
-        message.error('未连接房间')
-        return
-      }
-
-      const videoUrl = buildBilibiliVideoUrl(bvid)
-      setLoading(true)
-      try {
-        const resolved = await resolveBilibili(videoUrl)
-        await addMovie(roomId, {
-          url: videoUrl,
-          title: title || resolved.title || videoUrl,
-          source: 'bilibili',
-          audioUrl: resolved.audioUrl,
-          format: resolved.format,
-          videoCodec: resolved.videoCodec,
-          audioCodec: resolved.audioCodec,
-          duration: resolved.duration,
-          cid: cid || resolved.cid,
-          currentQn: resolved.currentQn,
-          acceptQuality: resolved.acceptQuality,
-        })
-        await fetchMovies(roomId)
-        const movie = useRoomStore
-          .getState()
-          .movies.find((m) => m.url === videoUrl)
-        if (movie) {
-          setCurrentMovieId(movie.id)
-          socket?.emit('play-movie', { roomId, movieId: movie.id })
-        }
-        message.success('已加载番剧集数')
-      } catch (err) {
-        console.error('[MoviePushPanel] select bangumi episode error:', err)
-        message.error(err instanceof Error ? err.message : '加载番剧集数失败')
-      } finally {
-        setLoading(false)
-      }
-    },
-    [isHost, roomId, addMovie, fetchMovies, setCurrentMovieId, socket]
-  )
 
   const handleSelectAnimeEpisode = useCallback(
     async (sourceId: string, episode: AniSubsEpisode, title: string) => {
@@ -1728,26 +1675,7 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
                 </Text>
               </div>
               <div
-                className="mt-2 flex flex-wrap items-center gap-2 rounded-[var(--md-sys-shape-corner)] p-1 transition-colors hover:cursor-pointer hover:bg-[var(--md-sys-color-surface-container-highest)]"
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  if (bilibiliLoggedIn && bilibiliUser) {
-                    setBangumiOpen(true)
-                  } else {
-                    handleOpenQrModal()
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    if (bilibiliLoggedIn && bilibiliUser) {
-                      setBangumiOpen(true)
-                    } else {
-                      handleOpenQrModal()
-                    }
-                  }
-                }}
+                className="mt-2 flex flex-wrap items-center gap-2 rounded-[var(--md-sys-shape-corner)] p-1"
               >
                 {bilibiliLoggedIn && bilibiliUser ? (
                   <>
@@ -1826,15 +1754,6 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           )}
         </div>
       </div>
-
-      {sourceType === 'bilibili' && (
-        <BilibiliBangumiSelector
-          open={bangumiOpen}
-          onOpenChange={setBangumiOpen}
-          onSelectEpisode={handleSelectBangumiEpisode}
-          disabled={!isHost}
-        />
-      )}
 
       {sourceType === 'anime' && (
         <AniSubsSelector
