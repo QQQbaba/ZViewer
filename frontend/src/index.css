@@ -39,6 +39,15 @@
   animation: zen-indeterminate 1.2s ease-in-out infinite;
 }
 
+/* 隐藏滚动条但保留滚动功能（房间页面） */
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
+
 /* 影片列表滚动区：窄滚动条 + scrollbar-gutter 预留空间，
    避免 B站解析设置展开后滚动条占用内容宽度导致视频卡片收缩。
    注意：Chrome 121+ (Electron 39) 在 Windows 经典滚动条模式下
