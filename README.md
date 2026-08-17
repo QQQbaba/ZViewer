@@ -238,8 +238,8 @@ docker run -d \
   zerowyc0721/zviewer:latest
 ```
 
-> 注：`--restart unless-stopped`（或 `--restart always`）是 Docker 内置自动更新功能的前提。
-> 更新流程会替换容器内程序文件后终止后端进程，依赖 restart 策略自动重启容器以加载新版本。
+> 注：更新流程会替换容器内程序文件后在容器内直接重启后端进程，无需重启整个容器，也不依赖 restart 策略。
+> 建议保留 `--restart unless-stopped` 以应对后端异常退出（非更新触发）时的自动恢复。
 
 ### Docker Compose
 

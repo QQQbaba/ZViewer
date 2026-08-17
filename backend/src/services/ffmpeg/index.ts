@@ -16,9 +16,10 @@ import path from 'node:path'
 import os from 'node:os'
 import { createWriteStream } from 'node:fs'
 import AdmZip from 'adm-zip'
+import { PROJECT_ROOT } from '../paths'
 
 /** 项目内置 bin 目录（存放 ffmpeg 二进制） */
-export const FFMPEG_BIN_DIR = path.resolve(process.cwd(), 'bin')
+export const FFMPEG_BIN_DIR = path.resolve(PROJECT_ROOT, 'bin')
 /** 内置 ffmpeg 可执行文件路径 */
 export const FFMPEG_BIN_PATH = path.join(
   FFMPEG_BIN_DIR,

@@ -269,20 +269,36 @@ async function fallbackToMp4(
     platform: 'html5',
   });
   if (mp4PlayUrl?.format === 'mp4' && mp4PlayUrl.durl?.[0]?.url) {
+    const rawUrl = mp4PlayUrl.durl[0].url;
+    const httpsUrl = upgradeBilibiliUrlToHttps(rawUrl);
     // skipCdnCheck=true 时直接使用 baseUrl，避免 HEAD 探测延迟（下载场景）
     if (skipCdnCheck) {
       return {
-        videoUrl: upgradeBilibiliUrlToHttps(mp4PlayUrl.durl[0].url),
+        videoUrl: httpsUrl,
         currentQn: mp4PlayUrl.currentQn,
         acceptQuality: mp4PlayUrl.acceptQuality,
       };
     }
     const mp4Url = await findReachableMediaUrl({
-      baseUrl: mp4PlayUrl.durl[0].url,
+      baseUrl: rawUrl,
     });
     if (mp4Url) {
       return { videoUrl: mp4Url, currentQn: mp4PlayUrl.currentQn, acceptQuality: mp4PlayUrl.acceptQuality };
     }
+    // HEAD 检测全部失败时回退到原始 URL（升级 HTTPS）。
+    // 原因：B站 platform=html5 返回的 MP4 直链设计上是无防盗链的，浏览器可直接播放。
+    // 某些 B站 CDN 对 HEAD 方法返回 403（但对 GET 请求正常），
+    // 此时不应拒绝解析，而应让浏览器直接尝试播放原始 URL。
+    // 若 URL 真的不可达，浏览器播放时会显示错误，但这比直接拒绝解析更合理。
+    console.warn(
+      '[bilibili-mp4] HEAD 检测全部失败，回退到原始 URL:',
+      httpsUrl,
+    );
+    return {
+      videoUrl: httpsUrl,
+      currentQn: mp4PlayUrl.currentQn,
+      acceptQuality: mp4PlayUrl.acceptQuality,
+    };
   }
   return null;
 }

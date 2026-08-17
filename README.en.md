@@ -234,9 +234,9 @@ docker run -d \
   zerowyc0721/zviewer:latest
 ```
 
-> Note: `--restart unless-stopped` (or `--restart always`) is required for the built-in auto-update feature.
-> The update process replaces files inside the container then terminates the backend process;
-> the restart policy automatically restarts the container to load the new version.
+> Note: The update process replaces files inside the container then restarts the backend process in-place,
+> without restarting the whole container and without relying on a restart policy.
+> Keeping `--restart unless-stopped` is still recommended to recover from backend crashes (non-update exits).
 
 ### Docker Compose
 

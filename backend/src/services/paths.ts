@@ -34,13 +34,16 @@ import fs from 'node:fs';
  *   编译后路径为 `backend/dist/services/paths.js`，上溯 3 层即可到达项目根。
  *
  * pkg 打包后（exe 运行）：
- *   __dirname 指向虚拟文件系统（只读），改用 process.cwd() 作为项目根。
+ *   __dirname 指向虚拟文件系统（只读 snapshot），使用 process.execPath
+ *   定位可执行文件所在目录作为项目根。
+ *   比 process.cwd() 更可靠：cwd 可能因启动方式不同而变化
+ *   （如 systemd、绝对路径启动、符号链接等），而 execPath 始终指向可执行文件本身。
  *   用户需在 exe 所在目录（或通过 CONFIG_DIR 环境变量）放置 config/ 目录。
  */
 export const PROJECT_ROOT = process.env.PROJECT_ROOT
   ? process.env.PROJECT_ROOT
   : process.pkg
-    ? process.cwd()
+    ? path.dirname(process.execPath)
     : path.resolve(__dirname, '..', '..', '..');
 
 /**
