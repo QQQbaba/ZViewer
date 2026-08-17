@@ -57,17 +57,18 @@ export function useRoomExitGuard() {
     [needsGuard, navigate]
   )
 
-  /** 确认离开：房主关闭房间，清除房间状态，导航到目标路径 */
+  /** 确认离开：房主离开房间（保留房间进入重连宽限期），清除本地状态，导航到目标路径 */
   const confirmExit = useCallback(() => {
     setConfirmOpen(false)
-    // 房主离开时关闭房间（与 RoomLayout.defaultBack 逻辑一致）
+    // 房主主动离开时 emit host-leave：与断线一致，房间保留 10 分钟
+    // 期间观众进入自主控制模式，房主可通过重新进入房间页面恢复
     if (socket && activeRoomId) {
       // 通过 sessionStorage 判断是否为房主
       try {
         const isHost =
           sessionStorage.getItem('zcontrol-host-room') === activeRoomId
         if (isHost) {
-          socket.emit('close-room', () => {
+          socket.emit('host-leave', () => {
             /* ack */
           })
         }
@@ -121,7 +122,7 @@ export function useRoomExitGuard() {
             确定要离开当前房间吗？
           </p>
           <p className="mt-1 text-xs leading-relaxed text-[var(--md-sys-color-on-surface-variant)]">
-            离开后将断开与房间的连接，房主离开会关闭房间。如需再次进入需要重新加入。
+            离开后将断开与房间的连接。房主离开后房间将保留 10 分钟，期间观众可继续观看并自主控制播放，房主可重新进入房间恢复。
           </p>
         </div>
       </div>

@@ -26,6 +26,7 @@ import {
 import { roomPermissionService } from '../room-permission.service';
 import { roomSessionService } from '../room-session.service';
 import { roomStateService } from '../room-state.service';
+import { playbackMemoryService } from '../../playback-memory';
 
 /** 8 位 roomId 生成器（数字 + 大小写字母） */
 const generateRoomId = customAlphabet(
@@ -129,6 +130,48 @@ export class RoomLifecycleHandler implements SocketEventHandler {
         }
       },
     );
+
+    // --- 房主主动离开房间（不关闭房间）：仅当前 socket 为活跃 sharer ---
+    // 与 close-room 区别：
+    // - close-room：销毁房间（DB status='closed'、踢出观众、清播放记忆）
+    // - host-leave：保留房间，复用断线（disconnect）的处理逻辑
+    //   清空 hostSocketId、广播 host-disconnected、启动 10 分钟重连定时器
+    //   观众进入自主控制模式，房主可在宽限期内通过 register-host 恢复
+    socket.on('host-leave', async (callback: AckCallback) => {
+      try {
+        const sharer = await roomPermissionService.getSharerBySocketId(socket.id);
+        if (!sharer) {
+          return safeAck(callback, { success: false, message: '无权限离开房间' });
+        }
+
+        const roomId = sharer.roomId;
+
+        // 结束当前 sharer session（与 disconnect handler 一致）
+        // 让 register-host 重连时可以复用或重建 session
+        await roomSessionService.endSession(socket.id);
+
+        // 清空 hostSocketId，但保留播放状态（playback 仍在内存/DB）
+        // 服务器将继续推算播放进度并广播给观众，观众可继续观看
+        await playbackMemoryService.updateHostSocket(roomId, null);
+
+        // 广播 host-disconnected 给房间内所有成员
+        // 观众端据此进入"自主控制模式"
+        io.to(roomId).emit('host-disconnected', { roomId });
+
+        // 启动重连定时器：超时（10 分钟）则关闭房间
+        roomStateService.startReconnectTimer(roomId, () => {
+          void roomStateService.closeRoomAndNotify(io, roomId, socket.id);
+        });
+
+        // 房主 socket 主动离开房间（保持 socket 连接，允许房主浏览其他页面）
+        await socket.leave(roomId);
+
+        return safeAck(callback, { success: true });
+      } catch (err) {
+        console.error('[host-leave] error:', err);
+        return safeAck(callback, { success: false, message: '离开房间失败' });
+      }
+    });
 
     // --- 关闭自己的房间：仅当前 socket 为活跃 sharer ---
     socket.on('close-room', async (callback: AckCallback) => {

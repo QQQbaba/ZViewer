@@ -984,6 +984,22 @@ export function useWatchTogether({
     fetchBlobsForBufferModeLocal,
   ])
 
+  // currentMovieId 被清空（删除当前播放影片等场景）时，立即暂停视频并清理媒体资源，
+  // 避免已删除的影片继续在播放器中播放。房主与观众端均生效。
+  useEffect(() => {
+    if (currentMovieId !== null) return
+    const video = videoRef.current
+    if (video) {
+      suppressEventsRef.current = true
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+      suppressEventsRef.current = false
+    }
+    cleanupMedia()
+    lastLoadedMovieRef.current = null
+  }, [currentMovieId, cleanupMedia, videoRef, suppressEventsRef])
+
   // 组件卸载或切换房间时释放 MSE blob URL 与音频同步资源
   useEffect(() => {
     return () => {
