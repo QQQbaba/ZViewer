@@ -362,16 +362,28 @@ export async function installFfmpegFromZip(archivePath: string): Promise<void> {
       zip.extractAllTo(extractDir, true)
     } else if (lowerPath.endsWith('.tar.xz') || lowerPath.endsWith('.tar.gz') || lowerPath.endsWith('.tgz')) {
       // tar.xz / tar.gz：使用系统 tar 命令
+      // 注意：tar.xz 需要系统安装 xz-utils（Docker 中需在 Dockerfile 添加）
       await new Promise<void>((resolve, reject) => {
         const tar = spawn(
           'tar',
           ['-xf', archivePath, '-C', extractDir, '--strip-components=0'],
-          { stdio: 'ignore' }
+          { stdio: ['ignore', 'pipe', 'pipe'] }
         )
-        tar.on('error', reject)
+        let stderr = ''
+        tar.stderr?.on('data', (data: Buffer) => {
+          stderr += data.toString()
+        })
+        tar.on('error', (err) => {
+          reject(new Error(`tar 命令执行失败：${err.message}。如果是 Docker 环境，请确保 Dockerfile 中已安装 xz-utils`))
+        })
         tar.on('exit', (code) => {
           if (code === 0) resolve()
-          else reject(new Error(`tar 解压失败，退出码 ${code}`))
+          else {
+            const hint = lowerPath.endsWith('.xz')
+              ? '（可能缺少 xz-utils，Docker 用户请在 Dockerfile 中添加 xz-utils）'
+              : ''
+            reject(new Error(`tar 解压失败，退出码 ${code}${hint}${stderr ? '\n' + stderr.trim() : ''}`))
+          }
         })
       })
     } else {

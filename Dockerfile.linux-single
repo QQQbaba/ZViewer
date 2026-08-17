@@ -1,9 +1,11 @@
 FROM debian:bullseye-slim
 
 # procps: 提供 pgrep，供 Docker 更新脚本在 pidfile 缺失时回退定位后端进程
+# xz-utils: 提供 xz 解压支持，tar -xf *.tar.xz 需要 xz 命令
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     procps \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
