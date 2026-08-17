@@ -67,6 +67,27 @@ function isPkg(): boolean {
   return !!process.pkg;
 }
 
+/**
+ * 检测是否运行在 Docker 容器内。
+ *
+ * Docker 容器内会存在 /.dockerenv 文件，且 cgroup 通常包含 docker / containerd 字样。
+ * 容器环境下的更新流程与单文件版本不同：
+ * - 单文件版：下载解压 → 生成更新脚本覆盖文件 → 脚本重启进程
+ * - Docker 版：容器内文件系统是临时的（重启即丢失），必须通过镜像更新或挂载持久化目录实现。
+ *   本应用 Docker 更新采用「容器内就地替换 + 退出进程触发容器重启」策略，
+ *   前提是 docker run 时配置了 --restart=always 或同等 restart policy。
+ */
+function isDocker(): boolean {
+  try {
+    if (fs.existsSync('/.dockerenv')) return true;
+    const cgroup = fs.readFileSync('/proc/1/cgroup', 'utf8');
+    if (/docker|containerd|kubepods/.test(cgroup)) return true;
+  } catch {
+    // 忽略读取错误
+  }
+  return false;
+}
+
 function projectRoot(): string {
   return isPkg() ? process.cwd() : path.resolve(__dirname, '..', '..', '..', '..');
 }
@@ -629,6 +650,131 @@ exit /b 0
 }
 
 /**
+ * 生成 Docker 容器内更新 shell 脚本。
+ *
+ * Docker 更新策略与单文件版不同：
+ * 1. 备份 config 目录（包含数据库、用户上传等持久化数据）
+ * 2. 用解压出的新文件覆盖 /app/ 下的程序文件
+ * 3. 恢复 config 目录
+ * 4. 不重启进程，而是直接退出容器主进程（后端），
+ *    依赖 docker run 时配置的 --restart=always 策略自动重启容器。
+ *    容器重启后加载的是已更新的程序文件，实现「自动更新」效果。
+ *
+ * 注意：容器内文件系统是临时的，重启容器不会丢失更新（容器停止≠删除容器）。
+ *      只有 docker rm 后重新 run 才会回到镜像原始状态，此场景需通过拉取新镜像更新。
+ */
+function writeDockerUpdateSh(
+  root: string,
+  tempDir: string,
+  extractedDir: string,
+): string {
+  const shPath = path.join(root, 'apply-update.sh');
+  const content = `#!/bin/bash
+set -e
+
+ROOT="${root}"
+TEMP_DIR="${tempDir}"
+EXTRACTED_DIR="${extractedDir}"
+CONFIG_DIR="$ROOT/config"
+CONFIG_BACKUP="$ROOT/.config-backup-$$"
+SELF_PID=$$
+LOG_FILE="$ROOT/update.log"
+
+# 将输出重定向到日志文件，方便诊断更新失败原因
+exec >> "$LOG_FILE" 2>&1
+
+echo ""
+echo "========================================"
+echo "[Docker 更新脚本] 开始执行 $(date)"
+echo "========================================"
+
+echo "[Docker 更新脚本] 等待后端返回响应..."
+sleep 3
+
+echo "[Docker 更新脚本] 备份 config 目录..."
+if [ -d "$CONFIG_DIR" ]; then
+  cp -r "$CONFIG_DIR" "$CONFIG_BACKUP"
+  rm -rf "$CONFIG_DIR"
+  echo "[Docker 更新脚本] 已备份 config 到 $CONFIG_BACKUP"
+fi
+
+echo "[Docker 更新脚本] 应用新文件..."
+if [ ! -d "$EXTRACTED_DIR" ]; then
+  echo "[错误] 未找到解压目录：$EXTRACTED_DIR"
+  if [ -d "$CONFIG_BACKUP" ]; then
+    cp -rf "$CONFIG_BACKUP" "$CONFIG_DIR"
+  fi
+  exit 1
+fi
+
+# 覆盖程序文件（保留 config 目录）
+cp -rf "$EXTRACTED_DIR/"zviewer-backend "$ROOT/" 2>/dev/null || true
+cp -rf "$EXTRACTED_DIR/"zviewer-cert "$ROOT/" 2>/dev/null || true
+cp -rf "$EXTRACTED_DIR/"start.sh "$ROOT/" 2>/dev/null || true
+cp -rf "$EXTRACTED_DIR/"package.json "$ROOT/" 2>/dev/null || true
+cp -rf "$EXTRACTED_DIR/".env "$ROOT/" 2>/dev/null || true
+# 前端静态文件
+if [ -d "$EXTRACTED_DIR/frontend/dist" ]; then
+  rm -rf "$ROOT/frontend/dist"
+  mkdir -p "$ROOT/frontend/dist"
+  cp -rf "$EXTRACTED_DIR/frontend/dist/"* "$ROOT/frontend/dist/" 2>/dev/null || true
+fi
+chmod +x "$ROOT/zviewer-backend" "$ROOT/zviewer-cert" 2>/dev/null || true
+
+# 验证关键文件是否存在
+if [ ! -f "$ROOT/zviewer-backend" ]; then
+  echo "[错误] 更新后未找到 zviewer-backend，更新包可能损坏"
+  if [ -d "$CONFIG_BACKUP" ]; then
+    cp -rf "$CONFIG_BACKUP" "$CONFIG_DIR"
+  fi
+  exit 1
+fi
+
+# 恢复 config 目录
+echo "[Docker 更新脚本] 恢复 config 目录..."
+if [ -d "$CONFIG_BACKUP" ]; then
+  mkdir -p "$CONFIG_DIR"
+  cp -rf "$CONFIG_BACKUP/"* "$CONFIG_DIR/" 2>/dev/null || true
+  rm -rf "$CONFIG_BACKUP"
+  echo "[Docker 更新脚本] 已恢复 config 目录（用户数据已保留）"
+fi
+
+echo "[Docker 更新脚本] 清理临时文件..."
+rm -rf "$TEMP_DIR"
+
+echo "[Docker 更新脚本] 更新完成，准备重启容器... $(date)"
+echo "[Docker 更新脚本] 依赖 docker --restart=always 策略自动重启容器"
+
+# 删除自身
+rm -f "$0"
+
+# kill 后端进程（容器主进程），触发 restart policy 重启容器。
+# 容器重启后将加载更新后的程序文件。
+# 更新脚本由后端 detached 启动，与后端进程独立，可安全 kill 后端。
+echo "[Docker 更新脚本] 正在终止后端进程以触发容器重启..."
+sleep 2
+# 尝试通过 pidfile 获取后端 PID，回退到 pgrep
+BACKEND_PID=""
+if [ -f "$ROOT/.backend.pid" ]; then
+  BACKEND_PID=$(cat "$ROOT/.backend.pid" 2>/dev/null)
+fi
+if [ -z "$BACKEND_PID" ]; then
+  BACKEND_PID=$(pgrep -f "zviewer-backend" 2>/dev/null | head -n 1)
+fi
+if [ -n "$BACKEND_PID" ]; then
+  echo "[Docker 更新脚本] 终止后端进程 PID=$BACKEND_PID"
+  kill -9 "$BACKEND_PID" 2>/dev/null || true
+else
+  echo "[Docker 更新脚本] 未找到后端进程，可能已退出"
+fi
+exit 0
+`;
+  fs.writeFileSync(shPath, content, 'utf8');
+  fs.chmodSync(shPath, 0o755);
+  return shPath;
+}
+
+/**
  * 生成 Linux 更新 shell 脚本。
  */
 function writeApplyUpdateSh(
@@ -824,9 +970,13 @@ async function applyUpdateFromArchive(
     // 生成并启动更新脚本
     if (onStage) onStage({ stage: 'starting' });
     const isWindows = os.platform() === 'win32';
+    // Docker 环境使用专用脚本：不重启进程，而是 kill 后端触发容器 restart
+    const dockerMode = !isWindows && isDocker();
     const scriptPath = isWindows
       ? writeApplyUpdateBat(root, tempDir, extractedDir)
-      : writeApplyUpdateSh(root, tempDir, extractedDir);
+      : dockerMode
+        ? writeDockerUpdateSh(root, tempDir, extractedDir)
+        : writeApplyUpdateSh(root, tempDir, extractedDir);
 
     if (isWindows) {
       spawn('cmd', ['/c', scriptPath], {
@@ -843,7 +993,9 @@ async function applyUpdateFromArchive(
       }).unref();
     }
 
-    const successMessage = '更新已触发，后台将自动替换文件并重启服务';
+    const successMessage = dockerMode
+      ? '更新已触发，后台将自动替换文件并重启容器（需 docker run 配置 --restart=always）'
+      : '更新已触发，后台将自动替换文件并重启服务';
     if (onStage) onStage({ stage: 'done', message: successMessage });
     return {
       success: true,
