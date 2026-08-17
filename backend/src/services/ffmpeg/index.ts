@@ -47,12 +47,12 @@ function getDownloadSource(): { url: string; kind: 'zip' | 'tar.xz'; size: numbe
   }
 
   if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) {
-    // Linux: johnvansickle 静态构建
-    const suffix = arch === 'arm64' ? 'arm64' : 'amd64'
+    // Linux: BtbN/FFmpeg-Builds GitHub Releases 静态构建
+    const suffix = arch === 'arm64' ? 'linuxarm64' : 'linux64'
     return {
-      url: `https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${suffix}-static.tar.xz`,
+      url: `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${suffix}-gpl.tar.xz`,
       kind: 'tar.xz',
-      size: 30 * 1024 * 1024,
+      size: arch === 'arm64' ? 120 * 1024 * 1024 : 140 * 1024 * 1024,
     }
   }
 
