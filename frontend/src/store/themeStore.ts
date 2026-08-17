@@ -53,6 +53,8 @@ interface ThemeState {
   glassBlur: number
   /** 精简动画模式：去除 blur/3D/rotate 等浮夸效果，仅保留基础淡入与微交互 */
   reducedMotion: boolean
+  /** 禁用全局 hover 位移效果（translate/scale），不影响其他动画与玻璃效果 */
+  disableHoverTransform: boolean
 
   /** 自定义背景图片（URL 或 Base64），null 表示未设置 */
   backgroundImage: string | null
@@ -90,6 +92,8 @@ interface ThemeState {
   setGlassBlur: (value: number) => void
   /** 设置精简动画模式 */
   setReducedMotion: (value: boolean) => void
+  /** 设置禁用全局 hover 位移 */
+  setDisableHoverTransform: (value: boolean) => void
   /** 设置自定义背景图片 */
   setBackgroundImage: (value: string | null) => void
   /** 设置背景模糊度 */
@@ -115,6 +119,7 @@ export const useThemeStore = create<ThemeState>()(
       glassStrength: 0.6,
       glassBlur: 12,
       reducedMotion: false,
+      disableHoverTransform: false,
       backgroundImage: null,
       backgroundBlur: 0,
       backgroundOpacity: 1,
@@ -161,6 +166,8 @@ export const useThemeStore = create<ThemeState>()(
         }),
       setBackgroundImage: (value: string | null) =>
         set({ backgroundImage: value }),
+      setDisableHoverTransform: (value: boolean) =>
+        set({ disableHoverTransform: value }),
       setBackgroundBlur: (value: number) => set({ backgroundBlur: value }),
       setBackgroundOpacity: (value: number) =>
         set({ backgroundOpacity: value }),
@@ -180,6 +187,7 @@ export const useThemeStore = create<ThemeState>()(
         glassStrength: state.glassStrength,
         glassBlur: state.glassBlur,
         reducedMotion: state.reducedMotion,
+        disableHoverTransform: state.disableHoverTransform,
         // 自定义背景同时持久化 URL 与 base64 数据（用户上传图片在 5MB 限制内）
         backgroundImage: state.backgroundImage,
         backgroundBlur: state.backgroundBlur,
