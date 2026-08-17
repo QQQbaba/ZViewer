@@ -1,7 +1,9 @@
 FROM debian:bullseye-slim
 
+# procps: 提供 pgrep，供 Docker 更新脚本在 pidfile 缺失时回退定位后端进程
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -89,7 +89,16 @@ function isDocker(): boolean {
 }
 
 function projectRoot(): string {
-  return isPkg() ? process.cwd() : path.resolve(__dirname, '..', '..', '..', '..');
+  if (isPkg()) {
+    // pkg 打包后 __dirname 指向虚拟文件系统（只读 snapshot），
+    // 使用 process.execPath 定位可执行文件所在目录。
+    // 比 process.cwd() 更可靠：cwd 可能因启动方式不同而变化
+    // （如 systemd、绝对路径启动、符号链接等），而 execPath 始终指向可执行文件本身。
+    // Docker 中：process.execPath = /app/zviewer-backend → 返回 /app
+    // Linux 单文件：process.execPath = /path/to/zviewer-backend → 返回 /path/to
+    return path.dirname(process.execPath);
+  }
+  return path.resolve(__dirname, '..', '..', '..', '..');
 }
 
 /**
@@ -165,12 +174,18 @@ function httpsGetJson<T>(url: string): Promise<T> {
  */
 function getLocalVersion(): string {
   const root = projectRoot();
+  const pkgPath = path.join(root, 'package.json');
   try {
     const pkg = JSON.parse(
-      fs.readFileSync(path.join(root, 'package.json'), 'utf8'),
+      fs.readFileSync(pkgPath, 'utf8'),
     ) as { version?: string };
-    return pkg.version || '0.0.0';
-  } catch {
+    const version = pkg.version || '0.0.0';
+    console.log(`[updater] 本地版本: ${version} (读取自 ${pkgPath})`);
+    return version;
+  } catch (err) {
+    console.warn(
+      `[updater] 读取版本号失败: ${pkgPath} - ${err instanceof Error ? err.message : String(err)}`,
+    );
     return '0.0.0';
   }
 }
@@ -652,16 +667,21 @@ exit /b 0
 /**
  * 生成 Docker 容器内更新 shell 脚本。
  *
- * Docker 更新策略与单文件版不同：
+ * Docker 更新策略（容器内重启，不重启容器）：
  * 1. 备份 config 目录（包含数据库、用户上传等持久化数据）
  * 2. 用解压出的新文件覆盖 /app/ 下的程序文件
  * 3. 恢复 config 目录
- * 4. 不重启进程，而是直接退出容器主进程（后端），
- *    依赖 docker run 时配置的 --restart=always 策略自动重启容器。
- *    容器重启后加载的是已更新的程序文件，实现「自动更新」效果。
+ * 4. 创建 .restart-backend 标记文件
+ * 5. kill 后端进程（容器主进程的子进程）
  *
- * 注意：容器内文件系统是临时的，重启容器不会丢失更新（容器停止≠删除容器）。
- *      只有 docker rm 后重新 run 才会回到镜像原始状态，此场景需通过拉取新镜像更新。
+ * entrypoint-linux-single.sh 的监控循环检测到后端退出后，
+ * 会检查 .restart-backend 标记：存在则重启后端，不退出容器。
+ * 这样容器不重启，只是后端进程在容器内重启，加载已更新的程序文件。
+ *
+ * 优点：
+ * - 不依赖 docker run 的 --restart 策略
+ * - 容器重启速度更快（无需重新初始化容器环境）
+ * - config volume 挂载状态保持不变
  */
 function writeDockerUpdateSh(
   root: string,
@@ -677,6 +697,7 @@ TEMP_DIR="${tempDir}"
 EXTRACTED_DIR="${extractedDir}"
 CONFIG_DIR="$ROOT/config"
 CONFIG_BACKUP="$ROOT/.config-backup-$$"
+RESTART_MARKER="$ROOT/.restart-backend"
 SELF_PID=$$
 LOG_FILE="$ROOT/update.log"
 
@@ -742,17 +763,20 @@ fi
 echo "[Docker 更新脚本] 清理临时文件..."
 rm -rf "$TEMP_DIR"
 
-echo "[Docker 更新脚本] 更新完成，准备重启容器... $(date)"
-echo "[Docker 更新脚本] 依赖 docker --restart=always 策略自动重启容器"
+echo "[Docker 更新脚本] 更新完成，准备重启后端进程... $(date)"
+
+# 创建重启标记，entrypoint 检测到后会重启后端而非退出容器
+touch "$RESTART_MARKER"
+echo "[Docker 更新脚本] 已创建重启标记: $RESTART_MARKER"
 
 # 删除自身
 rm -f "$0"
 
-# kill 后端进程（容器主进程），触发 restart policy 重启容器。
-# 容器重启后将加载更新后的程序文件。
+# kill 后端进程（容器内进程），触发 entrypoint 监控循环重启后端。
 # 更新脚本由后端 detached 启动，与后端进程独立，可安全 kill 后端。
-echo "[Docker 更新脚本] 正在终止后端进程以触发容器重启..."
-sleep 2
+# entrypoint 的 while kill -0 循环会检测到后端退出，
+# 发现 .restart-backend 标记后重新启动后端，加载已更新的程序文件。
+echo "[Docker 更新脚本] 正在终止后端进程以触发容器内重启..."
 # 尝试通过 pidfile 获取后端 PID，回退到 pgrep
 BACKEND_PID=""
 if [ -f "$ROOT/.backend.pid" ]; then
@@ -763,7 +787,19 @@ if [ -z "$BACKEND_PID" ]; then
 fi
 if [ -n "$BACKEND_PID" ]; then
   echo "[Docker 更新脚本] 终止后端进程 PID=$BACKEND_PID"
-  kill -9 "$BACKEND_PID" 2>/dev/null || true
+  # 先发 SIGTERM 触发 graceful shutdown（刷新数据库脏数据），
+  # 等待最多 5 秒，仍未退出则 SIGKILL 强制终止
+  kill -TERM "$BACKEND_PID" 2>/dev/null || true
+  for i in 1 2 3 4 5; do
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  if kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "[Docker 更新脚本] 后端未响应 SIGTERM，强制终止"
+    kill -9 "$BACKEND_PID" 2>/dev/null || true
+  fi
 else
   echo "[Docker 更新脚本] 未找到后端进程，可能已退出"
 fi
@@ -994,7 +1030,7 @@ async function applyUpdateFromArchive(
     }
 
     const successMessage = dockerMode
-      ? '更新已触发，后台将自动替换文件并重启容器（需 docker run 配置 --restart=always）'
+      ? '更新已触发，后台将自动替换文件并在容器内重启后端进程'
       : '更新已触发，后台将自动替换文件并重启服务';
     if (onStage) onStage({ stage: 'done', message: successMessage });
     return {

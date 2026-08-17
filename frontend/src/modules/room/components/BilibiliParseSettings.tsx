@@ -434,134 +434,138 @@ export function BilibiliParseSettings({
             </div>
           </div>
 
-          {/* 缓冲模式 */}
-          <div
-            className={cn(
-              'transition-opacity',
-              effectivePreferMp4 && 'pointer-events-none opacity-40'
-            )}
-          >
+          {/* 缓冲模式（仅服务器 DASH 可用时显示） */}
+          {!dashDisabled && (
             <div
-              className="mb-1 text-[10px] font-bold uppercase tracking-wide"
-              style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+              className={cn(
+                'transition-opacity',
+                effectivePreferMp4 && 'pointer-events-none opacity-40'
+              )}
             >
-              缓冲模式
-            </div>
-            {renderSegmented(
-              displayBufferMode,
-              handleBufferModeChange,
-              '关闭',
-              '开启',
-              !isHost || effectivePreferMp4
-            )}
-            <div
-              className="mt-1 text-[10px] leading-snug"
-              style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-            >
-              {!isHost
-                ? '缓冲模式由房主统一管理'
-                : effectivePreferMp4
-                  ? 'MP4 模式不支持缓冲，请切换到 DASH'
-                  : displayBufferMode
-                    ? '进入房间先缓存完整视频到本地，避免 URL 过期与卡顿'
-                    : '直接流式播放，无需等待缓存'}
-            </div>
-          </div>
-
-          {/* P2P 传输 */}
-          <div
-            className={cn(
-              'transition-opacity',
-              (!isHost ||
-                effectivePreferMp4 ||
-                displayBufferMode ||
-                displayCliEnabled) &&
-                'pointer-events-none opacity-40'
-            )}
-          >
-            <div
-              className="mb-1 text-[10px] font-bold uppercase tracking-wide"
-              style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-            >
-              P2P 传输
-            </div>
-            {renderSegmented(
-              displayP2pEnabled,
-              handleP2PChange,
-              '关闭',
-              '开启',
-              !isHost ||
-                effectivePreferMp4 ||
-                displayBufferMode ||
-                displayCliEnabled
-            )}
-            <div
-              className="mt-1 text-[10px] leading-snug"
-              style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-            >
-              {!isHost
-                ? 'P2P 传输由房主统一管理'
-                : effectivePreferMp4
-                  ? 'MP4 模式不支持 P2P，请切换到 DASH'
-                  : displayCliEnabled
-                    ? 'CLI 代理与 P2P 互斥，请关闭 CLI 后再启用 P2P'
-                    : displayBufferMode
-                      ? '缓冲模式下视频已本地缓存，无需 P2P'
-                      : displayP2pEnabled
-                        ? '房间内观众间共享分片，减少服务器流量（需 WebRTC）'
-                        : '所有流量走服务器代理'}
-            </div>
-
-            {displayP2pEnabled && p2pEngineActive && (
               <div
-                className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 rounded-lg p-1.5 text-[10px]"
-                style={{
-                  backgroundColor: 'var(--md-sys-color-surface-container-high)',
-                }}
+                className="mb-1 text-[10px] font-bold uppercase tracking-wide"
+                style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
               >
-                <div className="flex items-center justify-between">
-                  <span
-                    style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-                  >
-                    ↓HTTP
-                  </span>
-                  <span className="font-mono font-semibold">
-                    {formatKBytes(totalHTTPDownloaded)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span
-                    style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-                  >
-                    ↓P2P
-                  </span>
-                  <span className="font-mono font-semibold">
-                    {formatKBytes(totalP2PDownloaded)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span
-                    style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-                  >
-                    ↑P2P
-                  </span>
-                  <span className="font-mono font-semibold">
-                    {formatKBytes(totalP2PUploaded)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span
-                    style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-                  >
-                    速度
-                  </span>
-                  <span className="font-mono font-semibold">
-                    {formatKBytes(p2pDownloadSpeed)}/s
-                  </span>
-                </div>
+                缓冲模式
               </div>
-            )}
-          </div>
+              {renderSegmented(
+                displayBufferMode,
+                handleBufferModeChange,
+                '关闭',
+                '开启',
+                !isHost || effectivePreferMp4
+              )}
+              <div
+                className="mt-1 text-[10px] leading-snug"
+                style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+              >
+                {!isHost
+                  ? '缓冲模式由房主统一管理'
+                  : effectivePreferMp4
+                    ? 'MP4 模式不支持缓冲，请切换到 DASH'
+                    : displayBufferMode
+                      ? '进入房间先缓存完整视频到本地，避免 URL 过期与卡顿'
+                      : '直接流式播放，无需等待缓存'}
+              </div>
+            </div>
+          )}
+
+          {/* P2P 传输（仅服务器 DASH 可用时显示） */}
+          {!dashDisabled && (
+            <div
+              className={cn(
+                'transition-opacity',
+                (!isHost ||
+                  effectivePreferMp4 ||
+                  displayBufferMode ||
+                  displayCliEnabled) &&
+                  'pointer-events-none opacity-40'
+              )}
+            >
+              <div
+                className="mb-1 text-[10px] font-bold uppercase tracking-wide"
+                style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+              >
+                P2P 传输
+              </div>
+              {renderSegmented(
+                displayP2pEnabled,
+                handleP2PChange,
+                '关闭',
+                '开启',
+                !isHost ||
+                  effectivePreferMp4 ||
+                  displayBufferMode ||
+                  displayCliEnabled
+              )}
+              <div
+                className="mt-1 text-[10px] leading-snug"
+                style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+              >
+                {!isHost
+                  ? 'P2P 传输由房主统一管理'
+                  : effectivePreferMp4
+                    ? 'MP4 模式不支持 P2P，请切换到 DASH'
+                    : displayCliEnabled
+                      ? 'CLI 代理与 P2P 互斥，请关闭 CLI 后再启用 P2P'
+                      : displayBufferMode
+                        ? '缓冲模式下视频已本地缓存，无需 P2P'
+                        : displayP2pEnabled
+                          ? '房间内观众间共享分片，减少服务器流量（需 WebRTC）'
+                          : '所有流量走服务器代理'}
+              </div>
+
+              {displayP2pEnabled && p2pEngineActive && (
+                <div
+                  className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 rounded-lg p-1.5 text-[10px]"
+                  style={{
+                    backgroundColor: 'var(--md-sys-color-surface-container-high)',
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <span
+                      style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+                    >
+                      ↓HTTP
+                    </span>
+                    <span className="font-mono font-semibold">
+                      {formatKBytes(totalHTTPDownloaded)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span
+                      style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+                    >
+                      ↓P2P
+                    </span>
+                    <span className="font-mono font-semibold">
+                      {formatKBytes(totalP2PDownloaded)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span
+                      style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+                    >
+                      ↑P2P
+                    </span>
+                    <span className="font-mono font-semibold">
+                      {formatKBytes(totalP2PUploaded)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span
+                      style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+                    >
+                      速度
+                    </span>
+                    <span className="font-mono font-semibold">
+                      {formatKBytes(p2pDownloadSpeed)}/s
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -20,6 +20,11 @@ const HTTPS_CAPABLE_BILIBILI_DOMAINS = [
   'biliimg.com',
   'bilibili.com',
   'upos-hz-mirrorakam.akamaized.net',
+  // B站 视频轨道 CDN 域名（edge 节点），与前端 url-proxy.ts 白名单保持一致
+  'mountaintoys.cn',
+  'pili-video.com',
+  'boss-pgc.com',
+  'bstatic.com',
 ];
 
 /**
