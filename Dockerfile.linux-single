@@ -11,6 +11,7 @@ COPY dist/linux/zviewer-backend .
 COPY dist/linux/zviewer-cert .
 COPY dist/linux/start.sh .
 COPY dist/linux/.env .
+COPY dist/linux/package.json .
 COPY dist/linux/frontend/dist ./frontend/dist/
 
 # 创建运行时数据目录
