@@ -26,6 +26,8 @@ export HTTP_FLV_PORT="$HTTP_FLV_PORT"
 echo "  启动后端 (统一端口: $PORT, RTMP: $RTMP_PORT, FLV: $HTTP_FLV_PORT)..."
 ./zviewer-backend &
 BACKEND_PID=$!
+# 记录后端 PID 到 pidfile，供 Docker 更新脚本终止后端进程以触发容器重启
+echo "$BACKEND_PID" > /app/.backend.pid
 
 echo ""
 echo "========================================"

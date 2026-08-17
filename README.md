@@ -231,11 +231,15 @@ Docker 镜像使用 HTTP 模式启动，后端统一托管前端静态文件，�
 ```bash
 docker run -d \
   --name zviewer \
+  --restart unless-stopped \
   -p 3333:3333 \
   -p 3334:3334 \
   -v zviewer-data:/app/config \
   zerowyc0721/zviewer:latest
 ```
+
+> 注：`--restart unless-stopped`（或 `--restart always`）是 Docker 内置自动更新功能的前提。
+> 更新流程会替换容器内程序文件后终止后端进程，依赖 restart 策略自动重启容器以加载新版本。
 
 ### Docker Compose
 

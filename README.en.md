@@ -227,11 +227,16 @@ Docker images run in HTTP mode. The backend serves frontend static files. For HT
 ```bash
 docker run -d \
   --name zviewer \
+  --restart unless-stopped \
   -p 3333:3333 \
   -p 3334:3334 \
   -v zviewer-data:/app/config \
   zerowyc0721/zviewer:latest
 ```
+
+> Note: `--restart unless-stopped` (or `--restart always`) is required for the built-in auto-update feature.
+> The update process replaces files inside the container then terminates the backend process;
+> the restart policy automatically restarts the container to load the new version.
 
 ### Docker Compose
 
