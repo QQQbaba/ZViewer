@@ -698,7 +698,6 @@ EXTRACTED_DIR="${extractedDir}"
 CONFIG_DIR="$ROOT/config"
 CONFIG_BACKUP="$ROOT/.config-backup-$$"
 RESTART_MARKER="$ROOT/.restart-backend"
-SELF_PID=$$
 LOG_FILE="$ROOT/update.log"
 
 # 将输出重定向到日志文件，方便诊断更新失败原因
@@ -712,72 +711,16 @@ echo "========================================"
 echo "[Docker 更新脚本] 等待后端返回响应..."
 sleep 3
 
-echo "[Docker 更新脚本] 备份 config 目录..."
-if [ -d "$CONFIG_DIR" ]; then
-  cp -r "$CONFIG_DIR" "$CONFIG_BACKUP"
-  rm -rf "$CONFIG_DIR"
-  echo "[Docker 更新脚本] 已备份 config 到 $CONFIG_BACKUP"
-fi
-
-echo "[Docker 更新脚本] 应用新文件..."
-if [ ! -d "$EXTRACTED_DIR" ]; then
-  echo "[错误] 未找到解压目录：$EXTRACTED_DIR"
-  if [ -d "$CONFIG_BACKUP" ]; then
-    cp -rf "$CONFIG_BACKUP" "$CONFIG_DIR"
-  fi
-  exit 1
-fi
-
-# 覆盖程序文件（保留 config 目录）
-cp -rf "$EXTRACTED_DIR/"zviewer-backend "$ROOT/" 2>/dev/null || true
-cp -rf "$EXTRACTED_DIR/"zviewer-cert "$ROOT/" 2>/dev/null || true
-cp -rf "$EXTRACTED_DIR/"start.sh "$ROOT/" 2>/dev/null || true
-cp -rf "$EXTRACTED_DIR/"package.json "$ROOT/" 2>/dev/null || true
-cp -rf "$EXTRACTED_DIR/".env "$ROOT/" 2>/dev/null || true
-# 前端静态文件
-if [ -d "$EXTRACTED_DIR/frontend/dist" ]; then
-  rm -rf "$ROOT/frontend/dist"
-  mkdir -p "$ROOT/frontend/dist"
-  cp -rf "$EXTRACTED_DIR/frontend/dist/"* "$ROOT/frontend/dist/" 2>/dev/null || true
-fi
-chmod +x "$ROOT/zviewer-backend" "$ROOT/zviewer-cert" 2>/dev/null || true
-
-# 验证关键文件是否存在
-if [ ! -f "$ROOT/zviewer-backend" ]; then
-  echo "[错误] 更新后未找到 zviewer-backend，更新包可能损坏"
-  if [ -d "$CONFIG_BACKUP" ]; then
-    cp -rf "$CONFIG_BACKUP" "$CONFIG_DIR"
-  fi
-  exit 1
-fi
-
-# 恢复 config 目录
-echo "[Docker 更新脚本] 恢复 config 目录..."
-if [ -d "$CONFIG_BACKUP" ]; then
-  mkdir -p "$CONFIG_DIR"
-  cp -rf "$CONFIG_BACKUP/"* "$CONFIG_DIR/" 2>/dev/null || true
-  rm -rf "$CONFIG_BACKUP"
-  echo "[Docker 更新脚本] 已恢复 config 目录（用户数据已保留）"
-fi
-
-echo "[Docker 更新脚本] 清理临时文件..."
-rm -rf "$TEMP_DIR"
-
-echo "[Docker 更新脚本] 更新完成，准备重启后端进程... $(date)"
-
-# 创建重启标记，entrypoint 检测到后会重启后端而非退出容器
+# ==================== 第 1 步：创建重启标记 ====================
+# 先创建标记，确保后续 kill 后端时 entrypoint 能检测到并等待更新完成
 touch "$RESTART_MARKER"
 echo "[Docker 更新脚本] 已创建重启标记: $RESTART_MARKER"
 
-# 删除自身
-rm -f "$0"
-
-# kill 后端进程（容器内进程），触发 entrypoint 监控循环重启后端。
-# 更新脚本由后端 detached 启动，与后端进程独立，可安全 kill 后端。
-# entrypoint 的 while kill -0 循环会检测到后端退出，
-# 发现 .restart-backend 标记后重新启动后端，加载已更新的程序文件。
-echo "[Docker 更新脚本] 正在终止后端进程以触发容器内重启..."
-# 尝试通过 pidfile 获取后端 PID，回退到 pgrep
+# ==================== 第 2 步：终止后端进程 ====================
+# 必须先终止后端，再复制文件。否则 cp -rf 会截断正在运行的二进制，
+# 导致后端进程崩溃（SIGBUS/SIGSEGV），entrypoint 在标记创建前检测到退出，
+# 误判为异常退出并停止容器。
+echo "[Docker 更新脚本] 正在终止后端进程..."
 BACKEND_PID=""
 if [ -f "$ROOT/.backend.pid" ]; then
   BACKEND_PID=$(cat "$ROOT/.backend.pid" 2>/dev/null)
@@ -800,9 +743,71 @@ if [ -n "$BACKEND_PID" ]; then
     echo "[Docker 更新脚本] 后端未响应 SIGTERM，强制终止"
     kill -9 "$BACKEND_PID" 2>/dev/null || true
   fi
+  # 等待进程完全退出和端口释放
+  sleep 2
 else
   echo "[Docker 更新脚本] 未找到后端进程，可能已退出"
 fi
+
+# ==================== 第 3 步：备份 config 目录 ====================
+echo "[Docker 更新脚本] 备份 config 目录..."
+if [ -d "$CONFIG_DIR" ]; then
+  cp -r "$CONFIG_DIR" "$CONFIG_BACKUP"
+  echo "[Docker 更新脚本] 已备份 config 到 $CONFIG_BACKUP"
+fi
+
+# ==================== 第 4 步：应用新文件 ====================
+# 后端已停止，可安全覆盖二进制文件
+echo "[Docker 更新脚本] 应用新文件..."
+if [ ! -d "$EXTRACTED_DIR" ]; then
+  echo "[错误] 未找到解压目录：$EXTRACTED_DIR"
+  if [ -d "$CONFIG_BACKUP" ]; then
+    cp -rf "$CONFIG_BACKUP" "$CONFIG_DIR"
+  fi
+  exit 1
+fi
+
+# 覆盖程序文件（后端已停止，不会截断运行中的二进制）
+cp -f "$EXTRACTED_DIR/zviewer-backend" "$ROOT/zviewer-backend" 2>/dev/null || true
+cp -f "$EXTRACTED_DIR/zviewer-cert" "$ROOT/zviewer-cert" 2>/dev/null || true
+cp -f "$EXTRACTED_DIR/start.sh" "$ROOT/start.sh" 2>/dev/null || true
+cp -f "$EXTRACTED_DIR/package.json" "$ROOT/package.json" 2>/dev/null || true
+cp -f "$EXTRACTED_DIR/.env" "$ROOT/.env" 2>/dev/null || true
+# 前端静态文件
+if [ -d "$EXTRACTED_DIR/frontend/dist" ]; then
+  rm -rf "$ROOT/frontend/dist"
+  mkdir -p "$ROOT/frontend/dist"
+  cp -rf "$EXTRACTED_DIR/frontend/dist/"* "$ROOT/frontend/dist/" 2>/dev/null || true
+fi
+chmod +x "$ROOT/zviewer-backend" "$ROOT/zviewer-cert" 2>/dev/null || true
+
+# 验证关键文件是否存在
+if [ ! -f "$ROOT/zviewer-backend" ]; then
+  echo "[错误] 更新后未找到 zviewer-backend，更新包可能损坏"
+  if [ -d "$CONFIG_BACKUP" ]; then
+    cp -rf "$CONFIG_BACKUP" "$CONFIG_DIR"
+  fi
+  exit 1
+fi
+
+# ==================== 第 5 步：恢复 config 目录 ====================
+echo "[Docker 更新脚本] 恢复 config 目录..."
+if [ -d "$CONFIG_BACKUP" ]; then
+  mkdir -p "$CONFIG_DIR"
+  cp -rf "$CONFIG_BACKUP/"* "$CONFIG_DIR/" 2>/dev/null || true
+  rm -rf "$CONFIG_BACKUP"
+  echo "[Docker 更新脚本] 已恢复 config 目录（用户数据已保留）"
+fi
+
+# ==================== 第 6 步：清理并退出 ====================
+echo "[Docker 更新脚本] 清理临时文件..."
+rm -rf "$TEMP_DIR"
+
+echo "[Docker 更新脚本] 更新完成，entrypoint 将自动重启后端 $(date)"
+
+# 删除自身
+rm -f "$0"
+
 exit 0
 `;
   fs.writeFileSync(shPath, content, 'utf8');

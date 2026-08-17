@@ -550,8 +550,11 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           const normalizedPath = normalizeMountPath(path)
           if (sourceType === 'webdav' || sourceType === 'openlist') {
             // WebDAV 与 OpenList 共用同一套协议逻辑，仅 API 前缀与直链获取不同
+            // 内网地址强制使用服务器转发（浏览器无法直连内网服务器）
             const isDirect =
-              sourceType === 'webdav' ? webdavDirectLink : openlistDirectLink
+              sourceType === 'webdav'
+                ? (isWebdavInternal ? false : webdavDirectLink)
+                : (isOpenlistInternal ? false : openlistDirectLink)
             const serverUrl =
               (sourceType === 'webdav'
                 ? webdav.serverUrl
@@ -915,13 +918,11 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         message.success('影片已添加')
       } else if (sourceType === 'webdav' || sourceType === 'openlist') {
         // WebDAV 与 OpenList 共用同一套协议逻辑，仅 API 前缀与直链获取不同
-        // OpenList 内网地址强制使用服务器转发（浏览器无法直连内网 raw_url）
+        // 内网地址强制使用服务器转发（浏览器无法直连内网服务器）
         const isDirect =
           sourceType === 'webdav'
-            ? webdavDirectLink
-            : isOpenlistInternal
-              ? false
-              : openlistDirectLink
+            ? (isWebdavInternal ? false : webdavDirectLink)
+            : (isOpenlistInternal ? false : openlistDirectLink)
         const mountPath = (
           sourceType === 'webdav' ? webdav.path : openlist.path
         ).trim()
