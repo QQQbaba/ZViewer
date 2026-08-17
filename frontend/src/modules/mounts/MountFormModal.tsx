@@ -34,6 +34,7 @@ import {
   updateJellyfinMount,
   testJellyfinMount,
 } from '@/modules/jellyfin/jellyfinApi'
+import { isInternalOpenListServer } from '@/modules/openlist/isInternal'
 import type { UnionMount, MountType } from './types'
 
 interface MountFormModalProps {
@@ -365,6 +366,8 @@ export default function MountFormModal({
   const isOpenlist = formValues.type === 'openlist'
   const isEmby = formValues.type === 'emby'
   const showDirectLink = isWebdav || isOpenlist || isEmby
+  const isWebdavOrOpenlistInternal =
+    (isWebdav || isOpenlist) && isInternalOpenListServer(formValues.serverUrl)
 
   return (
     <Modal
@@ -468,11 +471,19 @@ export default function MountFormModal({
           onChange={(e) => updateField('password', e.target.value)}
         />
         {showDirectLink && (
-          <Switch
-            label="使用直链播放（不经过服务端转发）"
-            checked={formValues.directLink}
-            onChange={(e) => updateField('directLink', e.target.checked)}
-          />
+          <>
+            <Switch
+              label="使用直链播放（不经过服务端转发）"
+              checked={isWebdavOrOpenlistInternal ? false : formValues.directLink}
+              disabled={isWebdavOrOpenlistInternal}
+              onChange={(e) => updateField('directLink', e.target.checked)}
+            />
+            {isWebdavOrOpenlistInternal && (
+              <div className="rounded border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-3 py-2 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                检测到内网地址，浏览器无法直连，已强制使用服务器转发模式
+              </div>
+            )}
+          </>
         )}
         {submitError && (
           <div className="rounded border border-[var(--md-sys-color-error)] bg-[var(--md-sys-color-error-container)] px-3 py-2 text-xs text-[var(--md-sys-color-on-error-container)]">
