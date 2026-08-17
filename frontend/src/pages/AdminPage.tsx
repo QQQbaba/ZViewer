@@ -192,6 +192,7 @@ export default function AdminPage() {
   const [ffmpegInstallStage, setFfmpegInstallStage] = useState('')
   const [ffmpegInstallPercent, setFfmpegInstallPercent] = useState(0)
   const [ffmpegUploading, setFfmpegUploading] = useState(false)
+  const [ffmpegUploadPercent, setFfmpegUploadPercent] = useState(0)
   const ffmpegFileInputRef = useRef<HTMLInputElement | null>(null)
 
   const authHeaders = {
@@ -651,13 +652,16 @@ export default function AdminPage() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    if (!file.name.toLowerCase().endsWith('.zip')) {
-      message.error('请上传 .zip 格式的 FFmpeg 压缩包')
+    if (!file.name.toLowerCase().match(/\.(zip|tar\.xz|tar\.gz|tgz)$/)) {
+      message.error('请上传 .zip、.tar.xz 或 .tar.gz 格式的 FFmpeg 压缩包')
       return
     }
     setFfmpegUploading(true)
+    setFfmpegUploadPercent(0)
     try {
-      const status = await uploadFfmpeg(file)
+      const status = await uploadFfmpeg(file, (loaded, total) => {
+        setFfmpegUploadPercent(Math.round((loaded / total) * 100))
+      })
       setFfmpegStatus(status)
       if (status.transcodeCapable) {
         message.success('FFmpeg 安装成功（完整版，支持音频转码）')
@@ -670,6 +674,7 @@ export default function AdminPage() {
       message.error(err instanceof Error ? err.message : '上传安装失败')
     } finally {
       setFfmpegUploading(false)
+      setFfmpegUploadPercent(0)
     }
   }
 
@@ -1695,11 +1700,15 @@ export default function AdminPage() {
                               !ffmpegInstalling &&
                               !ffmpegUploading && (
                                 <a
-                                  href="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+                                  href={
+                                    ffmpegStatus?.platform === 'win32'
+                                      ? 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
+                                      : 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz'
+                                  }
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex h-8 items-center gap-1.5 rounded-[var(--md-sys-shape-corner-full)] px-3 text-xs font-medium text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
-                                  title="在浏览器中手动下载 FFmpeg 压缩包"
+                                  title={`在浏览器中手动下载 FFmpeg（${ffmpegStatus?.platform === 'win32' ? 'Windows' : 'Linux'} 版本）`}
                                 >
                                   <ExternalLink className="h-3.5 w-3.5" />
                                   手动下载
@@ -1708,14 +1717,30 @@ export default function AdminPage() {
                             <input
                               ref={ffmpegFileInputRef}
                               type="file"
-                              accept=".zip"
+                              accept=".zip,.tar.xz,.tar.gz"
                               className="hidden"
                               onChange={handleUploadFfmpeg}
                             />
                             {ffmpegUploading && (
-                              <div className="flex items-center gap-1.5 text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                                <span>上传安装中...</span>
+                              <div className="flex flex-col gap-1.5">
+                                <div className="flex items-center gap-1.5 text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  <span>
+                                    {ffmpegUploadPercent < 100
+                                      ? `上传中 ${ffmpegUploadPercent}%`
+                                      : '安装中...'}
+                                  </span>
+                                </div>
+                                <div className="h-1.5 w-32 overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container)]">
+                                  <div
+                                    className="h-full rounded-full transition-all"
+                                    style={{
+                                      width: `${ffmpegUploadPercent < 100 ? ffmpegUploadPercent : 100}%`,
+                                      backgroundColor:
+                                        'var(--md-sys-color-primary)',
+                                    }}
+                                  />
+                                </div>
                               </div>
                             )}
                             {!ffmpegInstalling && !ffmpegUploading && (

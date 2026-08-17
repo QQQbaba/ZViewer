@@ -422,32 +422,54 @@ export async function downloadBilibiliVideo(
  *
  * 用户上传包含 ffmpeg 可执行文件的 zip 压缩包，
  * 后端解压并提取 ffmpeg 到 bin/ 目录。
+ *
+ * @param file      用户选择的 zip 文件
+ * @param onProgress 上传进度回调（loaded, total）
  */
-export async function uploadFfmpeg(file: File): Promise<FfmpegStatus> {
+export async function uploadFfmpeg(
+  file: File,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<FfmpegStatus> {
   const formData = new FormData()
   formData.append('file', file)
 
-  const res = await apiFetch('/api/server-files/ffmpeg-upload', {
-    method: 'POST',
-    body: formData,
+  return new Promise<FfmpegStatus>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${getApiUrl()}/api/server-files/ffmpeg-upload`)
+    xhr.withCredentials = true
+
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(e.loaded, e.total)
+      }
+    }
+
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText) as FfmpegStatus & {
+          success?: boolean
+          message?: string
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+          resolve({
+            available: !!data.available,
+            source: data.source,
+            path: data.path,
+            version: data.version,
+            transcodeCapable: data.transcodeCapable,
+            platform: data.platform,
+          })
+        } else {
+          reject(new Error(data.message || '上传安装失败'))
+        }
+      } catch {
+        reject(new Error('解析响应失败'))
+      }
+    }
+
+    xhr.onerror = () => reject(new Error('网络错误，上传失败'))
+    xhr.send(formData)
   })
-
-  const data = (await res.json()) as FfmpegStatus & {
-    success?: boolean
-    message?: string
-  }
-
-  if (!res.ok || !data.success) {
-    throw new Error(data.message || '上传安装失败')
-  }
-
-  return {
-    available: !!data.available,
-    source: data.source,
-    path: data.path,
-    version: data.version,
-    transcodeCapable: data.transcodeCapable,
-  }
 }
 
 // ============ FFmpeg 状态检测与在线安装 ============
@@ -466,6 +488,7 @@ export async function checkFfmpeg(
       path: null,
       version: null,
       transcodeCapable: false,
+      platform: data.platform,
       error: data.error || '检测失败',
     }
   }
@@ -475,6 +498,7 @@ export async function checkFfmpeg(
     path: data.path,
     version: data.version,
     transcodeCapable: data.transcodeCapable,
+    platform: data.platform,
   }
 }
 

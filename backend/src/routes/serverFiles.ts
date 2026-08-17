@@ -935,12 +935,13 @@ router.get('/ffmpeg-status', async (req: AuthenticatedRequest, res: Response): P
     const transcodeCapable = status.available
       ? await isFfmpegTranscodeCapable()
       : false;
-    res.json({ success: true, ...status, transcodeCapable });
+    res.json({ success: true, ...status, transcodeCapable, platform: process.platform });
   } catch (err) {
     res.status(500).json({
       success: false,
       available: false,
       transcodeCapable: false,
+      platform: process.platform,
       message: err instanceof Error ? err.message : '检测 FFmpeg 失败',
     });
   }
@@ -1007,10 +1008,11 @@ const ffmpegUpload = multer({
   }),
   limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
   fileFilter: (_req, file, cb) => {
-    if (file.originalname.toLowerCase().endsWith('.zip')) {
+    const name = file.originalname.toLowerCase();
+    if (name.endsWith('.zip') || name.endsWith('.tar.xz') || name.endsWith('.tar.gz') || name.endsWith('.tgz')) {
       cb(null, true);
     } else {
-      cb(new Error('仅支持 .zip 格式的 FFmpeg 压缩包'));
+      cb(new Error('仅支持 .zip、.tar.xz 或 .tar.gz 格式的 FFmpeg 压缩包'));
     }
   },
 });
