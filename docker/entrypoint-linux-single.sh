@@ -47,7 +47,7 @@ trap cleanup SIGTERM SIGINT
 
 # ==================== 后端进程监控循环 ====================
 # 后端退出后，检查是否为更新触发的重启：
-# - 存在 .restart-backend 标记 → 重启后端，不退出容器
+# - 存在 .restart-backend 标记 → 等待更新脚本完成 → 重启后端，不退出容器
 # - 无标记 → 后端异常退出，停止容器（依赖 restart policy 自动恢复）
 while true; do
   echo "  启动后端 (统一端口: $PORT, RTMP: $RTMP_PORT, FLV: $HTTP_FLV_PORT)..."
@@ -75,11 +75,27 @@ while true; do
   # 后端已退出，检查是否为更新触发的重启
   if [ -f "$RESTART_MARKER" ]; then
     echo ""
-    echo "  [entrypoint] 检测到更新重启标记，正在重启后端..."
+    echo "  [entrypoint] 检测到更新重启标记"
     rm -f "$RESTART_MARKER"
+
+    # 等待更新脚本（apply-update.sh）完成文件复制
+    # 更新脚本先 kill 后端再复制文件，必须等它完成后才能重启后端
+    echo "  [entrypoint] 等待更新脚本完成..."
+    UPDATE_TIMEOUT=120
+    UPDATE_WAITED=0
+    while pgrep -f "apply-update.sh" >/dev/null 2>&1; do
+      sleep 1
+      UPDATE_WAITED=$((UPDATE_WAITED + 1))
+      if [ "$UPDATE_WAITED" -ge "$UPDATE_TIMEOUT" ]; then
+        echo "  [entrypoint] 更新脚本等待超时（${UPDATE_TIMEOUT}s），强制重启后端"
+        break
+      fi
+    done
+    echo "  [entrypoint] 更新脚本已完成，正在重启后端..."
+
     # 短暂等待，确保端口释放（旧进程可能处于 TIME_WAIT）
     sleep 2
-    continue
+    continue  # 重启后端，不退出容器
   fi
 
   echo "  [警告] 后端进程已异常退出，正在停止容器..."
