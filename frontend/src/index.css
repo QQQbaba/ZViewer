@@ -1177,3 +1177,30 @@ video {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* =====================================================
+   禁用全局 hover 位移：[data-no-hover-transform="true"] 时启用
+   - 属性挂在 document.body 上，portal（下拉/弹窗）元素同样是
+     body 的后代，因此全局生效
+   - 仅禁用 hover 时的 translate / scale 变换
+   - 不影响其他动画、玻璃效果、透明度等设置
+   - 与精简动画模式独立，可单独使用
+   ===================================================== */
+body[data-no-hover-transform='true'] *:hover {
+  /* Tailwind v3 的 hover:translate-* / hover:scale-* 通过 CSS 变量
+     控制 transform，覆盖这些变量即可精准禁用位移/缩放，
+     不影响 transform 的其他用途（如居中定位 translate(-50%,-50%)） */
+  --tw-translate-x: 0 !important;
+  --tw-translate-y: 0 !important;
+  --tw-translate-z: 0 !important;
+  --tw-scale-x: 1 !important;
+  --tw-scale-y: 1 !important;
+}
+
+/* 以下通用组件的 hover 直接写 transform（非 Tailwind 变量），需单独禁用位移/缩放 */
+body[data-no-hover-transform='true'] .zen-card:hover,
+body[data-no-hover-transform='true'] .zen-btn:hover,
+body[data-no-hover-transform='true'] .zen-tag-hover:hover,
+body[data-no-hover-transform='true'] .zen-avatar-hover:hover {
+  transform: none !important;
+}

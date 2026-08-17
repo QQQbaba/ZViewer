@@ -16,6 +16,7 @@ import {
   ChevronDown,
   Image,
   Sparkles,
+  MousePointerClick,
   Download,
   Server,
 } from 'lucide-react'
@@ -89,6 +90,8 @@ export function Header() {
     setGlassBlur,
     reducedMotion,
     setReducedMotion,
+    disableHoverTransform,
+    setDisableHoverTransform,
   } = useThemeStore()
   const [themeOpen, setThemeOpen] = useState(false)
   const [themeClosing, setThemeClosing] = useState(false)
@@ -409,7 +412,7 @@ export function Header() {
                     top: `${themeMenuPos.top}px`,
                     right: `${themeMenuPos.right}px`,
                     zIndex: 50,
-                    height: 'min(520px, calc(100vh - 32px))',
+                    height: 'min(590px, calc(100vh - 32px))',
                     // 容器宽度由子元素决定，不单独动画 width，避免与侧面板的 width 动画不同步导致抖动
                     backdropFilter: 'blur(var(--glass-blur-strong))',
                     WebkitBackdropFilter: 'blur(var(--glass-blur-strong))',
@@ -421,7 +424,7 @@ export function Header() {
                     open={backgroundModalOpen}
                     onClose={() => setBackgroundModalOpen(false)}
                   />
-                  <div className="h-full w-72 flex-shrink-0 p-4">
+                  <div className="h-full w-72 flex-shrink-0 overflow-y-auto px-4 pt-4 pb-2">
                     {/* 深浅色切换 */}
                     <button
                       onClick={() => setDark(!isDark)}
@@ -632,6 +635,35 @@ export function Header() {
                       />
                     </div>
 
+                    {/* 禁用全局 hover 位移开关 */}
+                    <div
+                      className="zen-dropdown-item mt-3 flex items-center justify-between gap-2 px-3 py-2 rounded-[var(--md-sys-shape-corner)]"
+                      style={
+                        {
+                          border: '1px solid var(--md-sys-color-outline)',
+                          '--item-delay': '260ms',
+                        } as React.CSSProperties
+                      }
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <MousePointerClick className="w-4 h-4 text-[var(--md-sys-color-primary)] shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm text-[var(--md-sys-color-on-surface)] truncate">
+                            禁用 hover 位移
+                          </p>
+                          <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] truncate">
+                            关闭悬浮上浮/缩放效果
+                          </p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={disableHoverTransform}
+                        onChange={(e) =>
+                          setDisableHoverTransform(e.target.checked)
+                        }
+                      />
+                    </div>
+
                     {/* 自定义背景入口 */}
                     <button
                       ref={backgroundBtnRef}
@@ -645,7 +677,7 @@ export function Header() {
                       style={
                         {
                           border: '1px solid var(--md-sys-color-outline)',
-                          '--item-delay': '260ms',
+                          '--item-delay': '300ms',
                         } as React.CSSProperties
                       }
                     >

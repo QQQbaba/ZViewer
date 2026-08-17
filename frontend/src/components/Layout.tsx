@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useThemeStore } from '@/store/themeStore'
 import { Header } from './Header'
@@ -14,7 +15,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
     backgroundScale,
     backgroundRotate,
     reducedMotion,
+    disableHoverTransform,
   } = useThemeStore()
+
+  // 将禁用 hover 位移的开关挂到 document.body，使通过 portal 渲染的
+  // 组件（下拉、弹窗等）同样受控，实现全局生效。
+  useEffect(() => {
+    document.body.dataset.noHoverTransform = disableHoverTransform
+      ? 'true'
+      : 'false'
+    return () => {
+      delete document.body.dataset.noHoverTransform
+    }
+  }, [disableHoverTransform])
 
   return (
     <div
