@@ -20,12 +20,14 @@ import type { Server as SocketIOServer } from 'socket.io';
 import { AppDataSource } from '../../data-source';
 import { Room } from '../../entities/Room';
 import { UserMount } from '../../entities/UserMount';
+import { Movie as MovieEntity } from '../../entities/Movie';
 import {
   authenticateToken,
   type AuthenticatedRequest,
 } from '../../middleware/auth';
 import { movieService } from './movie.service';
 import { movieBroadcasterService } from './movie-broadcaster.service';
+import { isInternalOpenListServer } from '../../services/openlist-errors';
 import type { MovieDto } from '../shared';
 
 /**
@@ -106,6 +108,12 @@ export function createMovieRouter(io: SocketIOServer): Router {
               if (!data.username && mount.username) data.username = mount.username;
               if (!data.password && mount.password) data.password = mount.password;
             }
+          }
+
+          // OpenList 内网地址强制使用服务器中转（浏览器无法直连内网 raw_url）
+          // 覆盖前端传入的 directLink=true，防止用户绕过挂载层配置
+          if (sourceType === 'openlist' && isInternalOpenListServer(data.serverUrl)) {
+            data.directLink = false;
           }
         }
 
@@ -188,6 +196,31 @@ export function createMovieRouter(io: SocketIOServer): Router {
         }
 
         const data = req.body as Partial<MovieDto>;
+
+        // OpenList 内网地址强制使用服务器中转（浏览器无法直连内网 raw_url）
+        // 检查更新后的 serverUrl（若未传则查询现有影片的 serverUrl）
+        if (data.directLink === true) {
+          const serverUrlToCheck = typeof data.serverUrl === 'string' ? data.serverUrl : null;
+          if (serverUrlToCheck && isInternalOpenListServer(serverUrlToCheck)) {
+            data.directLink = false;
+          } else if (!serverUrlToCheck) {
+            // 未传 serverUrl，查询现有影片判断
+            const existing = await AppDataSource.getRepository(MovieEntity).findOneBy({
+              id: movieId,
+              roomId,
+            });
+            const existingServerUrl = existing?.serverUrl || undefined;
+            const existingSource = (existing?.source || '').toLowerCase();
+            if (
+              existingSource === 'openlist' &&
+              existingServerUrl &&
+              isInternalOpenListServer(existingServerUrl)
+            ) {
+              data.directLink = false;
+            }
+          }
+        }
+
         const updated = await movieService.updateMovie(roomId, movieId, data);
         if (!updated) {
           res.status(404).json({ success: false, message: '影片不存在' });

@@ -13,6 +13,8 @@ import { cn } from '@/lib/utils'
 export interface DropdownOption {
   label: string
   value: string | number
+  /** 禁用该项：不可选择，显示为灰色 */
+  disabled?: boolean
 }
 
 export interface DropdownProps {
@@ -232,16 +234,23 @@ export function Dropdown({
           >
             {options.map((opt) => {
               const active = String(opt.value) === String(value)
+              const optDisabled = opt.disabled === true
               return (
                 <button
                   key={opt.value}
                   type="button"
-                  onClick={() => handleSelect(opt)}
+                  disabled={optDisabled}
+                  onClick={() => {
+                    if (optDisabled) return
+                    handleSelect(opt)
+                  }}
                   className={cn(
                     'zen-dropdown-item flex w-full items-center justify-between gap-2 rounded-[var(--md-sys-shape-corner)] px-3 py-2 text-left text-sm transition-all',
-                    active
-                      ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
-                      : 'text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                    optDisabled
+                      ? 'cursor-not-allowed text-[var(--md-sys-color-on-surface)] opacity-40'
+                      : active
+                        ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                        : 'text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
                   )}
                   style={{ '--item-delay': '0ms' } as React.CSSProperties}
                 >

@@ -10,9 +10,12 @@
  *
  * 设计要点：
  * - 通过 movieId 从 Movie 表获取 source/path/serverUrl/username/password
- * - 支持 webdav / openlist（复用 WebDAV 协议）/ ftp / server-files 四种源
+ * - 支持 webdav / openlist（AList HTTP API）/ ftp / server-files 四种源
  * - browse 返回统一格式的文件列表（name/path/type/isSubtitle）
  * - load 返回字幕文件内容（非 URL），前端解析后转为 data URL 供 socket 同步
+ *
+ * v2 重构：OpenList 不再复用 WebDAV 协议，改用 AList HTTP API
+ * （listOpenListDirectory / fetchOpenListFileInfo），密码使用 SHA-256 哈希。
  */
 import { Router, type Response } from 'express';
 import fs from 'node:fs';
@@ -23,12 +26,19 @@ import { UserMount } from '../entities/UserMount';
 import { ServerFolder } from '../entities/ServerFolder';
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth';
 
-// WebDAV 服务（同时用于 OpenList）
+// WebDAV 服务（仅用于 webdav 源）
 import {
   listWebDAVDirectory,
   createWebDAVReadStream,
   type WebDAVConnectionParams,
 } from '../services/webdav';
+
+// OpenList 服务（AList HTTP API，用于 openlist 源）
+import {
+  listOpenListDirectory,
+  fetchOpenListFileInfo,
+  type OpenListBrowseEntry,
+} from '../services/openlist';
 
 // FTP 服务
 import {
@@ -157,6 +167,79 @@ function streamToString(
   });
 }
 
+/**
+ * 通过 AList HTTP API 读取 OpenList 文件内容。
+ *
+ * 流程：
+ * 1. 调用 fetchOpenListFileInfo 获取带签名的 raw_url
+ * 2. HTTP GET raw_url 读取文件字节流
+ * 3. 转为 UTF-8 字符串返回
+ *
+ * 与 createWebDAVReadStream 不同，此函数走 AList 的 /api/fs/get 端点，
+ * 使用 SHA-256 哈希密码（通过 /api/auth/login/hash 登录），不再依赖 WebDAV 协议。
+ *
+ * @param serverUrl  OpenList 服务器地址（可含 /dav 后缀）
+ * @param username   用户名（匿名场景为 undefined）
+ * @param password   哈希密码（由路由层 normalizePasswordForStorage 生成）
+ * @param filePath   文件在 OpenList 中的绝对路径
+ * @returns 文件文本内容
+ */
+async function readOpenListFileContent(
+  serverUrl: string,
+  username: string | undefined,
+  password: string | undefined,
+  filePath: string,
+  maxBytes = 2 * 1024 * 1024,
+): Promise<string> {
+  const info = await fetchOpenListFileInfo(serverUrl, username, password, filePath);
+  if (!info.rawUrl) {
+    throw new Error('OpenList 未返回文件直链');
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const res = await fetch(info.rawUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`OpenList 读取字幕失败: HTTP ${res.status}`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > maxBytes) {
+      throw new Error('字幕文件过大（超过 2MB）');
+    }
+    return buf.toString('utf-8');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 将 OpenList 目录条目转换为字幕路由统一的 BrowseEntry 格式。
+ *
+ * OpenList 的 entry.isDir 对应 WebDAV 的 type='directory'，
+ * 其他字段（name/size）语义一致。
+ */
+function openListEntryToBrowseEntry(
+  entry: OpenListBrowseEntry,
+  dirPath: string,
+): { name: string; path: string; type: 'file' | 'directory'; size?: number } {
+  const itemPath = dirPath.endsWith('/')
+    ? `${dirPath}${entry.name}`
+    : `${dirPath}/${entry.name}`;
+  return {
+    name: entry.name,
+    path: itemPath,
+    type: entry.isDir ? 'directory' : 'file',
+    size: entry.size,
+  };
+}
+
 interface SubtitleSearchResult {
   filename: string;
   format: string;
@@ -281,8 +364,41 @@ router.get('/search', async (req: AuthenticatedRequest, res: Response): Promise<
           console.warn(`[subtitles] FTP 读取字幕文件失败: ${entry.name}`, err);
         }
       }
+    } else if (source === 'openlist') {
+      // ── OpenList（AList HTTP API，密码为 SHA-256 哈希）──
+      if (!movie.serverUrl) {
+        res.json({ success: true, subtitles: [] });
+        return;
+      }
+      const result = await listOpenListDirectory(
+        movie.serverUrl,
+        creds.username,
+        creds.password,
+        dirPath,
+      );
+      for (const entry of result.entries) {
+        if (entry.isDir) continue;
+        const ext = getExt(entry.name);
+        if (!SUBTITLE_EXTS.includes(ext)) continue;
+        if (!entry.name.toLowerCase().startsWith(videoBasename.toLowerCase())) continue;
+
+        const filePath = dirPath.endsWith('/')
+          ? `${dirPath}${entry.name}`
+          : `${dirPath}/${entry.name}`;
+        try {
+          const content = await readOpenListFileContent(
+            movie.serverUrl,
+            creds.username,
+            creds.password,
+            filePath,
+          );
+          subtitles.push({ filename: entry.name, format: ext.slice(1), content });
+        } catch (err) {
+          console.warn(`[subtitles] OpenList 读取字幕文件失败: ${entry.name}`, err);
+        }
+      }
     } else {
-      // ── WebDAV / OpenList（复用 WebDAV 协议）──
+      // ── WebDAV（明文密码 + WebDAV 协议）──
       if (!movie.serverUrl) {
         res.json({ success: true, subtitles: [] });
         return;
@@ -441,8 +557,31 @@ router.get('/browse', async (req: AuthenticatedRequest, res: Response): Promise<
           size: entry.size,
         });
       }
+    } else if (source === 'openlist') {
+      // ── OpenList（AList HTTP API，密码为 SHA-256 哈希）──
+      if (!movie.serverUrl) {
+        res.status(400).json({ success: false, message: 'OpenList 服务器地址缺失' });
+        return;
+      }
+      const result = await listOpenListDirectory(
+        movie.serverUrl,
+        creds.username,
+        creds.password,
+        targetPath,
+      );
+      for (const entry of result.entries) {
+        const ext = getExt(entry.name);
+        const converted = openListEntryToBrowseEntry(entry, targetPath);
+        entries.push({
+          name: converted.name,
+          path: converted.path,
+          type: converted.type,
+          isSubtitle: converted.type === 'file' && SUBTITLE_EXTS.includes(ext),
+          size: converted.size,
+        });
+      }
     } else {
-      // ── WebDAV / OpenList ──
+      // ── WebDAV（明文密码 + WebDAV 协议）──
       if (!movie.serverUrl) {
         res.status(400).json({ success: false, message: 'WebDAV 服务器地址缺失' });
         return;
@@ -567,8 +706,20 @@ router.get('/load', async (req: AuthenticatedRequest, res: Response): Promise<vo
       };
       const stream = createFTPReadStream(params, 0);
       content = await streamToString(stream);
+    } else if (source === 'openlist') {
+      // ── OpenList（AList HTTP API，密码为 SHA-256 哈希）──
+      if (!movie.serverUrl) {
+        res.status(400).json({ success: false, message: 'OpenList 服务器地址缺失' });
+        return;
+      }
+      content = await readOpenListFileContent(
+        movie.serverUrl,
+        creds.username,
+        creds.password,
+        filePath,
+      );
     } else {
-      // ── WebDAV / OpenList ──
+      // ── WebDAV（明文密码 + WebDAV 协议）──
       if (!movie.serverUrl) {
         res.status(400).json({ success: false, message: 'WebDAV 服务器地址缺失' });
         return;
