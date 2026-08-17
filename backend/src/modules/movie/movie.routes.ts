@@ -110,9 +110,11 @@ export function createMovieRouter(io: SocketIOServer): Router {
             }
           }
 
-          // OpenList 内网地址强制使用服务器中转（浏览器无法直连内网 raw_url）
-          // 覆盖前端传入的 directLink=true，防止用户绕过挂载层配置
           if (sourceType === 'openlist' && isInternalOpenListServer(data.serverUrl)) {
+            data.directLink = false;
+          }
+          // WebDAV 内网地址也需要强制使用服务器中转（浏览器无法直连内网服务器）
+          if (sourceType === 'webdav' && isInternalOpenListServer(data.serverUrl)) {
             data.directLink = false;
           }
         }
@@ -212,7 +214,7 @@ export function createMovieRouter(io: SocketIOServer): Router {
             const existingServerUrl = existing?.serverUrl || undefined;
             const existingSource = (existing?.source || '').toLowerCase();
             if (
-              existingSource === 'openlist' &&
+              (existingSource === 'openlist' || existingSource === 'webdav') &&
               existingServerUrl &&
               isInternalOpenListServer(existingServerUrl)
             ) {

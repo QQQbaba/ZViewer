@@ -193,6 +193,8 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
   })
   // OpenList 内网地址检测：浏览器无法直连内网 raw_url，必须强制使用服务器转发
   const isOpenlistInternal = isInternalOpenListServer(openlist.serverUrl)
+  // WebDAV 内网地址检测：浏览器无法直连内网服务器，必须强制使用服务器转发
+  const isWebdavInternal = isInternalOpenListServer(webdav.serverUrl)
 
   // 已保存挂载
   const [mounts, setMounts] = useState<UnionMount[]>([])
@@ -486,7 +488,13 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         serverUrl: mount.serverUrl || '',
         path: normalizeMountPath('path' in mount ? mount.path || '' : ''),
       })
-      setWebdavDirectLink('directLink' in mount ? mount.directLink : false)
+      // 内网挂载强制使用服务器转发（后端已保证 directLink=false，前端双重保险）
+      const rawDirectLink = 'directLink' in mount ? mount.directLink : false
+      setWebdavDirectLink(
+        rawDirectLink && !isInternalOpenListServer(mount.serverUrl || '')
+          ? true
+          : false,
+      )
     } else if (sourceType === 'ftp') {
       setFtp((prev) => ({
         ...prev,
@@ -1258,13 +1266,18 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
             placeholder="文件路径，如 /movies/video.mp4"
           />
           <Dropdown
-            value={webdavDirectLink ? 'direct' : 'proxy'}
+            value={isWebdavInternal ? 'proxy' : webdavDirectLink ? 'direct' : 'proxy'}
             options={[
               { value: 'proxy', label: '服务器转发' },
-              { value: 'direct', label: '直链直连' },
+              { value: 'direct', label: '直链直连', disabled: isWebdavInternal },
             ]}
             onChange={(value) => setWebdavDirectLink(value === 'direct')}
           />
+          {isWebdavInternal && (
+            <div className="rounded border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-3 py-2 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+              检测到内网地址，浏览器无法直连，已强制使用服务器转发模式
+            </div>
+          )}
         </Space>
       )
     }

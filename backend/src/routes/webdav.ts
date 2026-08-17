@@ -25,6 +25,7 @@ import {
   fetchOpenListDirectUrl,
   OpenListError,
 } from '../services/openlist';
+import { isInternalOpenListServer } from '../services/openlist-errors';
 import { detectMediaFormat, getContentType } from '../services/mediaFormat';
 import { resolveUserMount, resolveMovieStream, pipeRangeStream } from '../services/proxy';
 import { upgradeToHttpsIfNeeded } from '../services/url-utils';
@@ -82,6 +83,22 @@ export function createMountRouter(opts: MountRouterOptions): Router {
     displayName,
     normalizeMovieServerUrl = false,
   } = opts;
+
+  /**
+   * 解析 directLink，内网地址强制使用服务器中转。
+   *
+   * 当 WebDAV 服务器为内网/回环地址（127.0.0.1、10.x、172.16-31.x、192.168.x、localhost、::1 等）时，
+   * 浏览器无法直接访问，必须强制通过后端 /stream 端点中转。
+   */
+  function resolveDirectLinkWithInternalCheck(
+    serverUrl: string,
+    directLink: boolean,
+  ): boolean {
+    if (directLink && isInternalOpenListServer(serverUrl)) {
+      return false;
+    }
+    return directLink;
+  }
 
   router.use(authenticateToken);
 
@@ -180,7 +197,7 @@ export function createMountRouter(opts: MountRouterOptions): Router {
         path: params.path,
         username: params.username || null,
         password: params.password || null,
-        directLink: directLink === true,
+        directLink: resolveDirectLinkWithInternalCheck(params.serverUrl, directLink === true),
         userId: req.user!.userId,
       } as UserMount);
       await repo.save(mount);
@@ -188,6 +205,9 @@ export function createMountRouter(opts: MountRouterOptions): Router {
       res.status(201).json({
         success: true,
         mount: stripPassword(mount),
+        ...(mount.directLink !== (directLink === true)
+          ? { warning: '检测到内网地址，已强制使用服务器中转模式' }
+          : {}),
       });
     } catch (err) {
       console.error(`[${logTag}] create mount error:`, err);
@@ -252,12 +272,15 @@ export function createMountRouter(opts: MountRouterOptions): Router {
       if (typeof password === 'string') {
         mount.password = password || null;
       }
-      mount.directLink = directLink === true;
+      mount.directLink = resolveDirectLinkWithInternalCheck(params.serverUrl, directLink === true);
       await repo.save(mount);
 
       res.json({
         success: true,
         mount: stripPassword(mount),
+        ...(mount.directLink !== (directLink === true)
+          ? { warning: '检测到内网地址，已强制使用服务器中转模式' }
+          : {}),
       });
     } catch (err) {
       console.error(`[${logTag}] update mount error:`, err);
@@ -505,6 +528,16 @@ export function createMountRouter(opts: MountRouterOptions): Router {
       }
       if (!mount.serverUrl) {
         res.status(400).json({ success: false, message: '该挂载未配置服务器地址' });
+        return;
+      }
+
+      // 内网地址拒绝返回直链（浏览器无法访问内网服务器）
+      if (isInternalOpenListServer(mount.serverUrl)) {
+        res.status(400).json({
+          success: false,
+          message: '该挂载为内网地址，无法使用直链模式，请使用服务器转发',
+          code: 'INTERNAL_NETWORK_FORBIDDEN',
+        });
         return;
       }
 
