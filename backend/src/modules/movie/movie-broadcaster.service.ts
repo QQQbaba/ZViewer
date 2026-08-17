@@ -27,7 +27,8 @@ export class MovieBroadcasterService {
    * 流程：
    * 1. 调用 movieService.listMovies 获取 DB 中的影片列表
    * 2. 调用 roomStateService.setMovies 同步到内存运行时状态
-   * 3. 若当前播放的影片已不在列表中，清空 currentMovieId
+   * 3. 若当前播放的影片已不在列表中，清空 currentMovieId 并广播 current-movie 事件
+   *    （REST 删除当前播放影片时，观众端需要通过该事件同步清理播放器）
    * 4. 通过 io.to(roomId).emit('movie-list', ...) 广播
    */
   async broadcastMovieList(io: SocketIOServer, roomId: string): Promise<void> {
@@ -36,13 +37,15 @@ export class MovieBroadcasterService {
     // 同步 DB 影片到内存运行时状态
     roomStateService.setMovies(roomId, movies);
 
-    // 若当前播放的影片已不在列表中，清空 currentMovieId
+    // 若当前播放的影片已不在列表中，清空 currentMovieId 并广播通知房间内所有客户端
+    // 修复「影片列表明明删除了视频，视频却还在播放」：观众端依赖该事件停止播放
     const currentMovieId = roomStateService.getCurrentMovieId(roomId);
     if (
       currentMovieId != null &&
       !movies.some((m) => m.id === currentMovieId || String(m.id) === String(currentMovieId))
     ) {
       roomStateService.setCurrentMovie(roomId, null);
+      io.to(roomId).emit('current-movie', { movieId: null });
     }
 
     // 广播给房间内所有成员
