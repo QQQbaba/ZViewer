@@ -1703,7 +1703,7 @@ export default function AdminPage() {
                                   href={
                                     ffmpegStatus?.platform === 'win32'
                                       ? 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
-                                      : 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz'
+                                      : 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz'
                                   }
                                   target="_blank"
                                   rel="noopener noreferrer"
