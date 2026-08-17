@@ -61,9 +61,10 @@ export class ViewerJoinHandler implements SocketEventHandler {
           }
 
           // 重复加入检测：同一账户（非 guest）不能在多个标签页同时进入同一房间。
+          // guest 用户共享 userId=0 且允许无限多端进入（游客不受登录数限制），跳过检测。
           // 如果发现旧 session 但其 socket 已断开（session 未清理），先结束旧 session 再放行。
           const currentUserId: number | null = socket.data.userId ?? null;
-          if (currentUserId != null) {
+          if (currentUserId != null && role !== 'guest') {
             const existingSession = await roomSessionService.findActiveSessionByUser(
               payload.roomId,
               currentUserId,
