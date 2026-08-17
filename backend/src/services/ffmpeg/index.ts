@@ -354,25 +354,26 @@ export async function installFfmpegFromZip(zipPath: string): Promise<void> {
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ffmpeg-manual-'))
   try {
-    if (process.platform === 'win32') {
-      await extractZipAndFindFfmpeg(zipPath, tmpDir)
-    } else {
-      // Linux: 尝试用 unzip 解压（用户上传的可能是 zip 而非 tar.xz）
-      const extractDir = path.join(tmpDir, 'extracted')
-      fs.mkdirSync(extractDir, { recursive: true })
-      await new Promise<void>((resolve, reject) => {
-        const proc = spawn('unzip', ['-o', zipPath, '-d', extractDir], {
-          stdio: 'ignore',
-        })
-        proc.on('error', reject)
-        proc.on('exit', (code) => {
-          if (code === 0) resolve()
-          else reject(new Error(`unzip 解压失败，退出码 ${code}`))
-        })
-      })
-      const ffmpegBin = findFileRecursive(extractDir, 'ffmpeg')
-      if (!ffmpegBin) throw new Error('解压后未找到 ffmpeg')
-      fs.copyFileSync(ffmpegBin, FFMPEG_BIN_PATH)
+    // 使用 adm-zip（纯 JavaScript）解压，不依赖系统 unzip 命令
+    const extractDir = path.join(tmpDir, 'extracted')
+    fs.mkdirSync(extractDir, { recursive: true })
+
+    const zip = new AdmZip(zipPath)
+    zip.extractAllTo(extractDir, true)
+
+    // 递归查找 ffmpeg 可执行文件（Windows: ffmpeg.exe, Linux: ffmpeg）
+    const ffmpegExeName =
+      process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+    const ffmpegBin = findFileRecursive(extractDir, ffmpegExeName)
+    if (!ffmpegBin) {
+      throw new Error(`解压后未找到 ${ffmpegExeName}`)
+    }
+
+    // 复制到 bin/
+    fs.copyFileSync(ffmpegBin, FFMPEG_BIN_PATH)
+
+    // 非 Windows 赋予可执行权限
+    if (process.platform !== 'win32') {
       fs.chmodSync(FFMPEG_BIN_PATH, 0o755)
     }
 
