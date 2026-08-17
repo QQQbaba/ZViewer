@@ -136,6 +136,8 @@ export interface FfmpegStatus {
   version: string | null
   /** 是否具备 AAC 编码能力（精简版 FFmpeg 可能为 false） */
   transcodeCapable?: boolean
+  /** 服务器平台（'win32' | 'linux' | 'darwin'） */
+  platform?: string
   error?: string
 }
 

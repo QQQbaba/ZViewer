@@ -336,37 +336,54 @@ function findFileRecursive(dir: string, filename: string): string | null {
   return null
 }
 
-// ============ 手动安装（从用户上传的 zip 文件）============
+// ============ 手动安装（从用户上传的压缩包）============
 
 /**
- * 从用户上传的 zip 文件安装 FFmpeg 到项目 `bin/` 目录。
+ * 从用户上传的压缩包安装 FFmpeg 到项目 `bin/` 目录。
  *
- * 流程：
- *   1. 解压 zip 到临时目录
- *   2. 递归查找 ffmpeg 可执行文件（Windows: ffmpeg.exe, Linux: ffmpeg）
- *   3. 复制到 bin/ 目录
- *   4. 清理临时文件
+ * 支持 zip（Windows）和 tar.xz/tar.gz（Linux）两种格式。
+ * 根据服务器平台查找对应的 ffmpeg 可执行文件。
  *
- * @param zipPath  用户上传的 zip 文件临时路径
+ * @param archivePath  用户上传的压缩包临时路径
  */
-export async function installFfmpegFromZip(zipPath: string): Promise<void> {
+export async function installFfmpegFromZip(archivePath: string): Promise<void> {
   fs.mkdirSync(FFMPEG_BIN_DIR, { recursive: true })
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ffmpeg-manual-'))
   try {
-    // 使用 adm-zip（纯 JavaScript）解压，不依赖系统 unzip 命令
     const extractDir = path.join(tmpDir, 'extracted')
     fs.mkdirSync(extractDir, { recursive: true })
 
-    const zip = new AdmZip(zipPath)
-    zip.extractAllTo(extractDir, true)
+    // 根据文件扩展名选择解压方式
+    const lowerPath = archivePath.toLowerCase()
+    if (lowerPath.endsWith('.zip')) {
+      // zip：使用 adm-zip（纯 JavaScript），不依赖系统命令
+      const zip = new AdmZip(archivePath)
+      zip.extractAllTo(extractDir, true)
+    } else if (lowerPath.endsWith('.tar.xz') || lowerPath.endsWith('.tar.gz') || lowerPath.endsWith('.tgz')) {
+      // tar.xz / tar.gz：使用系统 tar 命令
+      await new Promise<void>((resolve, reject) => {
+        const tar = spawn(
+          'tar',
+          ['-xf', archivePath, '-C', extractDir, '--strip-components=0'],
+          { stdio: 'ignore' }
+        )
+        tar.on('error', reject)
+        tar.on('exit', (code) => {
+          if (code === 0) resolve()
+          else reject(new Error(`tar 解压失败，退出码 ${code}`))
+        })
+      })
+    } else {
+      throw new Error('不支持的压缩包格式，请上传 .zip、.tar.xz 或 .tar.gz 文件')
+    }
 
-    // 递归查找 ffmpeg 可执行文件（Windows: ffmpeg.exe, Linux: ffmpeg）
+    // 递归查找 ffmpeg 可执行文件（按服务器平台区分）
     const ffmpegExeName =
       process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
     const ffmpegBin = findFileRecursive(extractDir, ffmpegExeName)
     if (!ffmpegBin) {
-      throw new Error(`解压后未找到 ${ffmpegExeName}`)
+      throw new Error(`解压后未找到 ${ffmpegExeName}，请确认压缩包内包含与服务器平台匹配的 ffmpeg 可执行文件`)
     }
 
     // 复制到 bin/
