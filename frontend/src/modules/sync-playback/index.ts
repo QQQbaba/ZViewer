@@ -11,7 +11,7 @@
  * ├── services/             纯函数服务层（从 hooks 抽取的可复用逻辑）
  * │   ├── state-merge.ts            状态构建与比较（buildStateFromVideo / isStateEqual）
  * │   ├── seek-strategy.ts          seek 跟随与缓冲检测（自适应阈值 / 未缓冲区域检测）
- * │   ├── seek-service.ts           统一 seek 入口（调用 MsePlayer.seekTo，不重建 MediaSource）
+ * │   ├── seek-service.ts           统一 seek 入口（调用引擎 seekTo，不重建媒体源）
  * │   └── index.ts                  服务层 barrel export
  * └── hooks/
  *     ├── useHostSync.ts             房主统一同步（组合广播+请求+心跳+事件绑定）

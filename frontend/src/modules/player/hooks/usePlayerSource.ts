@@ -12,8 +12,8 @@
  *
  * 相比 v1 的改进：
  * - Promise 队列替代 isAttaching/isReloading 双锁与 5s 等待循环；
- * - 不再读写 video._mseAbortController：旧引擎的下载中断由
- *   engine cleanup（MsePlayer.cleanup 内部 abort）负责；
+ * - 不再读写 video._mseAbortController：引擎的下载中断由
+ *   engine cleanup（DashPlayer.cleanup 内部 abort attach 请求）负责；
  * - forceReload 多次调用合并为最新 source 的一次重载。
  *
  * 该 Hook 是引擎无关的：不关心是房主还是观众，也不依赖 WatchTogetherState。
@@ -49,9 +49,8 @@ export interface UsePlayerSourceReturn {
   /** 当前已应用的 sourceUrl（用于去重与 seek-to-unbuffered 逻辑） */
   appliedSourceUrlRef: MutableRefObject<string | null>
   /**
-   * 引擎控制器实例（MSE / DASH 引擎返回，供外部调用 seekTo）。
-   * 替代旧 msePlayerRef，使用 PlayerController 接口抽象，
-   * 可同时持有 MsePlayer 或 DashPlayer 实例。
+   * 引擎控制器实例（DASH 引擎返回，供外部调用 seekTo）。
+   * 使用 PlayerController 接口抽象，无需感知底层引擎实现。
    */
   playerRef: MutableRefObject<PlayerController | null>
   /**
@@ -108,7 +107,7 @@ export function usePlayerSource(
     engineCleanupRef.current = null
     if (engineCleanup) {
       try {
-        // MsePlayer.cleanup 内部 abort 下载并释放 MediaSource；
+        // 引擎 cleanup（如 DashPlayer）内部中断下载并释放资源；
         // hls/flv 引擎销毁实例。放在 try 中避免清理异常阻断后续 attach。
         engineCleanup()
       } catch {
@@ -182,7 +181,7 @@ export function usePlayerSource(
   /**
    * seek 到目标时间。不重建 MediaSource。
    *
-   * MsePlayer 存在时委托其 seekTo（abort 下载 → 清缓冲 → init → Range 续传）；
+   * 引擎控制器存在时委托其 seekTo（abort 下载 → 清缓冲 → 从目标位置续传）；
    * 不存在（非 MSE 流）返回 { success: false }，调用方执行普通 seek。
    * needReload=true 表示不可恢复错误（video.error），需要上层 forceReload。
    */

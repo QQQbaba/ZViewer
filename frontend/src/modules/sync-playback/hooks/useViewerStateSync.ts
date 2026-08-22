@@ -78,7 +78,7 @@ export type UseViewerStateSyncReturn = void
  *
  * 4. **seek 到未缓冲区域的 MSE seek**：
  *    观众端跟随房主 seek 时（通过 control 事件），若目标位置不在缓冲范围内且为 MSE 流，
- *    调用 executeSeek → MsePlayer.seekTo（不重建 MediaSource）。用 isReloadingRef 锁防止并发。
+ *    调用 executeSeek → 引擎 seekTo（不重建媒体源）。用 isReloadingRef 锁防止并发。
  */
 export function useViewerStateSync({
   roomId,

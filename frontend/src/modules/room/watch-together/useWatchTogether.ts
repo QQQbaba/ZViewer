@@ -571,7 +571,7 @@ export function useWatchTogether({
         // 下载期间若已开始新的加载，放弃本次 attach（避免旧源覆盖新影片）
         if (loadSeqRef.current !== seq) return
 
-        // 传入 preserveTime 作为 startTime：MsePlayer.attach 会从该时间对应的字节偏移
+        // 传入 preserveTime 作为 startTime：DashPlayer 会从该时间对应的字节位置
         // 开始 Range 下载，而非从文件头 0 字节顺序下载。否则大跨度跳转后重载会
         // 从头加载到目标位置才播放（用户看到的"加载跳转之前的部分"现象）。
         await applySourceToVideo(video, newState, preserveTime, blobs)
@@ -948,7 +948,7 @@ export function useWatchTogether({
         state: WatchTogetherState,
         blobs?: { videoBlob: Blob; audioBlob: Blob }
       ) => {
-        // 恢复进度时传入 recoveryTime 作为 startTime，MsePlayer 从该时间对应的
+        // 恢复进度时传入 recoveryTime 作为 startTime，引擎从该时间对应的
         // 字节偏移开始下载，而非从文件头顺序下载到 recoveryTime 才播放。
         const startTime =
           isRecovery && recoveryTime > 0 ? recoveryTime : undefined

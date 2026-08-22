@@ -79,21 +79,27 @@ export const directEngine: PlayerEngine = {
     // 统一代理策略：由 url-proxy.ts 根据 URL 特征与源格式决定
     const targetUrl = resolveProxyUrl(source.url, source.headers, source.format)
 
-    // 先发 HEAD 请求尝试获取 X-Content-Duration（转码流场景）
-    // 不阻塞播放，失败时静默跳过
+    // 先发 HEAD 请求尝试获取 X-Content-Duration（转码流场景）。
+    // HEAD 与正式加载并行执行且带 5s 超时：慢代理/挂起的 HEAD 不推迟首帧，
+    // 失败或超时静默跳过（转码流时长回退由 X-Content-Duration header 探测路径兜底）。
     // 相对路径直接使用（浏览器用当前页面 origin 解析，同域请求携带 cookie）
-    try {
-      const headRes = await fetch(targetUrl, { method: 'HEAD' })
-      const contentDuration = headRes.headers.get('X-Content-Duration')
-      if (contentDuration) {
-        const d = parseFloat(contentDuration)
-        if (Number.isFinite(d) && d > 0) {
-          video.dataset.serverDuration = d.toString()
+    const headPromise = (async () => {
+      try {
+        const headRes = await fetch(targetUrl, {
+          method: 'HEAD',
+          signal: AbortSignal.timeout(5000),
+        })
+        const contentDuration = headRes.headers.get('X-Content-Duration')
+        if (contentDuration) {
+          const d = parseFloat(contentDuration)
+          if (Number.isFinite(d) && d > 0) {
+            video.dataset.serverDuration = d.toString()
+          }
         }
+      } catch {
+        // HEAD 请求失败（CORS 限制 / 超时），静默跳过
       }
-    } catch {
-      // HEAD 请求失败（如 CORS 限制），静默跳过
-    }
+    })()
 
     // 尝试加载视频：直连失败时回退到服务器代理（绕过跨域防盗链 / CORS）
     const fallback = canFallbackToProxy(targetUrl)
@@ -113,6 +119,8 @@ export const directEngine: PlayerEngine = {
       const proxyUrl = buildProxyUrl(source.url)
       await loadOnce(proxyUrl)
     }
+    // 等待 HEAD 结算（超时上限 5s，不显著阻塞；结果仅写 dataset）
+    await headPromise
 
     return {
       cleanup: () => {

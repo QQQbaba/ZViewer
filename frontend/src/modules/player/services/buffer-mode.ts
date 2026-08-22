@@ -57,13 +57,22 @@ export interface FetchBlobsResult {
 }
 
 /**
+ * 缓冲模式单视频（视频+音频流合计）大小上限：超出则中止下载。
+ * 缓冲模式将整片数据驻留内存并写入 IndexedDB，过大的文件会导致
+ * 内存峰值过高（OOM/页面崩溃）与超长下载等待。
+ */
+const MAX_BUFFER_TOTAL_BYTES = 800 * 1024 * 1024 // 800MB
+
+/**
  * 缓冲模式：从 B站 CDN 下载完整 m4s 流到 IndexedDB，缓存命中时直接复用。
  *
  * 流程：
  * 1. 检查 IndexedDB 缓存，命中则直接返回 Blob（fromCache=true）
  * 2. 未命中则下载 video + audio m4s 并存入 IndexedDB
  * 3. 进度通过 onProgress 反馈到 UI（每下载 1MB 触发一次）
- * 4. 失败时清理半成品缓存（避免下次命中损坏数据）
+ * 4. 总大小超过 MAX_BUFFER_TOTAL_BYTES 时中止下载（外部取消信号转发至内部）
+ * 5. 仅当"写入缓存的尝试失败"时清理；下载阶段的失败没有写入任何条目，
+ *    不删除（避免误删并发任务刚写入的完整缓存）
  *
  * 错误处理：调用方负责捕获 DownloadError / UrlExpiredError / DownloadAbortedError
  * 并向用户展示对应提示。
@@ -99,6 +108,15 @@ export async function fetchBlobsForBufferMode(
   // 未命中：下载 m4s 流
   console.log(`[buffer-mode] 缓冲模式开始下载: ${cacheKey}`)
 
+  // 内部取消器：组合"外部取消（切源/卸载）"与"超大小上限主动中止"
+  const externalSignal = signal
+  const internalController = new AbortController()
+  const forwardAbort = () => internalController.abort()
+  externalSignal?.addEventListener('abort', forwardAbort)
+  let overLimit = false
+  /** 是否已尝试写入缓存（用于失败时精确清理） */
+  let writeAttempted = false
+
   try {
     onProgress?.({ downloaded: 0, total: 1, title: displayTitle })
 
@@ -107,13 +125,19 @@ export async function fetchBlobsForBufferMode(
         state.sourceUrl,
         state.audioUrl,
         (downloaded, total) => {
+          // 首次得知总大小即检查上限，超限立即中止（不继续拉满带宽）
+          if (total > MAX_BUFFER_TOTAL_BYTES && !overLimit) {
+            overLimit = true
+            internalController.abort()
+            return
+          }
           onProgress?.({
             downloaded,
             total: total || downloaded,
             title: displayTitle,
           })
         },
-        signal
+        internalController.signal
       )
 
     // 写入 IndexedDB
@@ -131,6 +155,7 @@ export async function fetchBlobsForBufferMode(
       createdAt: Date.now(),
       lastAccessedAt: Date.now(),
     }
+    writeAttempted = true
     await setCacheEntry(entry)
 
     console.log(
@@ -138,9 +163,23 @@ export async function fetchBlobsForBufferMode(
     )
     return { videoBlob, audioBlob, cacheKey, fromCache: false }
   } catch (err) {
-    // 清理半成品缓存（如果有）
-    await deleteCacheEntry(cacheKey)
+    // 超大小上限被中止 → 转为明确提示（调用方按 DownloadError 展示）
+    if (overLimit && err instanceof DownloadAbortedError) {
+      throw new DownloadError(
+        `视频过大（超过 ${Math.round(MAX_BUFFER_TOTAL_BYTES / 1024 / 1024)}MB），已取消缓冲下载；请关闭缓冲模式或切换更低清晰度`
+      )
+    }
+    // 仅当写入缓存的尝试失败时才清理（IndexedDB 单条 put 失败通常原子回滚，
+    // 此处兜底）；下载阶段的失败没有写入任何条目，不删除——
+    // 否则会误删并发任务（如另一端同 key 下载）刚写入的完整缓存。
+    if (writeAttempted) {
+      await deleteCacheEntry(cacheKey).catch(() => {
+        /* 清理失败不影响错误上抛 */
+      })
+    }
     throw err
+  } finally {
+    externalSignal?.removeEventListener('abort', forwardAbort)
   }
 }
 

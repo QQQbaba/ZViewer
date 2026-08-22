@@ -80,7 +80,7 @@ export function shouldSeekToHost(
  *
  * 用于判断 seek 目标位置是否已有数据可播放：
  * - true：浏览器可直接 seek，无需 MSE seek
- * - false：需要调用 MsePlayer.seekTo 重新加载
+ * - false：需要调用 引擎 seekTo 重新加载
  */
 export function isInBufferedRange(
   video: HTMLVideoElement,
@@ -97,7 +97,7 @@ export function isInBufferedRange(
 /**
  * 判断当前源是否为 MSE 流。
  *
- * MSE 流（DASH / 含 audioUrl）的 seek 需要调用 MsePlayer.seekTo，
+ * MSE 流（DASH / 含 audioUrl）的 seek 需要调用 引擎 seekTo，
  * 普通mp4 直链由浏览器原生处理。
  */
 export function isMseStream(state: WatchTogetherState): boolean {

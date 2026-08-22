@@ -4,7 +4,7 @@
  * 职责：
  * 1. 将 B站非标准 DASH 流（分离的 video/audio m4s）包装为 dash.js 可识别的 MPD manifest
  * 2. 管理 dash.js MediaPlayer 实例生命周期（显式状态机）
- * 3. 实现 PlayerController 接口，与 MsePlayer 在 usePlayerSource 中可互换
+ * 3. 实现 PlayerController 接口，供 usePlayerSource / seek-service 统一调度
  *
  * B站 DASH 源特点：
  * - 非标准 DASH：没有 .mpd manifest，只有分离的 video.m4s + audio.m4s
@@ -138,6 +138,11 @@ export class DashPlayer implements PlayerController {
    * 生命周期与 dash.js 实例一致：attach 时创建，cleanup 时销毁。
    */
   private p2pEngine: { destroy: () => void } | null = null
+  /**
+   * attach 期间网络请求（init segment 预读 / sidx 二次扫描）的统一取消器。
+   * cleanup 时 abort：源切换后不再继续拉取旧源的头部队据（最多 5MB+）。
+   */
+  private attachAbort: AbortController | null = null
 
   constructor(options: DashPlayerOptions) {
     this.video = options.video
@@ -176,11 +181,19 @@ export class DashPlayer implements PlayerController {
       throw new Error(`DashPlayer 状态不允许 attach: ${this.state}`)
     }
     this.state = 'attaching'
+    this.attachAbort = new AbortController()
+
+    /** attach 进行中外部已 cleanup（切源/卸载）→ 抛错终止，由 catch 统一清理 */
+    const ensureNotDisposed = () => {
+      if (this.state === 'disposed') {
+        throw new Error('DashPlayer attach 已被取消（引擎已销毁）')
+      }
+    }
 
     try {
       // 1. 预下载/读取视频 m4s 头部，解析 sidx 和 moov 位置
       //    dash.js 需要 sidx 来实现 seek（计算目标时间对应的字节偏移）。
-      //    没有 sidx 时，dash.js 无法 seek（只知道顺序下载，不知道跳转位置）。
+      //    没有 sidx 时，dash.js 无法 seek（只知道顺序下载，不知道跳转位置)。
       if (this.isBufferMode && this.videoBlob) {
         // 缓冲模式：从本地 Blob slice 读取头部，零网络请求
         this.initInfo = await this.parseInitFromBlob(this.videoBlob)
@@ -188,6 +201,7 @@ export class DashPlayer implements PlayerController {
         // 流模式：通过服务器代理预下载头部
         this.initInfo = await this.preloadInitSegment(this.videoUrl)
       }
+      ensureNotDisposed()
 
       // 2. 生成 MPD manifest（含 SegmentBase/indexRange，如果解析到 sidx）
       const mpd = this.generateMpd()
@@ -195,10 +209,12 @@ export class DashPlayer implements PlayerController {
       // 3. 包装成 Blob URL
       const blob = new Blob([mpd], { type: 'application/dash+xml' })
       this.mpdBlobUrl = URL.createObjectURL(blob)
+      ensureNotDisposed()
 
       // 4. 创建 dash.js 实例
       const player = dashjs.MediaPlayer().create()
       this.dashPlayer = player
+      ensureNotDisposed()
 
       // 5. 配置 dash.js
       //    - 禁用 ABR 自动切换（B站 DASH 只有一个 Representation，ABR 无意义）
@@ -276,16 +292,25 @@ export class DashPlayer implements PlayerController {
       //     失败自动回退到 HTTP（dash.js 原生 loader）。
       if (this.p2pEnabled && !this.isBufferMode) {
         await this.setupP2P(player)
+        ensureNotDisposed()
       }
 
       // 7. 等待 metadata 加载（video.readyState >= 1）
       await this.waitForMetadata()
+      // attach 期间外部已 cleanup：不再置为 attached（避免覆盖 disposed 状态
+      // 导致孤儿 dash.js 实例与 blob URL 无法再被清理）
+      ensureNotDisposed()
 
       this.state = 'attached'
       return this.mpdBlobUrl
     } catch (err) {
+      this.attachAbort?.abort()
       this.cleanup()
       throw err
+    } finally {
+      // attach 结束（成功/失败/被取消）统一释放取消器：
+      // 成功时头部队据已读完；失败路径 catch 与 cleanup 均已 abort 并置空。
+      this.attachAbort = null
     }
   }
 
@@ -379,7 +404,7 @@ export class DashPlayer implements PlayerController {
    *
    * dash.js 的 seek 机制：设置 video.currentTime = x 后，
    * dash.js 内部自动 abort 旧下载、清空 SourceBuffer、按需 Range 重新下载目标位置的 segment。
-   * 不需要像 MsePlayer 那样手动管理 SourceBuffer 清理 + init segment 重 append。
+   * 无需手动管理 SourceBuffer 清理与 init segment 重 append。
    *
    * 等待 seeked 事件后再返回，避免 seek-service 的 isReloadingRef 过早释放
    * 导致后续 seeking 事件触发循环 seek。
@@ -387,6 +412,13 @@ export class DashPlayer implements PlayerController {
   async seekTo(targetTime: number): Promise<SeekResult> {
     if (!this.isAttached) {
       return { success: false, message: 'DashPlayer 未 attach' }
+    }
+    // 重入保护：上一次 seek 尚未完成（waitForSeeked 中）时拒绝新请求。
+    // 否则两个并发 seekTo 的 waitForSeeked 会被同一个 seeked 事件提前 resolve，
+    // 且第二个的 currentTime 赋值会打断第一个的下载。
+    // 调用方（seek-service）对 busy 结果会记录为 pending 目标，锁释放后接续处理。
+    if (this.state === 'seeking') {
+      return { success: false, busy: true, message: 'DashPlayer 正在 seek' }
     }
 
     const prevState = this.state
@@ -440,6 +472,9 @@ export class DashPlayer implements PlayerController {
   /** 清理所有资源：销毁 dash.js 实例 + revoke 所有 Blob URL */
   cleanup(): void {
     this.state = 'disposed'
+    // 取消 attach 进行中的网络请求（init segment 预读 / sidx 扫描）
+    this.attachAbort?.abort()
+    this.attachAbort = null
     // 先销毁 P2P 引擎：避免在 dash.js 销毁后还触发 P2P 回调导致异常
     if (this.p2pEngine) {
       try {
@@ -573,7 +608,8 @@ export class DashPlayer implements PlayerController {
       : 'include'
 
     try {
-      const controller = new AbortController()
+      // 使用 attach 级取消器：cleanup（切源）时立即中断预读
+      const controller = this.attachAbort ?? new AbortController()
       const response = await fetch(proxyUrl, {
         headers: {
           Range: `bytes=0-${INIT_SEGMENT_PRELOAD_BYTES - 1}`,
@@ -699,7 +735,8 @@ export class DashPlayer implements PlayerController {
     info: DashPlayerInitInfo
   ): Promise<void> {
     try {
-      const controller = new AbortController()
+      // 使用 attach 级取消器：cleanup（切源）时立即中断 5MB 二次扫描
+      const controller = this.attachAbort ?? new AbortController()
       const response = await fetch(proxyUrl, {
         headers: {
           Range: `bytes=0-${SIDX_SCAN_BYTES - 1}`,

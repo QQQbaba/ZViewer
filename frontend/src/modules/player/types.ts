@@ -1,13 +1,13 @@
 /**
  * 播放器模块类型定义（v2 重写，接口契约保持不变）。
  *
- * 定义播放器引擎统一接口与源数据结构，使 MSE / HLS / FLV / Direct 四种引擎
+ * 定义播放器引擎统一接口与源数据结构，使 DASH / HLS / FLV / Direct 四种引擎
  * 在同一抽象下被 usePlayerSource 统一调度。
  */
 import type { MediaFormat } from '@/lib/mediaFormat'
 
 /** 引擎类型标识 */
-export type EngineType = 'mse' | 'hls' | 'flv' | 'direct' | 'dash'
+export type EngineType = 'hls' | 'flv' | 'direct' | 'dash'
 
 /**
  * seek 操作返回结果（公共类型，供 MSE / DASH 等引擎实现共享）。
@@ -26,9 +26,9 @@ export interface SeekResult {
 }
 
 /**
- * 引擎控制器接口：MSE / DASH 引擎实例的统一抽象。
+ * 引擎控制器接口：DASH 引擎实例的抽象。
  *
- * 使 usePlayerSource 可以用同一个 ref 类型持有 MsePlayer 或 DashPlayer 实例，
+ * 使 usePlayerSource 可以用统一的 ref 类型持有 DashPlayer 实例，
  * seek-service 通过此接口调用 seekTo，无需感知底层引擎实现。
  */
 export interface PlayerController {
@@ -123,9 +123,8 @@ export interface EngineAttachResult {
   /** 引擎创建的 blob URL（需由调用方在切换时 revokeObjectURL） */
   blobUrl?: string
   /**
-   * 引擎控制器实例（仅 MSE / DASH 引擎返回，供外部调用 seekTo）。
-   * 替代旧字段 msePlayer，使用 PlayerController 接口抽象，
-   * 使 usePlayerSource 可同时持有 MsePlayer 或 DashPlayer 实例。
+   * 引擎控制器实例（DASH 引擎返回，供外部调用 seekTo）。
+   * 使用 PlayerController 接口抽象，usePlayerSource 无需感知底层引擎实现。
    */
   player?: PlayerController
 }
