@@ -64,8 +64,9 @@ export function useViewerSync({
   seekTo,
   reloadVideo,
 }: UseViewerSyncOptions): UseViewerSyncReturn {
-  // 共享 ref：usePlaybackStateRequest attach 完成后写入，useViewerStateSync 读取
-  // 避免 useViewerStateSync 在 usePlaybackStateRequest 完成后误判 source 变化
+  // 共享 ref：usePlaybackStateRequest attach 开始前即写入，useViewerStateSync 读取
+  // 避免 useViewerStateSync 在 usePlaybackStateRequest 进行中误判 source 变化，
+  // 并发触发第二个 attach（两个并发 attach 互相 reset → 黑屏）。
   const lastAppliedSourceUrlRef = useRef<string | null>(null)
 
   // 1. 接收房主实时状态（房主在线时）

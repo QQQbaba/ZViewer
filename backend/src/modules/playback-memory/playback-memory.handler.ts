@@ -55,9 +55,11 @@ export class PlaybackMemoryHandler implements SocketEventHandler {
           );
 
           // 广播给房间内其他成员（不含 roomId，接收端按 socket 所在房间处理）
+          // seq 为房主侧递增序号，透传给观众用于跳号检测（错失广播时拉全量自愈）
           socket.to(payload.roomId).emit('watch-together-state', {
             state: payload.state,
             diff: payload.diff,
+            seq: payload.seq,
           });
           safeAck(callback, { success: true });
         } catch (err) {

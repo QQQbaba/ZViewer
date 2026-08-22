@@ -15,6 +15,7 @@ import type { Server as SocketIOServer, Socket } from 'socket.io';
 import type { AckCallback, SocketEventHandler } from '../socket';
 import { safeAck } from '../socket';
 import { roomPermissionService } from '../room/room-permission.service';
+import { playbackMemoryService } from '../playback-memory';
 import type { HeartbeatPayload } from '../shared/dto';
 
 export class HeartbeatHandler implements SocketEventHandler {
@@ -34,6 +35,20 @@ export class HeartbeatHandler implements SocketEventHandler {
               message: '无权限发送心跳',
             });
           }
+
+          // 心跳落盘（10s 节流，service 内部控制）：房主连续播放期间没有
+          // 离散 state 事件，外推基线会逐渐陈旧；心跳携带真实 currentTime，
+          // 合并进播放记忆后房主断线的服务器外推与恢复进度不再超前。
+          // 不 await：落盘失败不应阻塞心跳转发。
+          void playbackMemoryService
+            .applyHostHeartbeat(payload.roomId, {
+              currentTime: payload.currentTime,
+              isPlaying: payload.isPlaying,
+              playbackRate: payload.playbackRate,
+            })
+            .catch((err) => {
+              console.error('[host-heartbeat] applyHostHeartbeat error:', err);
+            });
 
           // 转发心跳给房间内其他成员（不含发送者、不含 roomId）
           // 保留旧事件兼容已连接客户端

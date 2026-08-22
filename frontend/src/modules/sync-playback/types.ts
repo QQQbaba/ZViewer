@@ -86,6 +86,8 @@ export interface StatePayload {
   state: WatchTogetherState
   /** 增量字段（P1-Opt#7）：存在时观众端合并到现有 state，不存在时用 state 全量覆盖 */
   diff?: Partial<WatchTogetherState>
+  /** 房主侧递增序号：观众检测跳号即请求全量状态自愈（避免 diff 基线错位） */
+  seq?: number
 }
 
 /** `host-heartbeat` 事件 payload：房主定时广播的轻量心跳信息 */

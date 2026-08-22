@@ -22,6 +22,7 @@ import {
   SOCKET_EVENT,
   safePlay,
 } from '@/modules/sync-playback'
+import { createSuppressRef, resetSuppression } from '@/modules/sync-playback/suppression'
 import { type MediaFormat } from '@/lib/mediaFormat'
 import {
   resolveMovieSource,
@@ -124,7 +125,10 @@ export function useWatchTogether({
     }))
   )
   const isHostRef = useRef(isHost)
-  const suppressEventsRef = useRef(false)
+  // 事件抑制采用计数式实现：多个异步流程（attach/恢复/seek/缓冲下载）重叠时，
+  // 任一流程完成只释放自己的一次抑制，不再误伤其他进行中的流程
+  // （旧单布尔实现存在"先完成者提前释放抑制窗口"导致事件泄漏广播的问题）。
+  const suppressEventsRef = createSuppressRef()
   const lastLoadedMovieRef = useRef<{ id: number; url: string } | null>(null)
   // 房主刷新恢复：用于在 loadMovie 完成后应用 initialPlayback.currentTime 并暂停
   // 通过 ref 暂存，避免修改 effect 依赖导致 loadMovie 重新触发
@@ -515,6 +519,8 @@ export function useWatchTogether({
       }
 
       setIsResolving(true)
+      // 新代际重置旧抑制（计数清零防悬挂），随后重新获取
+      resetSuppression(suppressEventsRef)
       suppressEventsRef.current = true
 
       const preserveTime = video.currentTime
@@ -823,6 +829,9 @@ export function useWatchTogether({
     autoReloadCountRef.current = 0
     autoReloadNotifiedRef.current = false
     setLoadMovieError(null)
+    // 新代际全局重置：旧流程的抑制语义作废（计数清零防止悬挂），
+    // 随后由本次 loadMovie 重新获取抑制
+    resetSuppression(suppressEventsRef)
 
     suppressEventsRef.current = true
     lastLoadedMovieRef.current = { id: movie.id, url: movie.url }
@@ -1204,6 +1213,8 @@ export function useWatchTogether({
       // 预览即新的加载代际：使进行中的 loadMovie / reloadBilibili 过期，
       // 避免它们迟到完成后覆盖预览源
       ++loadSeqRef.current
+      // 新代际重置旧抑制（计数清零防悬挂）
+      resetSuppression(suppressEventsRef)
 
       const newState: WatchTogetherState = {
         sourceUrl: params.url,

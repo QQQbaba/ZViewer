@@ -107,6 +107,11 @@ export interface SyncStatePayload {
   state: SyncStateDto;
   /** 增量字段（P1-Opt#7）：观众端合并到现有 state，不存在时用 state 全量覆盖 */
   diff?: Partial<SyncStateDto>;
+  /**
+   * 房主侧递增序号：观众检测到跳号（seq > lastSeq + 1）说明错失了中间
+   * 广播（socket 重连窗口），主动请求全量状态自愈，避免 diff 合并基线错位。
+   */
+  seq?: number;
 }
 
 /** 控制动作类型 */

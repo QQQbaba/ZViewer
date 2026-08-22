@@ -104,6 +104,9 @@ export function useViewerStateSync({
   const lastAppliedPlaybackRateRef = useRef<number | null>(null)
   // 缓冲模式：下载取消器，新 source 到来时取消未完成下载避免竞态
   const downloadAbortRef = useRef<AbortController | null>(null)
+  // 最近一次收到的广播序号：检测跳号（seq > lastSeq + 1）即说明错失了中间广播
+  // （socket 重连窗口），主动请求全量状态自愈，避免 diff 合并基线错位
+  const lastSeqRef = useRef(0)
 
   useEffect(() => {
     if (!socket || isHostRef.current) return
@@ -176,7 +179,10 @@ export function useViewerStateSync({
           useRoomStore.getState().setBufferProgress(null)
         }
 
-        await applySourceToVideo(video, state, undefined, blobs)
+        // 传入 state.currentTime 作为 startTime：引擎（DashPlayer）从该时间对应
+        // 的字节位置开始下载，而非从文件头顺序下载到目标位置才播放
+        // （房主切清晰度/换片时观众从房主当前进度起播，避免长缓冲）。
+        await applySourceToVideo(video, state, state.currentTime || undefined, blobs)
         // applySourceToVideo 后视频元素可能已替换，重新获取
         const currentVideo = videoRef.current
         if (!currentVideo) return
@@ -241,6 +247,17 @@ export function useViewerStateSync({
     }
 
     const handleState = (payload: StatePayload) => {
+      // 跳号检测：seq > lastSeq + 1 说明错失了中间广播（socket 重连窗口等），
+      // diff 合并基线已错位 → 强制丢弃 diff 用全量 state，并请求全量状态自愈。
+      if (typeof payload.seq === 'number' && payload.seq > 0) {
+        const lastSeq = lastSeqRef.current
+        if (lastSeq > 0 && payload.seq > lastSeq + 1) {
+          // 错失广播：用全量 state 覆盖（忽略 diff），并请求房主/服务器最新状态
+          socket?.emit(SOCKET_EVENT.REQUEST_STATE, { roomId })
+        }
+        lastSeqRef.current = payload.seq
+      }
+
       // P1-Opt#7：增量状态合并——优先使用 diff 合并到现有 state，避免全量替换
       const state = payload.diff
         ? mergeStateDiff(

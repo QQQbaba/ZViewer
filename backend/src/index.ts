@@ -358,6 +358,10 @@ async function bootstrap() {
     },
   });
 
+  // 注入 io：playbackMemoryService.isHostOnline 据此校验 hostSocketId 的
+  // socket 是否实际在线（后端重启后 DB 恢复的旧 socket id 已失效）
+  playbackMemoryService.setIo(io);
+
   app.use('/api/rooms', createRoomsRouter(io));
 
   // 周期性自动删除长期无人访问的房间

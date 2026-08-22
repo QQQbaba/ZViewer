@@ -43,6 +43,10 @@ export function useHostBroadcast({
   const { socket } = useSocket()
   // 最近一次广播的状态：用于浅比较跳过等价广播
   const lastStateRef = useRef<WatchTogetherState | null>(null)
+  // 广播序号：每次广播递增。观众检测跳号（seq > lastSeq + 1）即说明错失了
+  // 中间广播（socket 重连窗口），主动请求全量状态自愈——避免 diff 合并基线
+  // 错位导致的字段静默发散。
+  const seqRef = useRef(0)
 
   const broadcastState = useCallback(
     (state: WatchTogetherState) => {
@@ -62,7 +66,13 @@ export function useHostBroadcast({
       // 计算增量（P1-Opt#7）：观众端合并 diff 到现有 state，减少全量替换
       const diff = computeStateDiff(lastStateRef.current, stateWithCli)
       lastStateRef.current = stateWithCli
-      socket.emit(SOCKET_EVENT.STATE, { roomId, state: stateWithCli, diff })
+      seqRef.current += 1
+      socket.emit(SOCKET_EVENT.STATE, {
+        roomId,
+        state: stateWithCli,
+        diff,
+        seq: seqRef.current,
+      })
     },
     [socket, roomId, isHostRef]
   )
@@ -85,9 +95,14 @@ export function useHostBroadcast({
     if (movieId != null) {
       newState.hostCliEnabled = getBilibiliParseOptions(movieId).cliEnabled
     }
-    // forceSync 总是广播，跳过浅比较
+    // forceSync 总是广播，跳过浅比较；seq 递增以触发观众端无条件全量应用
     lastStateRef.current = newState
-    socket.emit(SOCKET_EVENT.STATE, { roomId, state: newState })
+    seqRef.current += 1
+    socket.emit(SOCKET_EVENT.STATE, {
+      roomId,
+      state: newState,
+      seq: seqRef.current,
+    })
   }, [socket, roomId, isHostRef, videoRef])
 
   return {

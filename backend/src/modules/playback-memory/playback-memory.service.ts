@@ -26,6 +26,9 @@ import type { StorageAdapter } from '../../services/storage';
 /** DB 写入节流间隔（毫秒）。房主高频更新时避免每次都写 DB。 */
 const DB_WRITE_THROTTLE_MS = 2000;
 
+/** 房主心跳落盘节流间隔（毫秒）。心跳每 5s 一次，10s 节流保证外推基线新鲜。 */
+const HEARTBEAT_PERSIST_THROTTLE_MS = 10000;
+
 /** 缓存清理间隔（毫秒）。每隔 30s 清理一次房主离线且无观众的陈旧缓存。 */
 const CACHE_CLEANUP_INTERVAL_MS = 30000;
 
@@ -46,12 +49,22 @@ export class PlaybackMemoryService {
   private readonly cache = new Map<string, CachedPlayback>();
   /** 可选的存储适配器（#16）：写穿透到 Redis，用于多实例状态共享 */
   private storageAdapter: StorageAdapter<PlaybackStateDto> | null = null;
+  /** Socket.IO 实例（可选）：用于校验 hostSocketId 对应的 socket 是否实际在线 */
+  private io: import('socket.io').Server | null = null;
 
   /**
    * 设置存储适配器（#16 Redis 多实例支持）。
    */
   setStorageAdapter(adapter: StorageAdapter<PlaybackStateDto>): void {
     this.storageAdapter = adapter;
+  }
+
+  /**
+   * 注入 Socket.IO 实例：isHostOnline 据此校验 hostSocketId 的 socket
+   * 是否实际在线（后端重启后从 DB 恢复的 hostSocketId 是失效的旧值）。
+   */
+  setIo(io: import('socket.io').Server): void {
+    this.io = io;
   }
 
   /**
@@ -170,13 +183,52 @@ export class PlaybackMemoryService {
   }
 
   /**
-   * 检查房主是否在线（hostSocketId 不为 null）。
+   * 检查房主是否在线。
+   *
+   * hostSocketId 非空仅代表"曾经注册过"：后端重启后从 DB 恢复的状态携带的是
+   * 已失效的旧 socket id，仅判非空会让 playbackBroadcaster 永远跳过接力广播、
+   * cleanupStaleCache 永远跳过清理。因此注入 io 后进一步校验 socket 实际在线。
    */
   isHostOnline(roomId: string): boolean {
     const cached = this.cache.get(roomId);
     if (!cached) return false;
     const hostSocketId = (cached.state as PlaybackStateDto & { hostSocketId?: string | null }).hostSocketId;
-    return !!hostSocketId;
+    if (!hostSocketId) return false;
+    if (this.io) {
+      return this.io.sockets.sockets.has(hostSocketId);
+    }
+    return true;
+  }
+
+  /**
+   * 应用房主心跳到播放记忆（仅更新进度字段，不覆盖源信息）。
+   *
+   * 房主在线期间离散 state/control 事件之外的连续播放不产生持久化更新，
+   * 外推基线（updatedAt + currentTime）会逐渐偏离真实进度；房主断线时
+   * 服务器外推与房主恢复进度均超前。心跳每 5s 携带真实 currentTime，
+   * 在此以 10s 节流合并进内存缓存并落盘，保证基线新鲜且 DB 写入频率可控。
+   */
+  async applyHostHeartbeat(
+    roomId: string,
+    heartbeat: { currentTime: number; isPlaying: boolean; playbackRate: number },
+  ): Promise<void> {
+    const cached = this.cache.get(roomId);
+    // 无既有状态（房主尚未广播过完整 state）时不创建：
+    // 心跳缺少 sourceUrl 等字段，无法构成完整播放状态。
+    if (!cached) return;
+
+    const now = Date.now();
+    cached.state.currentTime = heartbeat.currentTime;
+    cached.state.isPlaying = heartbeat.isPlaying;
+    if (heartbeat.playbackRate > 0) {
+      cached.state.playbackRate = heartbeat.playbackRate;
+    }
+    cached.state.updatedAt = now;
+
+    if (now - cached.lastDbWriteAt > HEARTBEAT_PERSIST_THROTTLE_MS) {
+      cached.dirty = true;
+      await this.flushToDb(roomId);
+    }
   }
 
   /**
