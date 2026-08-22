@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/Switch'
 import { Slider } from '@/components/ui/Slider'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
-import type { SubtitleTrack } from '@/hooks/useSubtitles'
+import type { SubtitleTrack, EmbeddedTrackInfo } from '@/hooks/useSubtitles'
 import {
   DanmakuStylePanel,
   DanmakuAdvancedSettings,
@@ -58,8 +58,11 @@ interface SettingsPanelProps {
   onChangeSubtitleOffset?: (offset: number) => void
   onAutoSearchSubtitles?: () => Promise<number>
   canAutoSearchSubtitles?: boolean
-  onLoadEmbeddedSubtitles?: () => Promise<number>
   canLoadEmbeddedSubtitles?: boolean
+  /** 列出视频文件的内嵌字幕轨道（仅探测，不提取）。 */
+  onListEmbeddedTracks?: () => Promise<EmbeddedTrackInfo[]>
+  /** 提取指定一条内嵌字幕轨道并加入播放。 */
+  onExtractEmbeddedTrack?: (track: EmbeddedTrackInfo) => Promise<number>
   onDanmakuStyleChange?: (updates: Partial<DanmakuStyleState>) => void
   onDanmakuFilterChange?: (updates: Partial<DanmakuTypeFilters>) => void
   onDanmakuAdvancedChange?: (updates: Partial<DanmakuAdvancedStyle>) => void
@@ -90,8 +93,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onChangeSubtitleOffset,
     onAutoSearchSubtitles,
     canAutoSearchSubtitles,
-    onLoadEmbeddedSubtitles,
     canLoadEmbeddedSubtitles,
+    onListEmbeddedTracks,
+    onExtractEmbeddedTrack,
     onDanmakuStyleChange,
     onDanmakuFilterChange,
     onDanmakuAdvancedChange,
@@ -108,6 +112,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const [autoSearchMsg, setAutoSearchMsg] = useState('')
   const [embeddedLoading, setEmbeddedLoading] = useState(false)
   const [embeddedMsg, setEmbeddedMsg] = useState('')
+  const [embeddedTracks, setEmbeddedTracks] = useState<EmbeddedTrackInfo[]>([])
+  const [embeddedListLoading, setEmbeddedListLoading] = useState(false)
+  const [extractingIndex, setExtractingIndex] = useState<number | null>(null)
   const [browserOpen, setBrowserOpen] = useState(false)
   const subtitleFileInputRef = useRef<HTMLInputElement>(null)
 
@@ -147,19 +154,34 @@ export function SettingsPanel(props: SettingsPanelProps) {
     }
   }
 
-  const handleLoadEmbedded = async () => {
-    if (embeddedLoading || !onLoadEmbeddedSubtitles) return
-    setEmbeddedLoading(true)
+  const handleListEmbedded = async () => {
+    if (embeddedListLoading || !onListEmbeddedTracks) return
+    setEmbeddedListLoading(true)
     setEmbeddedMsg('')
     try {
-      const count = await onLoadEmbeddedSubtitles()
-      setEmbeddedMsg(
-        count > 0 ? `提取 ${count} 条内嵌字幕` : '未检测到内嵌字幕'
-      )
+      const tracks = await onListEmbeddedTracks()
+      setEmbeddedTracks(tracks)
+      if (tracks.length === 0) setEmbeddedMsg('未检测到内嵌字幕')
+    } catch {
+      setEmbeddedMsg('检测失败')
+    } finally {
+      setEmbeddedListLoading(false)
+    }
+  }
+
+  const handleExtractEmbedded = async (track: EmbeddedTrackInfo) => {
+    if (embeddedLoading || !onExtractEmbeddedTrack) return
+    setEmbeddedLoading(true)
+    setEmbeddedMsg('')
+    setExtractingIndex(track.index)
+    try {
+      const count = await onExtractEmbeddedTrack(track)
+      setEmbeddedMsg(count > 0 ? `已提取「${track.label}」` : '提取失败')
     } catch {
       setEmbeddedMsg('提取失败')
     } finally {
       setEmbeddedLoading(false)
+      setExtractingIndex(null)
       setTimeout(() => setEmbeddedMsg(''), 3000)
     }
   }
@@ -412,46 +434,89 @@ export function SettingsPanel(props: SettingsPanelProps) {
                           )}
                         </>
                       )}
-                      {canLoadEmbeddedSubtitles && onLoadEmbeddedSubtitles && (
-                        <>
-                          <div
-                            className="border-t pt-1"
-                            style={{
-                              borderColor:
-                                'color-mix(in srgb, var(--md-sys-color-outline) 20%, transparent)',
-                            }}
-                          />
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="h-7 w-full justify-center gap-1 text-xs"
-                            disabled={embeddedLoading}
-                            icon={
-                              embeddedLoading ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <FileText className="h-3 w-3" />
-                              )
-                            }
-                            onClick={handleLoadEmbedded}
-                          >
-                            {embeddedLoading ? '提取中...' : '提取内嵌字幕'}
-                          </Button>
-                          {embeddedMsg && (
+                      {canLoadEmbeddedSubtitles &&
+                        onListEmbeddedTracks &&
+                        onExtractEmbeddedTrack && (
+                          <>
                             <div
-                              className="text-center text-[10px]"
+                              className="border-t pt-1"
                               style={{
-                                color:
-                                  embeddedMsg === '提取失败'
-                                    ? 'var(--md-sys-color-error)'
-                                    : 'var(--md-sys-color-on-surface-variant)',
+                                borderColor:
+                                  'color-mix(in srgb, var(--md-sys-color-outline) 20%, transparent)',
                               }}
+                            />
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="h-7 w-full justify-center gap-1 text-xs"
+                              disabled={embeddedListLoading || embeddedLoading}
+                              icon={
+                                embeddedListLoading ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <FileText className="h-3 w-3" />
+                                )
+                              }
+                              onClick={handleListEmbedded}
                             >
-                              {embeddedMsg}
-                            </div>
-                          )}
-                        </>
-                      )}
+                              {embeddedListLoading ? '检测中...' : '内嵌字幕轨道'}
+                            </Button>
+                            {embeddedTracks.length > 0 && (
+                              <div className="mt-1 flex flex-col gap-0.5">
+                                <div
+                                  className="text-[11px] font-medium uppercase tracking-wide"
+                                  style={{
+                                    color:
+                                      'var(--md-sys-color-on-surface-variant)',
+                                  }}
+                                >
+                                  可提取轨道
+                                </div>
+                                {embeddedTracks.map((t) => {
+                                  const extracting = extractingIndex === t.index
+                                  return (
+                                    <button
+                                      key={t.index}
+                                      type="button"
+                                      disabled={embeddedLoading}
+                                      onClick={() => handleExtractEmbedded(t)}
+                                      className={cn(
+                                        'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                                        extracting
+                                          ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                                          : 'text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                                      )}
+                                    >
+                                      <span className="truncate">
+                                        {t.label}
+                                      </span>
+                                      <span className="ml-auto shrink-0 text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                                        {t.codecName}
+                                      </span>
+                                      {extracting && (
+                                        <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                                      )}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            )}
+                            {embeddedMsg && (
+                              <div
+                                className="text-center text-[10px]"
+                                style={{
+                                  color:
+                                    embeddedMsg === '提取失败' ||
+                                    embeddedMsg === '检测失败'
+                                      ? 'var(--md-sys-color-error)'
+                                      : 'var(--md-sys-color-on-surface-variant)',
+                                }}
+                              >
+                                {embeddedMsg}
+                              </div>
+                            )}
+                          </>
+                        )}
                       {canAutoSearchSubtitles &&
                         browseMovieId != null &&
                         onAddSubtitleContent && (

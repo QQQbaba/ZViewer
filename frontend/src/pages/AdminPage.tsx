@@ -123,6 +123,7 @@ interface AdminSettings {
   dashDisabled: boolean
   cdnAccelerate: boolean
   cdnProxyUrl: string
+  embeddedSubtitleEnabled: boolean
   dataSourceConfig?: {
     aniSubsSubscriptions?: string[]
     kazumiRules?: string[]
@@ -154,6 +155,7 @@ export default function AdminPage() {
     dashDisabled: false,
     cdnAccelerate: false,
     cdnProxyUrl: 'https://gh-proxy.com',
+    embeddedSubtitleEnabled: true,
   })
   const [loading, setLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -862,6 +864,7 @@ export default function AdminPage() {
         dashDisabled: settings.dashDisabled,
         cdnAccelerate: settings.cdnAccelerate,
         cdnProxyUrl: settings.cdnProxyUrl,
+        embeddedSubtitleEnabled: settings.embeddedSubtitleEnabled,
       }
       if (settings.dataSourceConfig) {
         payload.dataSourceConfig = settings.dataSourceConfig
@@ -1785,6 +1788,22 @@ export default function AdminPage() {
                       </>
                     )
                   })()}
+                </div>
+
+                <div className="mb-6">
+                  <Switch
+                    label="允许内嵌字幕（仅服务器中转）"
+                    checked={settings.embeddedSubtitleEnabled}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        embeddedSubtitleEnabled: e.target.checked,
+                      }))
+                    }
+                  />
+                  <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                    开启后，视频走服务器中转（后端可直接访问视频字节）时可识别并播放视频内封字幕轨道；直链模式不支持。
+                  </p>
                 </div>
 
                 <Title level={5} className="mb-4 mt-6">

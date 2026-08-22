@@ -54,6 +54,7 @@ import {
   resolveFfmpegPath,
   probeMediaInfo,
   extractSubtitleTrack,
+  mapCodecToSubtitleFormat,
   needsAudioTranscode,
   isFfmpegTranscodeCapable,
   createAudioTranscodeStream,
@@ -677,13 +678,15 @@ router.get('/extract-subtitle', async (req: AuthenticatedRequest, res: Response)
       return;
     }
 
-    const content = await extractSubtitleTrack(targetAbs, streamIndex);
+    // 按轨道编码选择输出格式（ass/ssa → ass 保留样式，webvtt → webvtt，其余 srt）
+    const format = mapCodecToSubtitleFormat(subStream.codecName);
+    const content = await extractSubtitleTrack(targetAbs, streamIndex, format);
     const label = subStream.title || subStream.language || `轨道 ${streamIndex}`;
 
     res.json({
       success: true,
       content,
-      format: 'srt',
+      format,
       label,
       language: subStream.language,
     });

@@ -19,6 +19,53 @@ export interface SubtitleTrack {
   lang?: string
 }
 
+/** 服务器文件内嵌字幕轨道（含用于展示的 label）。 */
+export interface EmbeddedTrackInfo {
+  index: number
+  codecName: string
+  language: string | null
+  title: string | null
+  label: string
+}
+
+/**
+ * 内嵌字幕提取的源描述。
+ * - server-files：后端本地文件路径
+ * - webdav / openlist：挂载源，仅服务器中转（directLink=false）时后端可访问并 ffmpeg 提取
+ * - emby / jellyfin：直接用其自带字幕接口（PlaybackInfo / Subtitles Stream），不受直链限制
+ */
+export type EmbeddedSource =
+  | { kind: 'server-files'; path: string }
+  | { kind: 'webdav'; movieId: number }
+  | { kind: 'openlist'; movieId: number }
+  | { kind: 'emby'; movieId: number }
+  | { kind: 'jellyfin'; movieId: number }
+
+/** 后端字幕提取返回的格式 → subtitleParser 的 SubtitleFormat（'webvtt' → 'vtt'）。 */
+function mapOutputFormat(format: string): SubtitleFormat {
+  switch (format) {
+    case 'ass':
+      return 'ass'
+    case 'webvtt':
+      return 'vtt'
+    case 'smi':
+      return 'smi'
+    case 'sub':
+      return 'sub'
+    default:
+      return 'srt'
+  }
+}
+
+/** 生成内封字幕轨道的展示标签。 */
+function embeddedTrackLabel(track: {
+  title?: string | null
+  language?: string | null
+  index: number
+}): string {
+  return track.title || track.language || `轨道 ${track.index}`
+}
+
 export interface SubtitleState {
   subtitleEnabled: boolean
   subtitleTracks: SubtitleTrack[]
@@ -299,8 +346,11 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
       for (const track of tracks) {
         try {
           const result = await extractEmbeddedSubtitle(filePath, track.index)
-          const cues = parseSubtitle(result.content, 'srt')
-          const label = track.title || track.language || `轨道 ${track.index}`
+          const cues = parseSubtitle(
+            result.content,
+            mapOutputFormat(result.format)
+          )
+          const label = embeddedTrackLabel(track)
           loaded.push({ cues, label, lang: track.language || undefined })
         } catch (err) {
           console.error(
@@ -326,6 +376,116 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         return next
       })
       return loaded.length
+    },
+    [isHost, broadcast]
+  )
+
+  /**
+   * 列出视频文件内的内嵌字幕轨道（仅探测，不提取内容）。
+   * 供 UI 先展示可用轨道，再由用户挑选某一条提取播放。
+   */
+  const listEmbeddedTracks = useCallback(
+    async (source: EmbeddedSource): Promise<EmbeddedTrackInfo[]> => {
+      if (!isHost) return []
+      try {
+        if (source.kind === 'server-files') {
+          const resolved = await resolveServerFile(source.path)
+          const tracks = resolved.subtitleTracks ?? []
+          return tracks.map((t) => ({
+            index: t.index,
+            codecName: t.codecName,
+            language: t.language,
+            title: t.title,
+            label: embeddedTrackLabel(t),
+          }))
+        }
+        // 挂载源（服务器中转）：通过 movieId 走后端探测端点
+        const res = await apiFetch(
+          `/api/subtitles/embedded-tracks?movieId=${source.movieId}`
+        )
+        const data = (await res.json()) as {
+          success: boolean
+          tracks?: EmbeddedTrackInfo[]
+          message?: string
+        }
+        if (!res.ok || !data.success || !data.tracks) {
+          throw new Error(data.message || '获取内嵌字幕轨道失败')
+        }
+        return data.tracks
+      } catch (err) {
+        console.error('[useSubtitles] list embedded tracks failed:', err)
+        return []
+      }
+    },
+    [isHost]
+  )
+
+  /**
+   * 提取指定一条内嵌字幕轨道并添加为可播放的字幕轨道。
+   * 用后端返回的格式解析（ass/webvtt/srt），保留 ASS 样式。
+   */
+  const extractEmbeddedTrack = useCallback(
+    async (
+      source: EmbeddedSource,
+      track: EmbeddedTrackInfo
+    ): Promise<number> => {
+      if (!isHost) return 0
+      try {
+        let content: string
+        let format: string
+        let label: string
+        let language: string | null
+        if (source.kind === 'server-files') {
+          const result = await extractEmbeddedSubtitle(source.path, track.index)
+          content = result.content
+          format = result.format
+          label = result.label
+          language = result.language
+        } else {
+          const res = await apiFetch(
+            `/api/subtitles/embedded-extract?movieId=${source.movieId}&index=${track.index}`
+          )
+          const data = (await res.json()) as {
+            success: boolean
+            content?: string
+            format?: string
+            label?: string
+            language?: string | null
+            message?: string
+          }
+          if (!res.ok || !data.success || !data.content) {
+            throw new Error(data.message || '提取内嵌字幕失败')
+          }
+          content = data.content
+          format = data.format || 'srt'
+          label = data.label || `轨道 ${track.index}`
+          language = data.language ?? null
+        }
+        const cues = parseSubtitle(content, mapOutputFormat(format))
+        const newTrack: SubtitleTrack = {
+          cues,
+          label: track.label || label || embeddedTrackLabel(track),
+          lang: language || track.language || undefined,
+        }
+        setState((prev) => {
+          const next: SubtitleState = {
+            ...prev,
+            subtitleTracks: [...prev.subtitleTracks, newTrack],
+            subtitleEnabled: true,
+            activeTrackIndex: prev.subtitleTracks.length,
+          }
+          broadcast(next)
+          return next
+        })
+        return 1
+      } catch (err) {
+        console.error(
+          '[useSubtitles] extract embedded track failed:',
+          track.index,
+          err
+        )
+        return 0
+      }
     },
     [isHost, broadcast]
   )
@@ -383,6 +543,8 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     clearTracks,
     searchAutoSubtitles,
     loadEmbeddedSubtitles,
+    listEmbeddedTracks,
+    extractEmbeddedTrack,
     setFontSize,
     setOffset,
   }

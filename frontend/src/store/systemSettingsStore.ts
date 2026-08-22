@@ -17,6 +17,8 @@ export interface SystemSettings {
   cdnAccelerate: boolean
   /** CDN 代理地址（如 https://gh-proxy.com），对所有 GitHub 请求使用前缀代理 */
   cdnProxyUrl: string
+  /** 内嵌字幕功能开关：仅当视频走服务器中转（后端可直接访问视频字节）时可用 */
+  embeddedSubtitleEnabled: boolean
   dataSourceConfig?: Record<string, unknown> | null
 }
 
@@ -45,6 +47,7 @@ const DEFAULT_SETTINGS: SystemSettings = {
   dashDisabled: true,
   cdnAccelerate: false,
   cdnProxyUrl: 'https://gh-proxy.com',
+  embeddedSubtitleEnabled: true,
   dataSourceConfig: null,
 }
 

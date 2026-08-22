@@ -33,6 +33,28 @@ export interface EmbyUserInfo {
   ServerId: string;
 }
 
+/** Emby 媒体流（含字幕流），对应 MediaStreams 数组元素。 */
+export interface EmbyMediaStream {
+  Index: number;
+  Type: string; // 'Video' | 'Audio' | 'Subtitle'
+  Codec?: string;
+  Language?: string;
+  DisplayTitle?: string;
+  IsExternal?: boolean;
+  DeliveryMethod?: string; // 'External' | 'Embedded' | 'Hls' ...
+  DeliveryUrl?: string;
+}
+
+/** Emby 媒体源（MediaSource），含流列表。 */
+export interface EmbyMediaSource {
+  Id: string;
+  Path: string;
+  Container?: string;
+  DirectPlayUrl?: string;
+  TranscodingUrl?: string;
+  MediaStreams?: EmbyMediaStream[];
+}
+
 export interface EmbyItem {
   Id: string;
   Name: string;
@@ -44,23 +66,11 @@ export interface EmbyItem {
   /** 是否为文件（可播放） */
   IsFile?: boolean;
   /** 媒体源信息（PlaybackInfo 或带 Fields=MediaSources 时返回） */
-  MediaSources?: Array<{
-    Id: string;
-    Path: string;
-    Container?: string;
-    DirectPlayUrl?: string;
-    TranscodingUrl?: string;
-  }>;
+  MediaSources?: EmbyMediaSource[];
 }
 
 export interface EmbyPlaybackInfo {
-  MediaSources: Array<{
-    Id: string;
-    Path: string;
-    Container?: string;
-    DirectPlayUrl?: string;
-    TranscodingUrl?: string;
-  }>;
+  MediaSources: EmbyMediaSource[];
 }
 
 export interface EmbyClientOptions {
@@ -77,6 +87,8 @@ interface EmbyRequestOptions {
   body?: unknown;
   /** 使用 API Key 请求头（GET 用 query，POST 用 X-Emby-Token） */
   authHeader?: boolean;
+  /** 响应类型：默认 json；字幕等纯文本响应传 'text' */
+  responseType?: 'json' | 'text';
 }
 
 export class EmbyError extends Error {
@@ -155,6 +167,9 @@ export class EmbyClient {
         );
       }
       if (res.status === 204) return undefined as T;
+      if (reqOpts.responseType === 'text') {
+        return (await res.text()) as unknown as T;
+      }
       return (await res.json()) as T;
     } catch (err) {
       if (err instanceof EmbyError) throw err;
@@ -297,6 +312,27 @@ export class EmbyClient {
       method: 'POST',
       path: '/emby/Videos/ActiveEncodings/Delete',
       body: { DeviceId: deviceId, PlaySessionId: playSessionId },
+    });
+  }
+
+  /**
+   * 获取指定字幕轨道的内容文本（SRT/ASS/VTT）。
+   * GET /emby/Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream[.{ext}]
+   * Emby 会把内嵌字幕转封装为对应格式输出；外挂字幕同理返回文件内容。
+   */
+  async subtitleContent(
+    itemId: string,
+    mediaSourceId: string,
+    index: number,
+    ext?: string,
+  ): Promise<string> {
+    const suffix = ext ? `.${ext}` : '';
+    return this.request<string>({
+      path: `/emby/Videos/${encodeURIComponent(itemId)}/${encodeURIComponent(
+        mediaSourceId,
+      )}/Subtitles/${index}/Stream${suffix}`,
+      authHeader: true,
+      responseType: 'text',
     });
   }
 }

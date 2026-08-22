@@ -30,6 +30,7 @@ import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth
 import {
   listWebDAVDirectory,
   createWebDAVReadStream,
+  buildWebDAVDirectUrl,
   type WebDAVConnectionParams,
 } from '../services/webdav';
 
@@ -54,6 +55,16 @@ import {
   resolveSafePath,
   type RootRegistry,
 } from '../services/server-files/pathResolver';
+
+// 内嵌字幕探测与提取（ffmpeg/ffprobe）
+import {
+  probeMediaInfo,
+  extractSubtitleTrack,
+  mapCodecToSubtitleFormat,
+} from '../services/ffmpeg';
+
+// Emby 字幕（直接调用 Emby 自带的字幕接口）
+import { EmbyClient, createEmbyClientFromMount } from '../services/emby-client';
 
 const router = Router();
 
@@ -745,5 +756,236 @@ router.get('/load', async (req: AuthenticatedRequest, res: Response): Promise<vo
     }
   }
 });
+
+// ==================== 内嵌字幕（仅服务器中转） ====================
+
+/**
+ * 重建内嵌字幕探测所需的真实源 URL。
+ *
+ * 仅支持"服务器中转"的挂载源（webdav/openlist 且 directLink !== true）：
+ * - 服务器中转时后端能访问源字节并喂给 ffmpeg；直链模式浏览器直连源，后端无法访问。
+ */
+async function resolveEmbeddedSource(movie: Movie): Promise<{ url: string }> {
+  const source = (movie.source || '').toLowerCase();
+  if (source !== 'webdav' && source !== 'openlist') {
+    throw new Error('该源暂不支持内嵌字幕');
+  }
+  // 直链模式：浏览器直连源，后端无法用 ffmpeg 访问，禁用内嵌字幕
+  if (movie.directLink === true) {
+    throw new Error('直链模式不支持内嵌字幕，请改用服务器中转');
+  }
+  if (!movie.serverUrl || !movie.path) {
+    throw new Error('该影片未挂载服务器信息');
+  }
+  const creds = await fillCredentialsFromMount(movie);
+  if (source === 'openlist') {
+    // OpenList：通过 AList /api/fs/get 获取带签名的真实直链（无需额外请求头）
+    const info = await fetchOpenListFileInfo(
+      movie.serverUrl,
+      creds.username,
+      creds.password,
+      movie.path,
+    );
+    return { url: info.rawUrl };
+  }
+  // WebDAV：拼接带凭证的直链（内嵌 Basic Auth），ffmpeg 可直接访问
+  const url = buildWebDAVDirectUrl(
+    movie.serverUrl,
+    movie.path,
+    creds.username,
+    creds.password,
+  );
+  return { url };
+}
+
+/**
+ * 解析 Emby / Jellyfin 播放所需的客户端与用户（直接调用其自带字幕接口）。
+ *
+ * Emby / Jellyfin 字幕不依赖"服务器中转"：后端始终持有 serverUrl + API Key/凭证，
+ * 无论视频走直链还是服务器中转，都能调 PlaybackInfo / Subtitles Stream。
+ */
+async function resolveEmbyContext(movie: Movie): Promise<{
+  client: EmbyClient;
+  itemId: string;
+  userId: string;
+}> {
+  const source = (movie.source || '').toLowerCase();
+  if (source !== 'emby' && source !== 'jellyfin') {
+    throw new Error('该源暂不支持内嵌字幕');
+  }
+  if (!movie.serverUrl || !movie.path) {
+    throw new Error('该影片未挂载服务器信息');
+  }
+  const mount = await AppDataSource.getRepository(UserMount).findOneBy({
+    serverUrl: movie.serverUrl,
+    type: source === 'jellyfin' ? 'jellyfin' : 'emby',
+  });
+  const client = await createEmbyClientFromMount({
+    serverUrl: movie.serverUrl,
+    apiKey: mount?.apiKey,
+    username: movie.username || mount?.username || undefined,
+    password: movie.password || mount?.password || undefined,
+  });
+  let userId = mount?.embyUserId ?? '';
+  if (!userId) {
+    const me = await client.me();
+    userId = me.Id;
+  }
+  return { client, itemId: movie.path, userId };
+}
+
+/** Emby 字幕 codec → 提取后缀与前端解析格式。 */
+function mapEmbySubtitleFormat(
+  codec: string,
+): { ext?: string; format: 'srt' | 'ass' | 'vtt' } {
+  switch (codec) {
+    case 'ass':
+    case 'ssa':
+      return { ext: 'ass', format: 'ass' };
+    case 'webvtt':
+      return { ext: 'vtt', format: 'vtt' };
+    case 'srt':
+    case 'subrip':
+    default:
+      return { ext: undefined, format: 'srt' };
+  }
+}
+
+/**
+ * 列出视频的内嵌字幕轨道：
+ * - emby：直接读 Emby PlaybackInfo 的 MediaStreams（Type===Subtitle）
+ * - webdav / openlist：后端 ffmpeg 探测
+ */
+router.get(
+  '/embedded-tracks',
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const movieId = Number(req.query.movieId);
+      if (!Number.isFinite(movieId)) {
+        res.status(400).json({ success: false, message: '缺少或无效的 movieId 参数' });
+        return;
+      }
+      const movie = await AppDataSource.getRepository(Movie).findOneBy({ id: movieId });
+      if (!movie) {
+        res.status(400).json({ success: false, message: '影片不存在' });
+        return;
+      }
+      const source = (movie.source || '').toLowerCase();
+
+      if (source === 'emby' || source === 'jellyfin') {
+        const ctx = await resolveEmbyContext(movie);
+        const playback = await ctx.client.playbackInfo(ctx.itemId, ctx.userId);
+        const mediaSource = playback.MediaSources[0];
+        const subtitleStreams = (mediaSource?.MediaStreams ?? []).filter(
+          (s) => s.Type === 'Subtitle',
+        );
+        const tracks = subtitleStreams.map((t) => ({
+          index: t.Index,
+          codecName: t.Codec || 'unknown',
+          language: t.Language || null,
+          title: t.DisplayTitle || null,
+          label: t.DisplayTitle || t.Language || `轨道 ${t.Index}`,
+        }));
+        res.json({ success: true, tracks });
+        return;
+      }
+
+      const { url } = await resolveEmbeddedSource(movie);
+      const info = await probeMediaInfo(url);
+      const tracks = info.subtitleStreams.map((t) => ({
+        index: t.index,
+        codecName: t.codecName,
+        language: t.language,
+        title: t.title,
+        label: t.title || t.language || `轨道 ${t.index}`,
+      }));
+      res.json({ success: true, tracks });
+    } catch (err) {
+      console.error('[subtitles] embedded-tracks error:', err);
+      res.status(400).json({
+        success: false,
+        message: err instanceof Error ? err.message : '获取内嵌字幕轨道失败',
+      });
+    }
+  },
+);
+
+/**
+ * 提取指定内嵌字幕轨道内容：
+ * - emby：调 Emby Subtitles Stream 端点（Emby 自动转封装为 SRT/ASS/VTT）
+ * - webdav / openlist：后端 ffmpeg 提取
+ */
+router.get(
+  '/embedded-extract',
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const movieId = Number(req.query.movieId);
+      const streamIndex = Number(req.query.index);
+      if (!Number.isFinite(movieId) || !Number.isFinite(streamIndex)) {
+        res.status(400).json({ success: false, message: '缺少或无效的 movieId/index 参数' });
+        return;
+      }
+      const movie = await AppDataSource.getRepository(Movie).findOneBy({ id: movieId });
+      if (!movie) {
+        res.status(400).json({ success: false, message: '影片不存在' });
+        return;
+      }
+      const source = (movie.source || '').toLowerCase();
+
+      if (source === 'emby' || source === 'jellyfin') {
+        const ctx = await resolveEmbyContext(movie);
+        const playback = await ctx.client.playbackInfo(ctx.itemId, ctx.userId);
+        const mediaSource = playback.MediaSources[0];
+        const subStream = (mediaSource?.MediaStreams ?? []).find(
+          (s) => s.Type === 'Subtitle' && s.Index === streamIndex,
+        );
+        if (!subStream || !mediaSource) {
+          res.status(400).json({ success: false, message: '未找到指定的字幕轨道' });
+          return;
+        }
+        const { ext, format } = mapEmbySubtitleFormat(subStream.Codec || '');
+        const content = await ctx.client.subtitleContent(
+          ctx.itemId,
+          mediaSource.Id,
+          streamIndex,
+          ext,
+        );
+        const label = subStream.DisplayTitle || subStream.Language || `轨道 ${streamIndex}`;
+        res.json({
+          success: true,
+          content,
+          format,
+          label,
+          language: subStream.Language || null,
+        });
+        return;
+      }
+
+      const { url } = await resolveEmbeddedSource(movie);
+      const info = await probeMediaInfo(url);
+      const subStream = info.subtitleStreams.find((s) => s.index === streamIndex);
+      if (!subStream) {
+        res.status(400).json({ success: false, message: '未找到指定的字幕轨道' });
+        return;
+      }
+      const format = mapCodecToSubtitleFormat(subStream.codecName);
+      const content = await extractSubtitleTrack(url, streamIndex, format);
+      const label = subStream.title || subStream.language || `轨道 ${streamIndex}`;
+      res.json({
+        success: true,
+        content,
+        format,
+        label,
+        language: subStream.language,
+      });
+    } catch (err) {
+      console.error('[subtitles] embedded-extract error:', err);
+      res.status(400).json({
+        success: false,
+        message: err instanceof Error ? err.message : '提取内嵌字幕失败',
+      });
+    }
+  },
+);
 
 export default router;

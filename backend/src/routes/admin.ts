@@ -415,6 +415,7 @@ router.get(
           dashDisabled: settings.dashDisabled,
           cdnAccelerate: settings.cdnAccelerate,
           cdnProxyUrl: settings.cdnProxyUrl,
+          embeddedSubtitleEnabled: settings.embeddedSubtitleEnabled,
         },
       });
     } catch (err) {
@@ -432,7 +433,7 @@ router.put(
     res: import('express').Response,
   ): Promise<void> => {
     try {
-      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled, dashDisabled, cdnAccelerate, cdnProxyUrl } = req.body;
+      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled, dashDisabled, cdnAccelerate, cdnProxyUrl, embeddedSubtitleEnabled } = req.body;
 
       if (typeof autoDeleteInactiveRooms !== 'boolean') {
         res.status(400).json({
@@ -506,6 +507,13 @@ router.put(
         });
         return;
       }
+      if (embeddedSubtitleEnabled !== undefined && typeof embeddedSubtitleEnabled !== 'boolean') {
+        res.status(400).json({
+          success: false,
+          message: 'embeddedSubtitleEnabled 必须是布尔值',
+        });
+        return;
+      }
       const settingsRepo = AppDataSource.getRepository(SystemSettings);
       const settings = await getSystemSettings();
       settings.autoDeleteInactiveRooms = autoDeleteInactiveRooms;
@@ -534,6 +542,9 @@ router.put(
       if (cdnProxyUrl !== undefined) {
         settings.cdnProxyUrl = cdnProxyUrl.trim();
       }
+      if (embeddedSubtitleEnabled !== undefined) {
+        settings.embeddedSubtitleEnabled = embeddedSubtitleEnabled;
+      }
       await settingsRepo.save(settings);
 
       res.json({
@@ -548,6 +559,7 @@ router.put(
           dashDisabled: settings.dashDisabled,
           cdnAccelerate: settings.cdnAccelerate,
           cdnProxyUrl: settings.cdnProxyUrl,
+          embeddedSubtitleEnabled: settings.embeddedSubtitleEnabled,
         },
       });
     } catch (err) {

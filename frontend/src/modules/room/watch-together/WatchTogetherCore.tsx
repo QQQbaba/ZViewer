@@ -21,11 +21,12 @@ import { Text } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
 import { Spinner } from '@/components/ui/Spinner'
 import { useSocket } from '@/hooks/useSocket'
-import { useSubtitles } from '@/hooks/useSubtitles'
+import { useSubtitles, type EmbeddedSource } from '@/hooks/useSubtitles'
 import { useCliAgent } from '@/hooks/useCliAgent'
 import { useRoomStore } from '@/store/roomStore'
 import { useDanmakuStore } from '@/store/danmakuStore'
 import { useCliAgentStore } from '@/store/cliAgentStore'
+import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import { getBilibiliParseOptions } from '@/modules/bilibili/parseOptions'
 import {
   DanmakuLayer,
@@ -151,6 +152,43 @@ export function WatchTogetherCore({
   // 字幕状态：房主操作广播同步，观众监听应用
   const subtitles = useSubtitles({ roomId, isHost })
 
+  // 内嵌字幕：仅当系统开关开启 && 视频走服务器中转（后端可访问视频字节）时才可用。
+  // - server-files：后端本地文件，恒为中转
+  // - webdav / openlist：仅 directLink=false（服务器中转）时后端可重建源 URL
+  const embeddedSubtitleEnabled = useSystemSettingsStore(
+    (s) => s.embeddedSubtitleEnabled
+  )
+  const embeddedSource: EmbeddedSource | null = (() => {
+    if (currentMovieSourceType === 'server-files' && currentMoviePath) {
+      return { kind: 'server-files', path: currentMoviePath }
+    }
+    // emby / jellyfin：直接调其自带字幕接口，后端始终能访问，不受直链/中转限制
+    if (
+      (currentMovieSourceType === 'emby' ||
+        currentMovieSourceType === 'jellyfin') &&
+      currentMovieId != null
+    ) {
+      return {
+        kind: currentMovieSourceType as 'emby' | 'jellyfin',
+        movieId: currentMovieId,
+      }
+    }
+    if (
+      (currentMovieSourceType === 'webdav' ||
+        currentMovieSourceType === 'openlist') &&
+      currentMovieId != null &&
+      !currentMovieDirectLink
+    ) {
+      return {
+        kind: currentMovieSourceType as 'webdav' | 'openlist',
+        movieId: currentMovieId,
+      }
+    }
+    return null
+  })()
+  const canEnableEmbedded =
+    isHost && embeddedSubtitleEnabled && embeddedSource !== null
+
   // ── 切换影片时自动搜索同目录字幕 + 内嵌字幕 ──────────────
   // 当房主切换到新影片时，清空旧字幕并：
   // - WebDAV/FTP/OpenList/服务器文件：在影片所在目录中搜索同名字幕文件
@@ -166,12 +204,22 @@ export function WatchTogetherCore({
     if (supportedSubtitleSources.includes(currentMovieSourceType)) {
       void subtitles.searchAutoSubtitles(currentMovieId)
     }
-    // 服务器文件：额外加载内嵌字幕轨道
-    if (currentMovieSourceType === 'server-files' && currentMoviePath) {
+    // 服务器文件：额外加载内嵌字幕轨道（仅开关开启）
+    if (
+      embeddedSubtitleEnabled &&
+      currentMovieSourceType === 'server-files' &&
+      currentMoviePath
+    ) {
       void subtitles.loadEmbeddedSubtitles(currentMoviePath)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentMovieId, isHost, currentMovieSourceType, currentMoviePath])
+  }, [
+    currentMovieId,
+    isHost,
+    currentMovieSourceType,
+    currentMoviePath,
+    embeddedSubtitleEnabled,
+  ])
 
   // ── CLI 代理上线后自动重新加载 ──────────────────────────
   // 页面刷新时 loadMovie 在 cliAgentStore.agents 填充之前就执行了，
@@ -1687,16 +1735,18 @@ export function WatchTogetherCore({
                 currentMovieId != null &&
                 supportedSubtitleSources.includes(currentMovieSourceType)
               }
-              onLoadEmbeddedSubtitles={
-                isHost && currentMoviePath
-                  ? () => subtitles.loadEmbeddedSubtitles(currentMoviePath)
+              onListEmbeddedTracks={
+                canEnableEmbedded && embeddedSource
+                  ? () => subtitles.listEmbeddedTracks(embeddedSource)
                   : undefined
               }
-              canLoadEmbeddedSubtitles={
-                isHost &&
-                currentMovieSourceType === 'server-files' &&
-                !!currentMoviePath
+              onExtractEmbeddedTrack={
+                canEnableEmbedded && embeddedSource
+                  ? (track) =>
+                      subtitles.extractEmbeddedTrack(embeddedSource, track)
+                  : undefined
               }
+              canLoadEmbeddedSubtitles={canEnableEmbedded}
               onDanmakuStyleChange={setStyle}
               onDanmakuFilterChange={setFilters}
               onDanmakuAdvancedChange={setAdvancedStyle}

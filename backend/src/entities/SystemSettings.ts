@@ -44,12 +44,21 @@ export class SystemSettings {
   dashDisabled!: boolean;
 
   /**
-   * 更新 CDN 加速开关。
+   * CDN 加速开关。
    * - true：更新检测和下载走 CDN 代理
    * - false：直连 GitHub
    */
   @Column({ type: 'boolean', default: false })
   cdnAccelerate!: boolean;
+
+  /**
+   * 内嵌字幕（embedded/muxed 字幕轨道）功能开关。
+   * 仅当视频走服务器中转（后端可直接访问视频字节）时内嵌字幕才可用：
+   * - server-files：后端本地文件，恒可用
+   * - webdav/openlist：仅 directLink=false（服务器中转）时可用，直链不可用
+   */
+  @Column({ type: 'boolean', default: true })
+  embeddedSubtitleEnabled!: boolean;
 
   /**
    * CDN 代理地址（含协议前缀），如 https://gh-proxy.com。
