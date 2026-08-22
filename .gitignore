@@ -1,35 +1,59 @@
+# ---- 依赖与构建产物 ----
 node_modules/
-.DS_Store
 dist/
-log/
 build/
-.workbuddy/
+.next/
+coverage/
+__pycache__/
+*.pyc
+.DS_Store
+
+# ---- 环境配置（含密钥，禁止提交） ----
 .env
 .env.local
 .env.*.local
+
+# ---- 日志 ----
+log/
 *.log
-.vscode/
-.idea/
-__pycache__/
-*.pyc
-.next/
-coverage/
-.trae/
-.update-temp/
-apply-update.bat
-# 数据库文件（�?B �?cookie、用户密码哈希等敏感数据，禁止提�?打包�?*.sqlite
+*.log.*
+
+# ---- 数据库文件（含用户信息、cookie、密码哈希等敏感数据，禁止提交） ----
+*.sqlite
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+*.db
+*.db-journal
 
-# 生产服务运行时状�?.prod.pids.json
-.prod.ports.json
+# ---- 运行时数据根目录 ----
+# 所有持久化数据（数据库、用户上传文件、头像、媒体切片、SSL 自签名证书等）
+# 统一存放在 config/ 目录下；升级时仅需保留 config/ 即可保留全部数据，
+# 首次部署时由后端自动创建。
+config/
 
-# 服务器文件上传目录（用户上传的视频等，不纳入版本控制�?# 旧路径：backend/uploads/
-# 新路径：config/uploads/（自 v2 起所有数据统一存放�?config/ 目录下）
+# ---- 后端旧上传路径（新路径统一在 config/uploads/） ----
 backend/uploads/
 
-# 数据根目录：所有持久化数据（数据库、用户上传文件、头像、NMS 媒体切片等）
-# 升级时仅需保留 config/ 目录即可保留全部数据；首次部署时由后端自动创�?config/
+# ---- SSL 证书与私钥（禁止提交） ----
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
 
-# 运行时日志目录（前后端实时日志与历史归档�?log/
+# ---- 生产服务运行时状态 ----
+.prod.pids.json
+.prod.ports.json
+apply-update.bat
+
+# ---- 本地测试产物 ----
+bili_test.json
+test-dev.sqlite
+
+# ---- 编辑器与 IDE ----
+.vscode/
+.idea/
+.trae/
+.workbuddy/
+.update-temp/
