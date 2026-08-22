@@ -205,6 +205,13 @@ export async function executeSeek(params: ExecuteSeekParams): Promise<boolean> {
     isReloadingRef.current = false
     suppressEventsRef.current = false
     useRoomStore.getState().setReloadingState(false, null)
+    // MSE seek 期间的 seeked 事件被 suppressEventsRef 吞掉（不发 seek 控制指令、
+    // 不更新服务器播放记忆），房主断线后外推基线会停留在 seek 前的旧进度。
+    // 此处补发一次 seeked 事件走正常广播链（handleSeeked 内有防抖与等价判断，
+    // 不会重复广播；handleSeeked 只广播、不会再触发 seek，无循环风险）。
+    if (handled) {
+      video.dispatchEvent(new Event('seeked'))
+    }
   }
   return handled
 }

@@ -271,10 +271,9 @@ export function useVideoSource({
   watchTogether,
   isHostRef,
 }: UseVideoSourceOptions): UseVideoSourceReturn {
-  const { attachSource, cleanup, seekTo, forceReload, playerRef } =
-    usePlayerSource({
-      videoRef,
-    })
+  const { attachSource, cleanup, seekTo, forceReload } = usePlayerSource({
+    videoRef,
+  })
   const restoredRef = useRef(false)
 
   const cleanupMedia = cleanup
@@ -293,18 +292,7 @@ export function useVideoSource({
       startTime?: number,
       blobs?: { videoBlob: Blob; audioBlob: Blob }
     ) => {
-      ;(window as unknown as { __srcDebug?: unknown[] }).__srcDebug =
-        (window as unknown as { __srcDebug?: unknown[] }).__srcDebug || []
-      ;(window as unknown as { __srcDebug?: unknown[] }).__srcDebug!.push({
-        step: 'applySourceToVideo',
-        sourceUrl: state.sourceUrl?.slice(0, 80),
-        format: state.format,
-        sourceType: state.sourceType,
-      })
       if (!state.sourceUrl) {
-        ;(window as unknown as { __srcDebug?: unknown[] }).__srcDebug!.push({
-          step: 'sourceUrl empty',
-        })
         return
       }
 
@@ -451,9 +439,6 @@ export function useVideoSource({
 
     const handleSeeking = () => {
       if (suppressEventsRef.current) {
-        console.warn(
-          `[useVideoSource] handleSeeking 跳过: suppressEventsRef=true targetTime=${video.currentTime}`
-        )
         return
       }
 
@@ -461,11 +446,6 @@ export function useVideoSource({
       // 由 executeSeek 记录为待处理目标，锁释放后接续处理（连续拖拽不丢目标）
       const targetTime = video.currentTime
       const state = useRoomStore.getState().watchTogether
-      const player = playerRef.current
-
-      console.warn(
-        `[useVideoSource] handleSeeking target=${targetTime.toFixed(1)}s isMseStream=${state.format === 'dash' || !!state.audioUrl} player=${!!player} isAttached=${player?.isAttached} isReloading=${isReloadingRef.current} bufferedRanges=${video.buffered.length} sourceUrl=${!!state.sourceUrl}`
-      )
 
       void executeSeek({
         video,
@@ -482,7 +462,7 @@ export function useVideoSource({
     return () => {
       video.removeEventListener('seeking', handleSeeking)
     }
-  }, [videoRef, seekTo, suppressEventsRef, reloadVideo, playerRef])
+  }, [videoRef, seekTo, suppressEventsRef, reloadVideo])
 
   return {
     applySourceToVideo,

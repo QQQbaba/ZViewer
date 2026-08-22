@@ -177,12 +177,6 @@ export class DashPlayer implements PlayerController {
     }
     this.state = 'attaching'
 
-    console.log(
-      `[DashPlayer] attach 开始: mode=${this.isBufferMode ? 'buffer' : 'stream'}, ` +
-        `startTime=${startTime?.toFixed(1) ?? '无'}, ` +
-        `videoUrl=${this.videoUrl.substring(0, 80)}...`
-    )
-
     try {
       // 1. 预下载/读取视频 m4s 头部，解析 sidx 和 moov 位置
       //    dash.js 需要 sidx 来实现 seek（计算目标时间对应的字节偏移）。
@@ -351,15 +345,6 @@ export class DashPlayer implements PlayerController {
           byteOffset += ref.referencedSize
         }
         info.segments = segments
-
-        console.log(
-          `[DashPlayer] 缓冲模式 sidx 解析:\n` +
-            `  sidx 数量: ${allSidx.length}\n` +
-            `  references: ${sidx.references.length}\n` +
-            `  累积时长: ${totalDuration.toFixed(1)}s (duration: ${this.duration ?? '未知'}s)\n` +
-            `  segments 数量: ${segments.length}\n` +
-            `  文件总大小: ${(blob.size / 1024 / 1024).toFixed(1)}MB`
-        )
 
         // sidx 覆盖不足时使用线性估算扩展
         if (this.duration && totalDuration < this.duration - 1) {
@@ -664,20 +649,6 @@ export class DashPlayer implements PlayerController {
           }
           info.segments = segments
 
-          console.log(
-            `[DashPlayer] sidx 详细信息（首次扫描 ${INIT_SEGMENT_PRELOAD_BYTES / 1024}KB）:\n` +
-              `  sidx 数量: ${allSidx.length}\n` +
-              `  第一个 sidx: references=${sidx.references.length}, range=${firstSidx.range}\n` +
-              `  timescale: ${sidx.timescale}\n` +
-              `  earliestPresentationTime: ${sidx.earliestPresentationTime}\n` +
-              `  firstOffset: ${sidx.firstOffset}\n` +
-              `  累积时长: ${totalDuration.toFixed(1)}s (后端权威 duration: ${this.duration ?? '未知'}s)\n` +
-              `  segments 数量: ${segments.length}\n` +
-              `  第一个 segment: start=${segments[0].startTime.toFixed(2)}s, byte=${segments[0].byteOffset}, size=${segments[0].byteSize}\n` +
-              `  最后一个 segment: start=${segments[segments.length - 1].startTime.toFixed(2)}s, byte=${segments[segments.length - 1].byteOffset}, size=${segments[segments.length - 1].byteSize}\n` +
-              `  文件总大小: ${info.totalSize ?? '未知'} bytes`
-          )
-
           if (this.duration && totalDuration < this.duration - 1) {
             console.warn(
               `[DashPlayer] sidx 覆盖不足 (${totalDuration.toFixed(1)}s < ${this.duration}s)`
@@ -706,9 +677,7 @@ export class DashPlayer implements PlayerController {
             }
           }
         } else {
-          console.log(
-            `[DashPlayer] 找到 sidx: range=${firstSidx.range}, references=${sidx?.references.length || 0}`
-          )
+          // 单 sidx 快速路径（info.segments 已由上方解析填充）
         }
       } else {
         console.warn('[DashPlayer] 未找到 sidx box，seek 可能无法正常工作')
@@ -748,11 +717,7 @@ export class DashPlayer implements PlayerController {
       const allSidx = findAllSidxInBuffer(buffer)
       info.sidxCount = allSidx.length
 
-      console.log(
-        `[DashPlayer] 二次扫描结果 (${SIDX_SCAN_BYTES / 1024 / 1024}MB): 找到 ${allSidx.length} 个 sidx box`
-      )
-
-      // 输出每个 sidx 的覆盖范围
+      // 累加每个 sidx 的覆盖时长
       let totalCoverage = 0
       for (let i = 0; i < allSidx.length; i++) {
         const sidx = allSidx[i].info
@@ -761,17 +726,11 @@ export class DashPlayer implements PlayerController {
             sidx.references.reduce((sum, r) => sum + r.subsegmentDuration, 0) /
             sidx.timescale
           totalCoverage += duration
-          console.log(
-            `[DashPlayer]   sidx[${i}]: range=${allSidx[i].range}, references=${sidx.references.length}, 时长=${duration.toFixed(1)}s`
-          )
         }
       }
 
       if (totalCoverage > 0) {
         info.sidxCoverage = totalCoverage
-        console.log(
-          `[DashPlayer] sidx 总覆盖时长: ${totalCoverage.toFixed(1)}s (duration: ${this.duration}s)`
-        )
       }
     } catch (err) {
       console.warn('[DashPlayer] 二次扫描异常:', err)
@@ -840,13 +799,6 @@ export class DashPlayer implements PlayerController {
       return segments
     }
 
-    console.log(
-      `[DashPlayer] 线性估算参数: coveredDuration=${coveredDuration.toFixed(1)}s, ` +
-        `coveredBytes=${coveredBytes}, duration=${duration}s, ` +
-        `totalSize=${validTotalSize ?? '无效'}, ` +
-        `estDuration=${estDuration.toFixed(2)}s, estSize=${estSize} bytes`
-    )
-
     const extended: DashSegmentInfo[] = [...segments]
     let currentTime = coveredDuration
     let byteOffset = coveredBytes
@@ -887,14 +839,6 @@ export class DashPlayer implements PlayerController {
       extendedCount++
     }
 
-    console.log(
-      `[DashPlayer] 线性估算扩展: ${segments.length} → ${extended.length} segments ` +
-        `(+${extendedCount} 估算), ` +
-        `覆盖 ${coveredDuration.toFixed(1)}s → ${currentTime.toFixed(1)}s, ` +
-        `字节 ${coveredBytes} → ${byteOffset} ` +
-        `(avg duration=${estDuration.toFixed(2)}s, avg size=${estSize} bytes)`
-    )
-
     return extended
   }
 
@@ -917,7 +861,6 @@ export class DashPlayer implements PlayerController {
     const videoCodec = this.videoCodec || 'avc1.64001E'
     const audioCodec = this.audioCodec || 'mp4a.40.2'
     const sidxRange = this.initInfo.sidxRange
-    const sidxCoverage = this.initInfo.sidxCoverage
     const segments = this.initInfo.segments
     const initEnd = this.initInfo.initEnd
 
@@ -970,9 +913,6 @@ ${timelineEntries}
 ${segmentUrls}
       </SegmentList>`
 
-      console.log(
-        `[DashPlayer] 使用 SegmentList+SegmentTimeline (${segments.length} 个 segments, 覆盖 ${sidxCoverage?.toFixed(1)}s)`
-      )
     } else if (sidxRange) {
       // fallback: SegmentBase + indexRange
       const sidxStart = parseInt(sidxRange.split('-')[0], 10)
@@ -980,7 +920,6 @@ ${segmentUrls}
       videoSegmentInfo = `<SegmentBase indexRange="${sidxRange}">
         <Initialization range="0-${initEndForBase}" />
       </SegmentBase>`
-      console.log(`[DashPlayer] 使用 SegmentBase+indexRange (fallback)`)
     }
 
     const mpd = `<?xml version="1.0" encoding="UTF-8"?>
@@ -999,8 +938,6 @@ ${segmentUrls}
     </AdaptationSet>
   </Period>
 </MPD>`
-
-    console.log('[DashPlayer] 生成的 MPD:', mpd)
 
     return mpd
   }

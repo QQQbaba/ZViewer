@@ -221,6 +221,8 @@ export function useWatchTogether({
       movie: Movie
     ): Promise<{ videoBlob: Blob; audioBlob: Blob }> => {
       const controller = new AbortController()
+      // 新下载开始前取消上一个未完成的下载，避免切影片/切清晰度后旧任务继续占用带宽
+      downloadAbortRef.current?.abort()
       downloadAbortRef.current = controller
 
       try {
@@ -252,12 +254,23 @@ export function useWatchTogether({
         }
         throw err
       } finally {
-        setBufferProgress(null)
-        downloadAbortRef.current = null
+        // 仅当 ref 仍指向本次 controller 时才清理：
+        // 旧下载晚于新下载结束时，不能把新下载的引用与进度一并清掉
+        if (downloadAbortRef.current === controller) {
+          downloadAbortRef.current = null
+          setBufferProgress(null)
+        }
       }
     },
     [setBufferProgress]
   )
+
+  // 组件卸载时取消进行中的缓冲下载，避免退房/离开页面后继续占用带宽
+  useEffect(() => {
+    return () => {
+      downloadAbortRef.current?.abort()
+    }
+  }, [])
 
   // B站 清晰度切换统一 Hook：封装 currentQuality/availableQualities/isSwitchingQuality
   // 状态及房主/观众/列表触发的切换逻辑。

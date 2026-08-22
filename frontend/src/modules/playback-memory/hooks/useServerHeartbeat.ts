@@ -181,8 +181,9 @@ export function useServerHeartbeat({
   useEffect(() => {
     if (!socket || isHostRef.current) return
 
-    socket.on(SOCKET_EVENT.SERVER_HEARTBEAT, handleServerHeartbeat)
-    // 统一心跳协议（#14）：监听从服务器发出的 sync-heartbeat（source='server'）
+    // 统一心跳协议（#14）：只监听 sync-heartbeat（source='server'）。
+    // 后端双发 server-heartbeat 与 sync-heartbeat，两者都绑定会导致
+    // 每条心跳被处理两遍（setWatchTogether 双倍 notify → 渲染翻倍），故不绑旧事件。
     const handleSyncHeartbeat = (payload: SyncHeartbeatPayload) => {
       if (payload.source === 'server' && payload.state) {
         handleServerHeartbeat({ roomId: '', state: payload.state })
@@ -191,7 +192,6 @@ export function useServerHeartbeat({
     socket.on(SOCKET_EVENT.SYNC_HEARTBEAT, handleSyncHeartbeat)
 
     return () => {
-      socket.off(SOCKET_EVENT.SERVER_HEARTBEAT, handleServerHeartbeat)
       socket.off(SOCKET_EVENT.SYNC_HEARTBEAT, handleSyncHeartbeat)
     }
   }, [socket, isHostRef, handleServerHeartbeat])

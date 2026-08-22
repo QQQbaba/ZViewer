@@ -30,34 +30,16 @@ const ENGINES: Record<EngineType, PlayerEngine> = {
 
 /** 根据源数据选择合适的播放引擎。 */
 export function selectEngine(source: PlayerSource): PlayerEngine {
-  const engineChoice = {
-    format: source.format,
-    audioUrl: !!source.audioUrl,
-    url: source.url?.slice(0, 80),
-    engine: '',
-  }
   // DASH 源或含独立音频轨 → dash.js 引擎
   // （自研 MSE 引擎暂时禁用，统一由 dash.js 处理双轨合并）
   if (source.format === 'dash' || source.audioUrl) {
-    engineChoice.engine = 'dash'
-    ;(window as unknown as { __engineChoice?: unknown }).__engineChoice =
-      engineChoice
     return ENGINES.dash
   }
   if (source.format === 'hls') {
-    engineChoice.engine = 'hls'
-    ;(window as unknown as { __engineChoice?: unknown }).__engineChoice =
-      engineChoice
     return ENGINES.hls
   }
   if (source.format === 'flv') {
-    engineChoice.engine = 'flv'
-    ;(window as unknown as { __engineChoice?: unknown }).__engineChoice =
-      engineChoice
     return ENGINES.flv
   }
-  engineChoice.engine = 'direct'
-  ;(window as unknown as { __engineChoice?: unknown }).__engineChoice =
-    engineChoice
   return ENGINES.direct
 }

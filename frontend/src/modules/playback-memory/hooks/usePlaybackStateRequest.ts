@@ -62,6 +62,8 @@ export function usePlaybackStateRequest({
   // 服务器暂无播放状态时的重试（房主可能刚开始播放 / 状态尚未持久化）
   const retryCountRef = useRef(0)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 缓冲模式下载的取消控制器：卸载/房间切换时中断下载，避免孤儿任务占用带宽
+  const downloadAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (!socket || isHostRef.current) return
@@ -98,6 +100,9 @@ export function usePlaybackStateRequest({
           const video = videoRef.current
           if (!video) return
 
+          const downloadController = new AbortController()
+          downloadAbortRef.current = downloadController
+
           suppressEventsRef.current = true
           setWatchTogether(state)
 
@@ -117,6 +122,7 @@ export function usePlaybackStateRequest({
                 state,
                 title: state.previewTitle,
                 onProgress: (p) => setBufferProgress(p),
+                signal: downloadController.signal,
               })
               return {
                 videoBlob: result.videoBlob,
@@ -201,6 +207,8 @@ export function usePlaybackStateRequest({
         clearTimeout(retryTimerRef.current)
         retryTimerRef.current = null
       }
+      downloadAbortRef.current?.abort()
+      downloadAbortRef.current = null
     }
   }, [
     socket,

@@ -489,8 +489,9 @@ export function useViewerHeartbeat({
       }
     }
 
-    socket.on(SOCKET_EVENT.HOST_HEARTBEAT, handleHeartbeat)
-    // 统一心跳协议（#14）：监听从房主发出的 sync-heartbeat（source='host'）
+    // 统一心跳协议（#14）：只监听 sync-heartbeat（source='host'）。
+    // 后端同时转发旧 host-heartbeat 与新 sync-heartbeat，若两者都绑定会导致
+    // 每条心跳被处理两遍（重复校正计算 + zustand 双倍 notify），故不再绑定旧事件。
     const handleSyncHeartbeat = (payload: SyncHeartbeatPayload) => {
       if (
         payload.source === 'host' &&
@@ -506,7 +507,6 @@ export function useViewerHeartbeat({
     }
     socket.on(SOCKET_EVENT.SYNC_HEARTBEAT, handleSyncHeartbeat)
     return () => {
-      socket.off(SOCKET_EVENT.HOST_HEARTBEAT, handleHeartbeat)
       socket.off(SOCKET_EVENT.SYNC_HEARTBEAT, handleSyncHeartbeat)
     }
   }, [socket, isHostRef, videoRef, suppressEventsRef])

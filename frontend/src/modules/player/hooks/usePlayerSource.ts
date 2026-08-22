@@ -116,6 +116,9 @@ export function usePlayerSource(
       }
     }
     playerRef.current = null
+    // 清空"已应用源"标记：引擎销毁后同 URL 重播不应被去重快速路径跳过，
+    // 否则清片/清理后再播放同一 URL 会黑屏。
+    appliedSourceUrlRef.current = null
   }, [])
 
   /**
@@ -125,10 +128,12 @@ export function usePlayerSource(
   const attachInner = useCallback(
     async (video: HTMLVideoElement, source: PlayerSource): Promise<void> => {
       const previousUrl = appliedSourceUrlRef.current
-      appliedSourceUrlRef.current = source.url
       try {
+        // cleanup 会清空 appliedSourceUrlRef（引擎销毁后旧标记失效），
+        // 因此新源的标记必须在 cleanup 之后写入。
         cleanup()
         resetVideoElement(video)
+        appliedSourceUrlRef.current = source.url
         const engine = selectEngine(source)
         const result = await engine.attach(video, source)
         if (result.blobUrl) {
@@ -147,19 +152,12 @@ export function usePlayerSource(
 
   const attachSource = useCallback(
     async (video: HTMLVideoElement, source: PlayerSource) => {
-      console.log('[attachSource] called:', {
-        url: source.url?.slice(0, 80),
-        format: source.format,
-        appliedSourceUrl: appliedSourceUrlRef.current?.slice(0, 80),
-      })
       if (!source.url) {
-        console.log('[attachSource] source.url is empty, returning')
         return
       }
 
       // 同一 sourceUrl 不重复加载（快速路径，不入队）
       if (appliedSourceUrlRef.current === source.url) {
-        console.log('[attachSource] duplicate url, returning')
         return
       }
 
@@ -167,18 +165,14 @@ export function usePlayerSource(
       // mkv 需 Chrome 91+ 且编码为 H.264/AAC。avi/flv/wmv/ts 等容器直接赋值会抛 NotSupportedError。
       // 预检放在更新 appliedSourceUrlRef 之前，失败时不污染"已应用"标记。
       if (source.format && !isBrowserPlayableFormat(source.format)) {
-        console.log('[attachSource] format not playable:', source.format)
         throw new Error(getUnsupportedFormatMessage(source.format))
       }
 
-      console.log('[attachSource] entering queue')
       await enqueue(async () => {
         // 入队期间可能已被其他操作应用了同一源（如 forceReload），再次去重
         if (appliedSourceUrlRef.current === source.url) {
-          console.log('[attachSource] duplicate after queue, returning')
           return
         }
-        console.log('[attachSource] calling attachInner')
         await attachInner(video, source)
       })
     },
@@ -232,7 +226,6 @@ export function usePlayerSource(
           pendingReloadRef.current = null
           cleanup()
           resetVideoElement(video)
-          appliedSourceUrlRef.current = null
           await attachInner(video, latest)
         })
       } finally {
