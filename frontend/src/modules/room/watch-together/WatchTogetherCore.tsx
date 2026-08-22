@@ -20,6 +20,7 @@ import { PlayerControlBar } from './PlayerControlBar'
 import { Text } from '@/components/ui/Typography'
 import { message } from '@/components/ui/message'
 import { Spinner } from '@/components/ui/Spinner'
+import { Button } from '@/components/ui/Button'
 import { useSocket } from '@/hooks/useSocket'
 import { useSubtitles, type EmbeddedSource } from '@/hooks/useSubtitles'
 import { useCliAgent } from '@/hooks/useCliAgent'
@@ -44,6 +45,7 @@ import type { MediaFormat } from '@/lib/mediaFormat'
 import { useVideoPlayingState } from '@/modules/art-player/useVideoPlayingState'
 import { SettingsPanel } from '@/components/VideoPlayer/SettingsPanel'
 import { SubtitleOverlay } from '@/components/VideoPlayer/SubtitleOverlay'
+import { isCliProxyUrl } from '@/modules/player/services/url-proxy'
 import type { ArtSlots } from './WatchTogetherPanel'
 import {
   isIOSDevice,
@@ -142,6 +144,8 @@ export function WatchTogetherCore({
     availableQualities,
     reloadVideo,
     reloadBilibili,
+    loadMovieError,
+    retryLoadMovie,
   } = useWatchTogether({
     roomId,
     isHost,
@@ -227,6 +231,8 @@ export function WatchTogetherCore({
   // 当 agents 从空变为非空时，若当前影片已启用 CLI 但视频源尚未走 CLI 代理，
   // 自动触发重新加载以应用 CLI 代理。
   const prevCliAgentsCountRef = useRef(0)
+  // CLI 上线自动重载的冷却时间戳：CLI 掉线重连（1→0→1）等场景 60s 内不重复触发
+  const lastCliAutoReloadAtRef = useRef(0)
   useEffect(() => {
     const prev = prevCliAgentsCountRef.current
     prevCliAgentsCountRef.current = cliAgentsCount
@@ -237,6 +243,14 @@ export function WatchTogetherCore({
     if (!cliEnabled) return
     const state = useRoomStore.getState().watchTogether
     if (state.sourceType !== 'bilibili' || !state.sourceUrl) return
+    // 当前源已经在走 CLI 代理：无需重载（避免 CLI 掉线重连时重复全量重解析）
+    if (isCliProxyUrl(state.sourceUrl) || isCliProxyUrl(state.audioUrl ?? '')) {
+      return
+    }
+    // 冷却：60s 内只自动重载一次
+    const now = Date.now()
+    if (now - lastCliAutoReloadAtRef.current < 60_000) return
+    lastCliAutoReloadAtRef.current = now
     if (isHost) {
       triggerReloadBilibili()
     } else {
@@ -1596,6 +1610,27 @@ export function WatchTogetherCore({
             fontSize={subtitles.subtitleFontSize}
             offset={subtitles.subtitleOffset}
           />,
+          slots.overlayRoot
+        )}
+
+      {/* 影片加载失败重试层（房主端 loadMovie 失败时显示）：
+          之前失败只有 toast，用户没有重试入口，只能切别的影片再切回 */}
+      {loadMovieError &&
+        isHost &&
+        createPortal(
+          <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-black/70">
+            <div className="text-center">
+              <div className="mb-1 text-base font-medium text-white">
+                视频加载失败
+              </div>
+              <div className="max-w-md px-6 text-xs text-white/60">
+                {loadMovieError}
+              </div>
+            </div>
+            <Button variant="primary" onClick={retryLoadMovie}>
+              重试
+            </Button>
+          </div>,
           slots.overlayRoot
         )}
 

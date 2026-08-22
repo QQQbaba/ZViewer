@@ -148,8 +148,38 @@ export function useWatchTogether({
   // （先结束的 finally 把 suppressEventsRef 重置为 false，但后结束的仍在解析中）
   // 以及重复 UI 闪烁。ref 标记确保同一时刻只有一个 reloadBilibili 在执行。
   const isReloadingBilibiliRef = useRef(false)
+  // reloadBilibili 执行期间收到的新请求不丢弃：记录后由 finally 补跑一次，
+  // 保证用户在解析期间切换 codec/CDN/CLI 偏好的最后一次也能生效。
+  const pendingBilibiliRerunRef = useRef<{
+    options?: { preferMp4?: boolean }
+  } | null>(null)
   // 观众端 CLI 代理切换/清晰度覆盖的并发重入保护。
   const isViewerReloadingRef = useRef(false)
+  // 观众端 reload 忙时补跑标记（语义同 pendingBilibiliRerunRef）。
+  const pendingViewerRerunRef = useRef(false)
+
+  // 加载代际：每次启动新的加载流程（loadMovie / reloadBilibili / previewPlay）递增。
+  // 旧流程在任意 await 恢复后若发现自己已过期（序号不再是最新）则静默放弃，
+  // 避免"快速切片 A(慢解析)→B(快)时 A 迟到完成覆盖 B"的竞态。
+  const loadSeqRef = useRef(0)
+
+  // stalled/error 自动重载的治理状态（ref 保存，避免 effect 重订阅时归零）：
+  // - lastAutoReloadAtRef：上次自动重载时间戳
+  // - autoReloadCountRef：当前影片连续自动重载次数（达上限后停止自动重试）
+  // - autoReloadNotifiedRef：达到上限后仅提示一次
+  const lastAutoReloadAtRef = useRef(0)
+  const autoReloadCountRef = useRef(0)
+  const autoReloadNotifiedRef = useRef(false)
+
+  // loadMovie 失败信息与重试令牌：失败时在播放器上显示"重试"入口，
+  // retryLoadMovie 清除 lastLoadedMovieRef 并递增令牌重新触发加载 effect。
+  const [loadMovieError, setLoadMovieError] = useState<string | null>(null)
+  const [retryToken, setRetryToken] = useState(0)
+  const retryLoadMovie = useCallback(() => {
+    setLoadMovieError(null)
+    lastLoadedMovieRef.current = null
+    setRetryToken((t) => t + 1)
+  }, [])
 
   useEffect(() => {
     isHostRef.current = isHost
@@ -441,25 +471,37 @@ export function useWatchTogether({
   // 房主：重新解析当前 B站 视频（用于解析偏好变更后即时生效）
   const reloadBilibili = useCallback(
     async (options?: { preferMp4?: boolean }) => {
-      // 并发重入保护：上一次解析仍在进行中（含超时未返回的挂起场景）时直接跳过，
+      // 并发重入保护：上一次解析仍在进行中（含超时未返回的挂起场景）时不并发执行，
       // 避免多个解析请求并发导致 suppressEventsRef / isResolving 状态错乱。
+      // 忙时不丢弃请求：记录最新 options，由 finally 补跑一次（最后一次偏好生效）。
       if (isReloadingBilibiliRef.current) {
-        console.log(
-          '[useWatchTogether] reloadBilibili 已在进行中，跳过本次请求'
-        )
+        pendingBilibiliRerunRef.current = { options }
         return
       }
       isReloadingBilibiliRef.current = true
 
+      // 代际号：使进行中的 loadMovie / previewPlay 过期，自身也受更新代际约束
+      const seq = ++loadSeqRef.current
+
+      /** 统一收尾：释放重入锁并补跑忙期间到达的最新请求 */
+      const finish = () => {
+        isReloadingBilibiliRef.current = false
+        if (pendingBilibiliRerunRef.current) {
+          const pending = pendingBilibiliRerunRef.current
+          pendingBilibiliRerunRef.current = null
+          void reloadBilibili(pending.options)
+        }
+      }
+
       const video = videoRef.current
       if (!video || !isHostRef.current) {
-        isReloadingBilibiliRef.current = false
+        finish()
         return
       }
 
       const state = useRoomStore.getState().watchTogether
       if (state.sourceType !== 'bilibili') {
-        isReloadingBilibiliRef.current = false
+        finish()
         return
       }
 
@@ -468,7 +510,7 @@ export function useWatchTogether({
         (m) => m.id === storeState.currentMovieId
       )
       if (!movie?.url) {
-        isReloadingBilibiliRef.current = false
+        finish()
         return
       }
 
@@ -494,6 +536,8 @@ export function useWatchTogether({
           undefined,
           resolvedOptions
         )
+        // 解析期间若已开始新的加载（切影片等），放弃本次结果
+        if (loadSeqRef.current !== seq) return
 
         const newState: WatchTogetherState = {
           ...state,
@@ -524,6 +568,8 @@ export function useWatchTogether({
             return
           }
         }
+        // 下载期间若已开始新的加载，放弃本次 attach（避免旧源覆盖新影片）
+        if (loadSeqRef.current !== seq) return
 
         // 传入 preserveTime 作为 startTime：MsePlayer.attach 会从该时间对应的字节偏移
         // 开始 Range 下载，而非从文件头 0 字节顺序下载。否则大跨度跳转后重载会
@@ -552,6 +598,8 @@ export function useWatchTogether({
 
         broadcastState(newState)
       } catch (err) {
+        // 已过期的失败（被新加载取代）无需提示或回退，避免覆盖新状态
+        if (loadSeqRef.current !== seq) return
         console.error('[useWatchTogether] 重新解析 B站 视频失败:', err)
         message.error(err instanceof Error ? err.message : '重新解析失败')
         try {
@@ -566,10 +614,15 @@ export function useWatchTogether({
           // 忽略恢复失败
         }
       } finally {
-        suppressEventsRef.current = false
+        // 仅当自身仍是最新加载代际时才释放事件抑制：
+        // 若已被新 loadMovie 取代，suppressEventsRef 由新流程管理，
+        // 此处提前释放会让新加载 attach 期间的事件泄漏广播。
+        if (loadSeqRef.current === seq) {
+          suppressEventsRef.current = false
+        }
         quality.setIsSwitchingQuality(false)
         setIsResolving(false)
-        isReloadingBilibiliRef.current = false
+        finish()
       }
     },
     [
@@ -602,7 +655,11 @@ export function useWatchTogether({
     if (pendingViewerSourceReload === 0) return
     const run = async () => {
       if (isHostRef.current) return
-      if (isViewerReloadingRef.current) return
+      if (isViewerReloadingRef.current) {
+        // 上一次仍在执行：记录补跑，由其 finally 重新触发（最后一次设置生效）
+        pendingViewerRerunRef.current = true
+        return
+      }
       isViewerReloadingRef.current = true
 
       const video = videoRef.current
@@ -674,6 +731,11 @@ export function useWatchTogether({
       } finally {
         suppressEventsRef.current = false
         isViewerReloadingRef.current = false
+        // 执行期间又有新的重载请求：补跑一次（重新读取最新偏好与状态）
+        if (pendingViewerRerunRef.current) {
+          pendingViewerRerunRef.current = false
+          void run()
+        }
       }
     }
     void run()
@@ -755,6 +817,13 @@ export function useWatchTogether({
     const sourceType: WatchTogetherState['sourceType'] =
       movie.sourceType === 'mp4' ? 'url' : movie.sourceType
 
+    // 加载代际：本次 loadMovie 使之前所有进行中的加载流程过期
+    const seq = ++loadSeqRef.current
+    // 新影片开始加载：重置自动重载治理状态与上一次的失败提示
+    autoReloadCountRef.current = 0
+    autoReloadNotifiedRef.current = false
+    setLoadMovieError(null)
+
     suppressEventsRef.current = true
     lastLoadedMovieRef.current = { id: movie.id, url: movie.url }
 
@@ -789,13 +858,14 @@ export function useWatchTogether({
         appliedPlaybackRef.current = true
       }
 
-      // 重置加载失败标记的辅助：允许用户手动重试
-      const resetForRetry = () => {
+      // 重置加载失败标记的辅助：允许用户手动重试；errMsg 非空时记录失败原因供 UI 展示
+      const resetForRetry = (errMsg?: string) => {
         suppressEventsRef.current = false
         lastLoadedMovieRef.current = null
         if (isRecovery) {
           appliedPlaybackRef.current = false
         }
+        setLoadMovieError(errMsg ?? null)
       }
 
       // 1. 解析播放源
@@ -826,11 +896,15 @@ export function useWatchTogether({
           })
         }
       } catch (err) {
+        // 已被更新的加载取代（切影片等）：静默放弃，不提示也不重置（新流程自管理状态）
+        if (loadSeqRef.current !== seq) return
         console.error('[useWatchTogether] 解析视频源失败:', err)
         message.error(err instanceof Error ? err.message : '视频源解析失败')
-        resetForRetry()
+        resetForRetry(err instanceof Error ? err.message : '视频源解析失败')
         return
       }
+      // 解析成功但已被更新的加载取代：放弃（不写 store、不 attach）
+      if (loadSeqRef.current !== seq) return
 
       // 2. 在线解析成功后同步清晰度 UI 状态（recovery 复用时保持现有值）
       if (sourceType === 'bilibili' && !resolved.reusedRecoveryUrl) {
@@ -879,6 +953,9 @@ export function useWatchTogether({
         const startTime =
           isRecovery && recoveryTime > 0 ? recoveryTime : undefined
         await applySourceToVideo(video, state, startTime, blobs)
+        // attach 已完成但本次加载已过期（新加载进行中）：不再恢复进度/广播/动
+        // suppressEventsRef（由新流程管理），避免旧状态覆盖新影片
+        if (loadSeqRef.current !== seq) return
         if (isRecovery && recoveryTime > 0) {
           // 恢复进度：seek 到目标时间并强制暂停
           try {
@@ -913,6 +990,8 @@ export function useWatchTogether({
        * 此处直接复用，避免与 useBilibiliQuality 的清晰度切换路径实现重复。
        */
       const newState = buildNewState(resolved)
+      // 写入 store 前复查代际：过期则不覆盖新流程的状态
+      if (loadSeqRef.current !== seq) return
       setWatchTogether(newState)
 
       // 缓冲模式：在 attach 前先下载完整 m4s 流到 IndexedDB
@@ -921,13 +1000,17 @@ export function useWatchTogether({
         try {
           blobs = await fetchBlobsForBufferModeLocal(newState, movie)
         } catch {
-          // 缓冲失败已通过 message.error 提示，重置状态允许用户重试
-          resetForRetry()
+          if (loadSeqRef.current === seq) {
+            // 缓冲失败已通过 message.error 提示，重置状态允许用户重试
+            resetForRetry('缓冲下载失败')
+          }
           return
         }
       }
 
       void applyAndRecover(newState, blobs).catch(async (err: unknown) => {
+        // 已被新加载取代：失败无需处理（新流程自管理状态）
+        if (loadSeqRef.current !== seq) return
         // MSE attach 失败时必须释放 suppressEventsRef，否则房主端
         // play/pause/seek/timeupdate 事件全部被吞，broadcastState 永不调用，
         // 导致观众端永久黑屏。
@@ -940,6 +1023,7 @@ export function useWatchTogether({
           console.log('[useWatchTogether] 复用旧 B站 URL 失败，回退到重新解析')
           try {
             const reResolved = await resolveOnline()
+            if (loadSeqRef.current !== seq) return
             if (reResolved.acceptQuality?.length) {
               quality.setAvailableQualities(reResolved.acceptQuality)
             }
@@ -959,7 +1043,9 @@ export function useWatchTogether({
                   movie
                 )
               } catch {
-                resetForRetry()
+                if (loadSeqRef.current === seq) {
+                  resetForRetry('缓冲下载失败')
+                }
                 return
               }
             }
@@ -967,18 +1053,20 @@ export function useWatchTogether({
             await applyAndRecover(reResolvedState, reBlobs)
             return
           } catch (retryErr) {
+            if (loadSeqRef.current !== seq) return
             console.error('[useWatchTogether] 回退重新解析失败:', retryErr)
-            message.error(
+            const retryMsg =
               retryErr instanceof Error ? retryErr.message : 'B站视频解析失败'
-            )
+            message.error(retryMsg)
+            resetForRetry(retryMsg)
+            return
           }
-          resetForRetry()
-          return
         }
 
         // 非回退路径：报错并允许重试
-        message.error(err instanceof Error ? err.message : '视频源加载失败')
-        resetForRetry()
+        const errMsg = err instanceof Error ? err.message : '视频源加载失败'
+        message.error(errMsg)
+        resetForRetry(errMsg)
       })
     }
 
@@ -995,6 +1083,7 @@ export function useWatchTogether({
     quality,
     suppressEventsRef,
     fetchBlobsForBufferModeLocal,
+    retryToken,
   ])
 
   // currentMovieId 被清空（删除当前播放影片等场景）时，立即暂停视频并清理媒体资源，
@@ -1022,7 +1111,12 @@ export function useWatchTogether({
 
   // Bug #14 修复：B站 CDN 地址 deadline 过期后，MSE 流式下载 fetch 会返回 403，
   // 播放器进入 stalled 状态。监听 video 的 stalled/error 事件，
-  // 房主端自动触发 reloadBilibili 重新解析新地址（带 5s 去抖动 + 单次重试限制）。
+  // 房主端自动触发 reloadBilibili 重新解析新地址（带去抖动 + 冷却 + 累计上限）。
+  // 治理策略（防重试风暴）：
+  // - 冷却时间指数退避：10s → 20s → 40s → 60s（封顶），且用 ref 保存，
+  //   避免 effect 因依赖变化重订阅时冷却被归零绕过
+  // - 连续自动重载达上限（3 次）后停止自动重试并提示一次，等待用户手动处理
+  // - 计数在换影片（loadMovie effect）时重置
   useEffect(() => {
     if (!isHostRef.current) return
     const video = videoRef.current
@@ -1031,20 +1125,33 @@ export function useWatchTogether({
     const state = useRoomStore.getState().watchTogether
     if (state.sourceType !== 'bilibili') return
 
+    const MAX_AUTO_RELOADS = 3
+    const BASE_COOLDOWN_MS = 10000
+    const MAX_COOLDOWN_MS = 60000
+
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
-    let lastReloadAt = 0
-    const RELOAD_COOLDOWN_MS = 10000 // 同一影片 10s 内最多重新解析一次，避免死循环
 
     const triggerReload = () => {
-      const now = Date.now()
-      if (now - lastReloadAt < RELOAD_COOLDOWN_MS) {
-        console.log(
-          '[useWatchTogether] stalled/error 已在冷却期内，跳过重新解析'
-        )
+      if (autoReloadCountRef.current >= MAX_AUTO_RELOADS) {
+        if (!autoReloadNotifiedRef.current) {
+          autoReloadNotifiedRef.current = true
+          message.warning(
+            '自动重载已达上限，视频仍无法播放，请手动重载、切换清晰度或更换影片'
+          )
+        }
         return
       }
-      lastReloadAt = now
-      console.log('[useWatchTogether] 检测到播放停滞，自动重新解析 B站 视频')
+      // 指数退避冷却：按已重载次数拉长间隔
+      const cooldown = Math.min(
+        BASE_COOLDOWN_MS * 2 ** autoReloadCountRef.current,
+        MAX_COOLDOWN_MS
+      )
+      const now = Date.now()
+      if (now - lastAutoReloadAtRef.current < cooldown) {
+        return
+      }
+      lastAutoReloadAtRef.current = now
+      autoReloadCountRef.current += 1
       void reloadBilibili()
     }
 
@@ -1093,6 +1200,10 @@ export function useWatchTogether({
     }) => {
       const video = videoRef.current
       if (!video) return
+
+      // 预览即新的加载代际：使进行中的 loadMovie / reloadBilibili 过期，
+      // 避免它们迟到完成后覆盖预览源
+      ++loadSeqRef.current
 
       const newState: WatchTogetherState = {
         sourceUrl: params.url,
@@ -1192,6 +1303,9 @@ export function useWatchTogether({
     isResolving,
     // B站 重新解析
     reloadBilibili,
+    // 影片加载失败信息与手动重试（供 UI 显示"重试"入口）
+    loadMovieError,
+    retryLoadMovie,
     // 轨道同步（合并事件）
     broadcastDanmakuTrackChange,
     broadcastSubtitleTrackChange,
