@@ -64,8 +64,27 @@ import {
 
 const router = Router();
 
-// 全局校验：仅 root 可访问
-router.use(authenticateToken, requireRoot);
+// 全局校验：所有端点需登录
+router.use(authenticateToken);
+// 管理类端点仅 root 可访问；
+// 播放代理相关端点（/resolve、/extract-subtitle、/proxy）允许任意已登录用户访问，
+// 否则观众（guest）无法加载房主推送的服务器本地视频。
+router.use(
+  [
+    '/roots',
+    '/browse',
+    '/browse-system',
+    '/upload',
+    '/folder',
+    '/rename',
+    '/file',
+    '/ffmpeg-status',
+    '/ffmpeg-install',
+    '/ffmpeg-upload',
+    '/bilibili-download',
+  ],
+  requireRoot,
+);
 
 // 上传文件大小上限：10GB
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024;
