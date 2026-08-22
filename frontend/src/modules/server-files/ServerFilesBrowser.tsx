@@ -112,8 +112,13 @@ export default function ServerFilesBrowser({
   })()
 
   return (
-    <Modal open={open} onClose={onClose} title="浏览服务器文件">
-      <div className="relative min-h-[200px]">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="浏览服务器文件"
+      className="max-w-3xl"
+    >
+      <div className="relative min-h-[320px]">
         {error ? (
           <div className="flex flex-col items-center gap-3 py-6">
             <Text className="text-sm text-[var(--md-sys-color-error)]">
@@ -201,7 +206,7 @@ export default function ServerFilesBrowser({
                 {displayPath || '/'}
               </Text>
             </div>
-            <div className="relative max-h-[400px] overflow-y-auto">
+            <div className="relative max-h-[65vh] min-h-[320px] overflow-y-auto">
               {entries.map((entry) => (
                 <div
                   key={entry.path}
