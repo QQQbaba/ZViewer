@@ -854,13 +854,15 @@ export interface TranscodeStreamResult {
  * 使用 FFmpeg 将音频转码为 AAC（192kbps 立体声），视频流直接复制，
  * 输出为 fragmented MP4 以支持流式传输。
  *
- * @param inputPath  源文件绝对路径
+ * @param inputPath  源文件绝对路径，或 http(s)/ftp URL（服务器中转的远程源）
  * @param seekTime   起始时间（秒），用于 seek 支持
+ * @param opts       headers：远程源需要的 HTTP 请求头（如 Authorization）
  * @returns 转码流与进程引用
  */
 export function createAudioTranscodeStream(
   inputPath: string,
   seekTime: number = 0,
+  opts?: { headers?: string },
 ): TranscodeStreamResult {
   const ffmpegPath = resolveFfmpegPath()
   if (!ffmpegPath) throw new Error('FFmpeg 不可用')
@@ -870,6 +872,10 @@ export function createAudioTranscodeStream(
   // seek 到指定时间（放在 -i 之前为快速 seek，精度略低但速度快）
   if (seekTime > 0) {
     args.push('-ss', seekTime.toFixed(3))
+  }
+
+  if (opts?.headers) {
+    args.push('-headers', opts.headers)
   }
 
   args.push(

@@ -42,6 +42,7 @@ import {
 import { hashAlistPassword, isAlistHashedPassword } from '../services/openlist-client';
 import { detectMediaFormat, getContentType } from '../services/mediaFormat';
 import { proxyHttpUpstream } from '../services/proxy/http-proxy';
+import { respondWithAudioTranscode } from '../services/proxy/audio-transcode';
 import { upgradeToHttpsIfNeeded } from '../services/url-utils';
 
 const router = Router();
@@ -742,6 +743,22 @@ router.get('/stream', async (req: AuthenticatedRequest, res: Response): Promise<
         });
         return;
       }
+    }
+
+    // ── 音频转码检测（V6）────────────────────────────
+    // mkv/avi/wmv/ts 容器的音轨可能是 DTS/AC3/EAC3 等浏览器不支持的编码。
+    // FFmpeg 直接读取 raw_url（签名直链）做探测；需要转码时以 fMP4 转码流
+    // 接管响应（音频实时转 AAC）。失败自动回退原有 raw_url 透传。
+    if (/\.(mkv|avi|wmv|ts)$/i.test(entry.name || movie.path)) {
+      const handled = await respondWithAudioTranscode(res, {
+        input: entry.rawUrl,
+        fileName: entry.name || movie.path,
+        duration: movie.duration ?? null,
+        rangeHeader: req.headers.range,
+        totalSize: entry.size ?? null,
+        logTag: 'openlist-stream-transcode',
+      });
+      if (handled) return;
     }
 
     // 透传 raw_url

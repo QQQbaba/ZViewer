@@ -378,14 +378,37 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
       return;
     }
 
+    // ── 音频编码兼容性检测 ──────────────────────────────
+    // static=true 直推原始容器时，若音轨是 DTS/EAC3/TrueHD 等浏览器
+    // <video> 不支持的编码，画面正常但完全无声（取决于片源音轨，因此"有概率"）。
+    // 检测到不兼容音轨时自动切换为 Emby 服务端转码的 HLS 流（音频强制 AAC），
+    // 由前端 hls-engine 接管播放，代价是 Emby 服务器承担实时转码开销。
+    const BROWSER_SUPPORTED_AUDIO = new Set(['aac', 'mp3', 'flac', 'opus', 'vorbis']);
+    const audioStream = source.MediaStreams?.find((s) => s.Type === 'Audio');
+    const audioCodec = audioStream?.Codec ?? null;
+    const needsAudioTranscode =
+      !!audioStream &&
+      !!audioStream.Codec &&
+      !BROWSER_SUPPORTED_AUDIO.has(audioStream.Codec.toLowerCase());
+
     // 标题：从 source.Path 取文件名，或回退 itemId
     const title =
       source.Path?.split(/[\\/]/).pop() || `item-${itemId}`;
+    const format = needsAudioTranscode ? 'hls' : detectMediaFormat(source.Path ?? title);
+
     // 代理 URL（本服务中转，带 token 转发，前端无需知道 Emby 地址）
-    const proxyUrl = `/api/emby/proxy?mountId=${mountId}&path=${encodeURIComponent(itemId)}`;
+    // at=1：audio-transcode，代理层转发到 Emby 转码端点而非 static 直推
+    const transcodeQuery = needsAudioTranscode ? '&at=1' : '';
+    const proxyUrl = `/api/emby/proxy?mountId=${mountId}&path=${encodeURIComponent(itemId)}${transcodeQuery}`;
+
     // 直连 URL（浏览器直连 Emby，要求前端可访问 Emby 服务器）
-    const directUrl = upgradeToHttpsIfNeeded(req, `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`);
-    const format = detectMediaFormat(source.Path ?? title);
+    // 需要音频转码时改为 Emby 官方转码播放列表（HLS，服务端强制音频 AAC）
+    const directUrl = upgradeToHttpsIfNeeded(
+      req,
+      needsAudioTranscode
+        ? `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/main.m3u8?api_key=${session.token}&AudioCodec=aac&TranscodingMaxAudioChannels=2&VideoBitrate=8000000&AudioBitrate=192000`
+        : `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`,
+    );
 
     res.json({
       success: true,
@@ -394,6 +417,8 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
       directUrl,
       format,
       duration: 0,
+      audioCodec,
+      needsAudioTranscode,
       emby: {
         itemId,
         container: source.Container ?? '',
@@ -410,6 +435,8 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
 });
 
 // 代理 - GET /proxy?mountId=&path=（path 为 Emby itemId）
+// at=1 时转发到 Emby 服务端转码播放列表（main.m3u8，音频强制 AAC），
+// 用于片源音轨编码浏览器不支持（DTS/EAC3 等）导致的无声场景。
 router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const resolved = await resolveUserMount(req, res, 'emby');
   if (!resolved) return;
@@ -417,8 +444,10 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
 
   try {
     const session = await resolveEmbySession(mount);
-    // 直接流：/emby/Videos/{id}/stream?static=true&api_key=
-    const upstreamUrl = `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(targetPath)}/stream?static=true&api_key=${session.token}`;
+    const audioTranscode = req.query.at === '1';
+    const upstreamUrl = audioTranscode
+      ? `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(targetPath)}/main.m3u8?api_key=${session.token}&AudioCodec=aac&TranscodingMaxAudioChannels=2&VideoBitrate=8000000&AudioBitrate=192000`
+      : `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(targetPath)}/stream?static=true&api_key=${session.token}`;
 
     await proxyHttpUpstream(req, res, {
       url: upstreamUrl,
@@ -429,8 +458,8 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
         },
       },
       cors: 'wildcard',
-      defaultContentType: 'video/mp4',
-      logTag: 'emby-proxy',
+      defaultContentType: audioTranscode ? 'application/x-mpegURL' : 'video/mp4',
+      logTag: audioTranscode ? 'emby-proxy-transcode' : 'emby-proxy',
       errorMessage: 'Emby 视频流代理失败',
     });
   } catch (err) {
@@ -448,6 +477,7 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
 // 与 /proxy 的区别：/stream 不依赖 userId 查挂载，而是直接从 Movie 表读取 serverUrl，
 // 再通过 serverUrl + type='emby' 在 UserMount 表中查找挂载凭证，
 // 这样房间内任何成员（含观众）都能通过 movieId 访问影片流。
+// at=1：音频转码模式（片源音轨编码浏览器不支持时由 resolve 标记并写入 movie.url）
 router.get('/stream', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const movieIdRaw = req.query.movieId;
@@ -469,7 +499,17 @@ router.get('/stream', async (req: AuthenticatedRequest, res: Response): Promise<
 
     const session = await resolveEmbySession(mount);
     const itemId = movie.path!;
-    const upstreamUrl = `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`;
+    // 转码判定：
+    // - resolve 阶段检测到音轨编码不兼容时，format 会持久化为 'hls'（Movie.format），
+    //   中转模式据此转发到 Emby 转码播放列表（main.m3u8），与前端 hls-engine 匹配；
+    // - 不能依赖 movie.url 是否带 at=1：代理模式下 createMovie 会把 url 重写为
+    //   /api/emby/stream?movieId=N，at=1 标记在重写时丢失。
+    const audioTranscode =
+      req.query.at === '1' ||
+      (movie.format ?? '').toLowerCase() === 'hls';
+    const upstreamUrl = audioTranscode
+      ? `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/main.m3u8?api_key=${session.token}&AudioCodec=aac&TranscodingMaxAudioChannels=2&VideoBitrate=8000000&AudioBitrate=192000`
+      : `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`;
 
     await proxyHttpUpstream(req, res, {
       url: upstreamUrl,
@@ -480,8 +520,8 @@ router.get('/stream', async (req: AuthenticatedRequest, res: Response): Promise<
         },
       },
       cors: 'wildcard',
-      defaultContentType: 'video/mp4',
-      logTag: 'emby-stream',
+      defaultContentType: audioTranscode ? 'application/x-mpegURL' : 'video/mp4',
+      logTag: audioTranscode ? 'emby-stream-transcode' : 'emby-stream',
       errorMessage: 'Emby 视频流代理失败',
     });
   } catch (err) {

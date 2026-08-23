@@ -21,6 +21,7 @@ import {
   WebDAVError,
   type WebDAVConnectionParams,
 } from '../services/webdav';
+import { respondWithAudioTranscode } from '../services/proxy/audio-transcode';
 import {
   fetchOpenListDirectUrl,
   OpenListError,
@@ -624,6 +625,41 @@ export function createMountRouter(opts: MountRouterOptions): Router {
       };
 
       const rangeHeader = req.headers.range;
+
+      // ── 音频转码检测（V6）────────────────────────────
+      // mkv/avi/wmv/ts 容器的音轨可能是 DTS/AC3/EAC3 等浏览器不支持的编码。
+      // 用 FFmpeg 读取带凭证的 WebDAV 直链做探测；需要转码时以 fMP4 转码流
+      // 接管响应（音频实时转 AAC，视频直拷贝）。失败自动回退原有直推。
+      if (/\.(mkv|avi|wmv|ts)$/i.test(movie.path!)) {
+        let seekTime = 0;
+        if (rangeHeader) {
+          // 用 Range 换算转码起始位置：start 字节 / 文件大小 × 影片时长
+          try {
+            const probe = await createWebDAVReadStreamWithRange(params, rangeHeader);
+            if (probe.fileSize > 0 && movie.duration && movie.duration > 0) {
+              seekTime = (probe.start / probe.fileSize) * movie.duration;
+            }
+            probe.stream.destroy();
+          } catch {
+            /* Range 探测失败不影响后续流程 */
+          }
+        }
+        const directUrlForFfmpeg = buildWebDAVDirectUrl(
+          params.serverUrl,
+          params.path,
+          username,
+          password,
+        );
+        const handled = await respondWithAudioTranscode(res, {
+          input: directUrlForFfmpeg,
+          fileName: movie.path!,
+          duration: movie.duration ?? null,
+          rangeHeader,
+          totalSize: null,
+          logTag: `${logTag}-stream-transcode`,
+        });
+        if (handled) return;
+      }
 
       let stream: import('node:stream').Readable;
       let fileSize: number;

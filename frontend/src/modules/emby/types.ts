@@ -52,4 +52,8 @@ export interface EmbyResolvedSource {
   directUrl?: string
   format: MediaFormat
   duration: number
+  /** 默认音轨编码（如 aac/dts/eac3），无法探测时为 null */
+  audioCodec?: string | null
+  /** 音轨编码浏览器不支持，已自动切换为 Emby 服务端转码流（HLS） */
+  needsAudioTranscode?: boolean
 }

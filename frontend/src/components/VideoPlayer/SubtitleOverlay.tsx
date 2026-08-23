@@ -12,7 +12,7 @@
  * - 仅当激活 cue 集合变化时更新 state，避免不必要重渲染
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ParsedCue } from '@/lib/subtitleParser'
 
 interface SubtitleOverlayProps {
@@ -32,6 +32,36 @@ function getTransform(
     align === 'center' ? '-50%' : align === 'right' ? '-100%' : '0%'
   const translateY = line > 50 ? '-100%' : '0%'
   return `translate(${translateX}, ${translateY})`
+}
+
+/** 同一槽位判定阈值：line 差值小于该值视为同一区域（百分比高度） */
+const LINE_SLOT_THRESHOLD = 7
+/** 槽位步进：重叠 cue 逐条下移的间距（百分比高度） */
+const LINE_SLOT_STEP = 9
+
+/**
+ * 计算激活 cue 的最终垂直位置（防重叠布局）。
+ *
+ * 同一时刻可能存在多条激活 cue（双语字幕、ASS 多层、ffmpeg 提取的时间轴
+ * 部分重叠等）。若它们声明了相同/相近的 line 位置，直接按各自 line 渲染
+ * 会导致文字完全重叠不可读。
+ *
+ * 策略：按 line 升序遍历，每条 cue 分配到不低于前一条（+ 步进）的槽位，
+ * 使重叠的 cue 垂直依次排列；无重叠的 cue 保持原始位置不变。
+ */
+function layoutCues(cues: ParsedCue[]): Array<ParsedCue & { resolvedLine: number }> {
+  const sorted = [...cues].sort((a, b) => (a.line ?? 100) - (b.line ?? 100))
+  const result: Array<ParsedCue & { resolvedLine: number }> = []
+  for (const cue of sorted) {
+    const base = cue.line ?? 100
+    const prev = result[result.length - 1]
+    const resolvedLine =
+      prev && base < prev.resolvedLine + LINE_SLOT_THRESHOLD
+        ? prev.resolvedLine + LINE_SLOT_STEP
+        : base
+    result.push({ ...cue, resolvedLine })
+  }
+  return result
 }
 
 export function SubtitleOverlay({
@@ -80,6 +110,9 @@ export function SubtitleOverlay({
     }
   }, [video, cues, enabled, offset])
 
+  // 防重叠布局：重叠 cue 垂直堆叠而非叠字（useMemo 须在 early return 之前调用）
+  const laidOut = useMemo(() => layoutCues(activeCues), [activeCues])
+
   if (!enabled || activeCues.length === 0) return null
 
   return (
@@ -87,8 +120,8 @@ export function SubtitleOverlay({
       className="pointer-events-none absolute inset-0 z-10"
       style={{ overflow: 'hidden' }}
     >
-      {activeCues.map((cue, i) => {
-        const line = cue.line ?? 100
+      {laidOut.map((cue, i) => {
+        const line = cue.resolvedLine
         const position = cue.position ?? 50
         const align = cue.align ?? 'center'
 

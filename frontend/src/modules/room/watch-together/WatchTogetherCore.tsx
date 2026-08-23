@@ -193,6 +193,54 @@ export function WatchTogetherCore({
   const canEnableEmbedded =
     isHost && embeddedSubtitleEnabled && embeddedSource !== null
 
+  // ── 音频编码兼容性提示 ──────────────────────────────
+  // 浏览器 <video> 仅支持 AAC/MP3/Opus/FLAC 等少数音频编码。
+  // DTS/AC3/EAC3 等编码需要服务器 FFmpeg 实时转码为 AAC 才能出声：
+  // - server-files 源：后端 proxy 自动转码（转码会有数秒启动延迟）
+  // - emby 源：resolve 阶段已自动切换为 Emby 服务端转码 HLS
+  // 若服务器 FFmpeg 缺失/精简版不支持 AAC 编码，视频将无声——
+  // 提示让用户明白无声原因与等待转码的原因，而不是以为播放器坏了。
+  const BROWSER_SUPPORTED_AUDIO = new Set([
+    'aac',
+    'mp3',
+    'opus',
+    'vorbis',
+    'flac',
+  ])
+  const lastAudioNoticeRef = useRef('')
+  useEffect(() => {
+    if (!watchTogether.sourceUrl) return
+    const codec = watchTogether.audioCodec?.toLowerCase()
+    if (!codec || BROWSER_SUPPORTED_AUDIO.has(codec)) return
+
+    // 同一影片+编码只提示一次，避免每次 state 更新都弹
+    const key = `${currentMovieId ?? ''}:${codec}`
+    if (lastAudioNoticeRef.current === key) return
+    lastAudioNoticeRef.current = key
+
+    if (
+      currentMovieSourceType === 'emby' ||
+      currentMovieSourceType === 'jellyfin' ||
+      currentMovieSourceType === 'webdav'
+    ) {
+      addPlayerNotice(
+        `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，已自动启用服务端音频转码`,
+        'info'
+      )
+    } else {
+      addPlayerNotice(
+        `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，正在通过服务器 FFmpeg 实时转码为 AAC（若仍无声请确认已安装完整版 FFmpeg）`,
+        'info'
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    watchTogether.sourceUrl,
+    watchTogether.audioCodec,
+    currentMovieId,
+    currentMovieSourceType,
+  ])
+
   // ── 切换影片时自动搜索同目录字幕 + 内嵌字幕 ──────────────
   // 当房主切换到新影片时，清空旧字幕并：
   // - WebDAV/FTP/OpenList/服务器文件：在影片所在目录中搜索同名字幕文件
