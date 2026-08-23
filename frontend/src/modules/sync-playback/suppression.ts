@@ -14,25 +14,48 @@
  * 读取 current = 计数 > 0。每个异步流程应保证 true/false 成对出现
  * （try/finally）；resetSuppression 供"新加载代际"等全局重置点强制清零
  * （旧流程的抑制作废，避免悬挂计数导致永久抑制）。
+ *
+ * 租约安全阀：每次获取记录时间戳，超过 SUPPRESS_LEASE_MS 未释放的抑制
+ * 自动过期——防御未来新增的非配对路径（+1 无 -1）导致的永久抑制
+ * （症状：心跳校正/事件处理被永久拦截，观众不再跟随房主）。
  */
 import type { MutableRefObject } from 'react'
 
-/** 计数式抑制 ref 的内部结构（__suppressCount 为内部计数存储）。 */
+/** 单次抑制租约上限。合法长持有（缓冲模式整片下载）通常在数分钟内完成。 */
+const SUPPRESS_LEASE_MS = 5 * 60 * 1000
+
+/** 计数式抑制 ref 的内部结构。 */
 interface CountedSuppressRef extends MutableRefObject<boolean> {
-  __suppressCount: number
+  __suppressStamps: number[]
 }
 
 /** 创建计数式事件抑制 ref（接口与普通 useRef(boolean) 完全兼容）。 */
 export function createSuppressRef(): MutableRefObject<boolean> {
   const holder = {
-    __suppressCount: 0,
+    __suppressStamps: [] as number[],
   } as CountedSuppressRef
   Object.defineProperty(holder, 'current', {
-    get: () => holder.__suppressCount > 0,
+    get: () => {
+      const now = Date.now()
+      // 租约安全阀：清理超过上限未释放的获取（异常泄漏自愈）
+      while (
+        holder.__suppressStamps.length > 0 &&
+        now - holder.__suppressStamps[0] > SUPPRESS_LEASE_MS
+      ) {
+        holder.__suppressStamps.shift()
+        console.warn(
+          '[suppression] 检测到超时未释放的抑制（可能存在 acquire/release 不配对），已自动过期'
+        )
+      }
+      return holder.__suppressStamps.length > 0
+    },
     set: (v: boolean) => {
-      holder.__suppressCount = v
-        ? holder.__suppressCount + 1
-        : Math.max(0, holder.__suppressCount - 1)
+      if (v) {
+        holder.__suppressStamps.push(Date.now())
+      } else if (holder.__suppressStamps.length > 0) {
+        // 释放最早的一次获取（FIFO 与 acquire 顺序对应）
+        holder.__suppressStamps.shift()
+      }
     },
   })
   return holder
@@ -47,8 +70,8 @@ export function createSuppressRef(): MutableRefObject<boolean> {
  */
 export function resetSuppression(ref: MutableRefObject<boolean>): void {
   const holder = ref as CountedSuppressRef
-  if (typeof holder.__suppressCount === 'number') {
-    holder.__suppressCount = 0
+  if (Array.isArray(holder.__suppressStamps)) {
+    holder.__suppressStamps.length = 0
   } else {
     ref.current = false
   }

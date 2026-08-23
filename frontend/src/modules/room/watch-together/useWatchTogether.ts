@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
+import type { MutableRefObject } from 'react'
 import { formatDuration } from '@/lib/utils'
 import { useShallow } from 'zustand/react/shallow'
 import { useSocket } from '@/hooks/useSocket'
@@ -128,7 +129,15 @@ export function useWatchTogether({
   // 事件抑制采用计数式实现：多个异步流程（attach/恢复/seek/缓冲下载）重叠时，
   // 任一流程完成只释放自己的一次抑制，不再误伤其他进行中的流程
   // （旧单布尔实现存在"先完成者提前释放抑制窗口"导致事件泄漏广播的问题）。
-  const suppressEventsRef = createSuppressRef()
+  // 必须用 useRef 持有：直接调用 createSuppressRef() 会在每次渲染时创建
+  // 全新对象（count 归零），导致抑制状态跨渲染丢失 + effect 因引用变化不断重订阅。
+  const suppressInstanceRef = useRef<MutableRefObject<boolean> | undefined>(
+    undefined
+  )
+  if (!suppressInstanceRef.current) {
+    suppressInstanceRef.current = createSuppressRef()
+  }
+  const suppressEventsRef = suppressInstanceRef.current
   const lastLoadedMovieRef = useRef<{ id: number; url: string } | null>(null)
   // 房主刷新恢复：用于在 loadMovie 完成后应用 initialPlayback.currentTime 并暂停
   // 通过 ref 暂存，避免修改 effect 依赖导致 loadMovie 重新触发

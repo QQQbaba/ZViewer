@@ -265,18 +265,10 @@ export function useViewerStateSync({
             payload.diff as Partial<WatchTogetherState>
           )
         : payload.state
-      suppressEventsRef.current = true
-      setWatchTogether(state)
 
       // 判断是否为 sourceUrl 变化
       const isSourceChange = lastAppliedSourceUrlRef.current !== state.sourceUrl
-
-      // 串行化 applySourceToVideo：若上一次 apply 还在进行中，
-      // 仅缓存最新 state，等上一次完成后处理最新值。
-      if (isSourceChange) {
-        pendingStateRef.current = state
-        if (isApplyingRef.current) return
-      }
+      setWatchTogether(state)
 
       const processState = async (s: WatchTogetherState) => {
         isApplyingRef.current = true
@@ -297,17 +289,31 @@ export function useViewerStateSync({
           pendingStateRef.current = null
           await processState(next)
         }
+        // 释放 drain 启动者获取的那一次抑制
         suppressEventsRef.current = false
       }
 
+      // 抑制计数必须在"确定成为处理者"时才获取（+1），并由处理完成点释放（−1）。
+      // 若在函数入口无条件 +1，pending 缓存路径会提前 return 且无对应 -1，
+      // drain 只释放启动者的一次 → 计数悬挂 → 心跳校正/事件处理被永久拦截
+      // （症状：房主跳转进度后观众不再自动跟随）。
+
+      // 串行化 applySourceToVideo：若上一次 apply 还在进行中，
+      // 仅缓存最新 state，等上一次完成后处理最新值。
       if (isSourceChange) {
+        pendingStateRef.current = state
+        if (isApplyingRef.current) return
+        // 成为 drain 启动者：获取抑制，drain 结束时统一释放
+        suppressEventsRef.current = true
         void drain()
-      } else {
-        // 非 sourceUrl 变化：直接同步，不需要串行化
-        void processState(state).then(() => {
-          suppressEventsRef.current = false
-        })
+        return
       }
+
+      // 非 sourceUrl 变化：直接同步，不需要串行化（各自 acquire/release 配对）
+      suppressEventsRef.current = true
+      void processState(state).then(() => {
+        suppressEventsRef.current = false
+      })
     }
 
     const handleControl = (payload: ControlPayload) => {
