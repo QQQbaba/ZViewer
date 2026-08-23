@@ -138,6 +138,16 @@ export interface FfmpegStatus {
   transcodeCapable?: boolean
   /** 服务器平台（'win32' | 'linux' | 'darwin'） */
   platform?: string
+  /**
+   * 手动下载链接清单（各平台的官方下载地址）。
+   * 下载发生在浏览器所在机器，上传到服务端时才需要与服务端平台匹配，
+   * 因此提供全部平台供用户自行选择。
+   */
+  manualDownloadUrls?: Array<{
+    platform: 'win32' | 'linux64'
+    label: string
+    url: string
+  }>
   error?: string
 }
 

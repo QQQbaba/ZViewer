@@ -32,8 +32,8 @@ export const FFPROBE_BIN_PATH = path.join(
   process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'
 )
 
-/** 下载源（按平台） */
-function getDownloadSource(): { url: string; kind: 'zip' | 'tar.xz'; size: number } {
+/** 下载源（按平台）。供在线安装与手动下载链接生成共用（服务端平台为准）。 */
+export function getDownloadSource(): { url: string; kind: 'zip' | 'tar.xz'; size: number } {
   const platform = process.platform
   const arch = process.arch
 
@@ -46,13 +46,12 @@ function getDownloadSource(): { url: string; kind: 'zip' | 'tar.xz'; size: numbe
     }
   }
 
-  if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) {
+  if (platform === 'linux' && arch === 'x64') {
     // Linux: BtbN/FFmpeg-Builds GitHub Releases 静态构建
-    const suffix = arch === 'arm64' ? 'linuxarm64' : 'linux64'
     return {
-      url: `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${suffix}-gpl.tar.xz`,
+      url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz',
       kind: 'tar.xz',
-      size: arch === 'arm64' ? 120 * 1024 * 1024 : 140 * 1024 * 1024,
+      size: 140 * 1024 * 1024,
     }
   }
 

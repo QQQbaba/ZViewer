@@ -489,6 +489,7 @@ export async function checkFfmpeg(
       version: null,
       transcodeCapable: false,
       platform: data.platform,
+      manualDownloadUrls: data.manualDownloadUrls,
       error: data.error || '检测失败',
     }
   }
@@ -499,6 +500,7 @@ export async function checkFfmpeg(
     version: data.version,
     transcodeCapable: data.transcodeCapable,
     platform: data.platform,
+    manualDownloadUrls: data.manualDownloadUrls,
   }
 }
 

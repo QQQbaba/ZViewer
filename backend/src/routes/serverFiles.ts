@@ -938,10 +938,15 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
  * GET /ffmpeg-status — 检测 FFmpeg 是否可用（内置或系统 PATH）。
  *
  * 返回：
- *   { success, available, source, path, version, transcodeCapable, error? }
+ *   { success, available, source, path, version, transcodeCapable, platform,
+ *     manualDownloadUrl, error? }
  *
  * transcodeCapable: 是否具备 AAC 编码能力（精简版 FFmpeg 可能为 false）。
  * available=true 但 transcodeCapable=false 时，前端应提示安装完整版。
+ *
+ * manualDownloadUrl: 按【服务端运行平台】生成的手动下载地址（浏览器直接
+ * 下载后通过"手动安装"上传）。由服务端提供而非前端硬编码，保证与实际
+ * 运行环境匹配（前端无法可靠得知服务端平台）。
  *
  * 查询参数：
  *   ?force=true  强制刷新缓存，重新检测。
@@ -957,7 +962,27 @@ router.get('/ffmpeg-status', async (req: AuthenticatedRequest, res: Response): P
     const transcodeCapable = status.available
       ? await isFfmpegTranscodeCapable()
       : false;
-    res.json({ success: true, ...status, transcodeCapable, platform: process.platform });
+    // 手动下载链接：提供全部支持平台的官方下载地址，由用户在弹窗中自选
+    // （下载的是浏览器所在机器的文件，上传到服务端时才需要与服务端平台匹配）
+    const manualDownloadUrls = [
+      {
+        platform: 'win32' as const,
+        label: 'Windows（zip）',
+        url: 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip',
+      },
+      {
+        platform: 'linux64' as const,
+        label: 'Linux x64（tar.xz）',
+        url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz',
+      },
+    ];
+    res.json({
+      success: true,
+      ...status,
+      transcodeCapable,
+      platform: process.platform,
+      manualDownloadUrls,
+    });
   } catch (err) {
     res.status(500).json({
       success: false,
