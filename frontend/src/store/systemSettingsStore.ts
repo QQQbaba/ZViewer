@@ -19,6 +19,8 @@ export interface SystemSettings {
   cdnProxyUrl: string
   /** 内嵌字幕功能开关：仅当视频走服务器中转（后端可直接访问视频字节）时可用 */
   embeddedSubtitleEnabled: boolean
+  /** FFmpeg 音频转码开关：开启后服务器中转时自动转码不兼容音轨为 AAC */
+  audioTranscodeEnabled: boolean
   dataSourceConfig?: Record<string, unknown> | null
 }
 
@@ -48,6 +50,7 @@ const DEFAULT_SETTINGS: SystemSettings = {
   cdnAccelerate: false,
   cdnProxyUrl: 'https://gh-proxy.com',
   embeddedSubtitleEnabled: true,
+  audioTranscodeEnabled: false,
   dataSourceConfig: null,
 }
 

@@ -457,6 +457,7 @@ router.get(
           cdnAccelerate: settings.cdnAccelerate,
           cdnProxyUrl: settings.cdnProxyUrl,
           embeddedSubtitleEnabled: settings.embeddedSubtitleEnabled,
+          audioTranscodeEnabled: settings.audioTranscodeEnabled,
         },
       });
     } catch (err) {
@@ -474,7 +475,7 @@ router.put(
     res: import('express').Response,
   ): Promise<void> => {
     try {
-      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled, dashDisabled, cdnAccelerate, cdnProxyUrl, embeddedSubtitleEnabled } = req.body;
+      const { autoDeleteInactiveRooms, autoDeleteAfterHours, dataSourceConfig, registrationMode, roomCreationMode, betaFeaturesEnabled, dashDisabled, cdnAccelerate, cdnProxyUrl, embeddedSubtitleEnabled, audioTranscodeEnabled } = req.body;
 
       if (typeof autoDeleteInactiveRooms !== 'boolean') {
         res.status(400).json({
@@ -555,6 +556,13 @@ router.put(
         });
         return;
       }
+      if (audioTranscodeEnabled !== undefined && typeof audioTranscodeEnabled !== 'boolean') {
+        res.status(400).json({
+          success: false,
+          message: 'audioTranscodeEnabled 必须是布尔值',
+        });
+        return;
+      }
       const settingsRepo = AppDataSource.getRepository(SystemSettings);
       const settings = await getSystemSettings();
       settings.autoDeleteInactiveRooms = autoDeleteInactiveRooms;
@@ -586,6 +594,9 @@ router.put(
       if (embeddedSubtitleEnabled !== undefined) {
         settings.embeddedSubtitleEnabled = embeddedSubtitleEnabled;
       }
+      if (audioTranscodeEnabled !== undefined) {
+        settings.audioTranscodeEnabled = audioTranscodeEnabled;
+      }
       await settingsRepo.save(settings);
 
       res.json({
@@ -601,6 +612,7 @@ router.put(
           cdnAccelerate: settings.cdnAccelerate,
           cdnProxyUrl: settings.cdnProxyUrl,
           embeddedSubtitleEnabled: settings.embeddedSubtitleEnabled,
+          audioTranscodeEnabled: settings.audioTranscodeEnabled,
         },
       });
     } catch (err) {

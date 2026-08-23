@@ -124,6 +124,7 @@ interface AdminSettings {
   cdnAccelerate: boolean
   cdnProxyUrl: string
   embeddedSubtitleEnabled: boolean
+  audioTranscodeEnabled: boolean
   dataSourceConfig?: {
     aniSubsSubscriptions?: string[]
     kazumiRules?: string[]
@@ -156,6 +157,7 @@ export default function AdminPage() {
     cdnAccelerate: false,
     cdnProxyUrl: 'https://gh-proxy.com',
     embeddedSubtitleEnabled: true,
+    audioTranscodeEnabled: false,
   })
   const [loading, setLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -867,6 +869,7 @@ export default function AdminPage() {
         cdnAccelerate: settings.cdnAccelerate,
         cdnProxyUrl: settings.cdnProxyUrl,
         embeddedSubtitleEnabled: settings.embeddedSubtitleEnabled,
+        audioTranscodeEnabled: settings.audioTranscodeEnabled,
       }
       if (settings.dataSourceConfig) {
         payload.dataSourceConfig = settings.dataSourceConfig
@@ -1616,6 +1619,21 @@ export default function AdminPage() {
                 <Title level={5} className="mb-4 mt-6">
                   FFmpeg 引擎
                 </Title>
+                <div className="mb-4">
+                  <Switch
+                    label="启用 FFmpeg 音频转码"
+                    checked={settings.audioTranscodeEnabled}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        audioTranscodeEnabled: e.target.checked,
+                      }))
+                    }
+                  />
+                  <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                    开启后，服务器中转播放时若检测到浏览器不支持的音轨编码（DTS/AC3/EAC3/TrueHD 等），将由 FFmpeg 实时转码为 AAC。需安装完整版 FFmpeg。关闭时一律直推，浏览器可能无声。
+                  </p>
+                </div>
                 <div
                   className="mb-6 flex flex-col gap-2 rounded-[var(--md-sys-shape-corner)] p-3"
                   style={{

@@ -65,6 +65,17 @@ export class SystemSettings {
    * 仅在 cdnAccelerate 为 true 时生效，对所有 GitHub 请求（api.github.com、
    * github.com、objects.githubusercontent.com）统一使用前缀代理方式。
    */
+  /**
+   * FFmpeg 音频转码开关。
+   * 浏览器不支持的音轨编码（DTS/AC3/EAC3/TrueHD 等）在服务器中转时是否由
+   * FFmpeg 实时转码为 AAC。默认关闭（手动开启），避免在未安装完整版 FFmpeg 的
+   * 环境下对每次请求都做 ffprobe 探测产生额外开销。
+   * - true：启用自动转码（需容器命中 + 音轨编码不在浏览器白名单 + FFmpeg 可用）
+   * - false：一律直推，浏览器可能无声
+   */
+  @Column({ type: 'boolean', default: false })
+  audioTranscodeEnabled!: boolean;
+
   @Column({ type: 'text', default: 'https://gh-proxy.com' })
   cdnProxyUrl!: string;
 

@@ -56,4 +56,6 @@ export interface EmbyResolvedSource {
   audioCodec?: string | null
   /** 音轨编码浏览器不支持，已自动切换为 Emby 服务端转码流（HLS） */
   needsAudioTranscode?: boolean
+  /** 音轨不兼容但管理后台音频转码开关关闭，浏览器可能无声 */
+  audioTranscodeDisabled?: boolean
 }

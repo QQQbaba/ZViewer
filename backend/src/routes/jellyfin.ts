@@ -13,6 +13,7 @@ import { JellyfinClient, JellyfinError } from '../services/jellyfin-client';
 import { detectMediaFormat } from '../services/mediaFormat';
 import { resolveUserMount, resolveMovieStream, proxyHttpUpstream } from '../services/proxy';
 import { upgradeToHttpsIfNeeded } from '../services/url-utils';
+import { getSystemSettings } from '../services/system-settings';
 
 const router = Router();
 
@@ -293,9 +294,28 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
       return;
     }
     const title = source.Path?.split(/[\\/]/).pop() || `item-${itemId}`;
-    const proxyUrl = `/api/jellyfin/proxy?mountId=${mountId}&path=${encodeURIComponent(itemId)}`;
-    const directUrl = upgradeToHttpsIfNeeded(req, `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`);
-    const format = detectMediaFormat(source.Path ?? title);
+
+    // ── 音频编码兼容性检测 ──────────────────────────────
+    // 与 emby.ts 一致：检测到浏览器不支持的音轨时切换为 Jellyfin 服务端转码 HLS
+    const BROWSER_SUPPORTED_AUDIO = new Set(['aac', 'mp3', 'flac', 'opus', 'vorbis']);
+    const audioStream = source.MediaStreams?.find((s) => s.Type === 'Audio');
+    const audioCodec = audioStream?.Codec ?? null;
+    const audioIncompatible =
+      !!audioStream &&
+      !!audioStream.Codec &&
+      !BROWSER_SUPPORTED_AUDIO.has(audioStream.Codec.toLowerCase());
+    const settings = await getSystemSettings();
+    const needsAudioTranscode = audioIncompatible && settings.audioTranscodeEnabled;
+
+    const format = needsAudioTranscode ? 'hls' : detectMediaFormat(source.Path ?? title);
+    const transcodeQuery = needsAudioTranscode ? '&at=1' : '';
+    const proxyUrl = `/api/jellyfin/proxy?mountId=${mountId}&path=${encodeURIComponent(itemId)}${transcodeQuery}`;
+    const directUrl = upgradeToHttpsIfNeeded(
+      req,
+      needsAudioTranscode
+        ? `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/main.m3u8?api_key=${session.token}&AudioCodec=aac&TranscodingMaxAudioChannels=2&VideoBitrate=8000000&AudioBitrate=192000`
+        : `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`,
+    );
     res.json({
       success: true,
       title,
@@ -303,6 +323,9 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
       directUrl,
       format,
       duration: 0,
+      audioCodec,
+      needsAudioTranscode,
+      audioTranscodeDisabled: audioIncompatible && !settings.audioTranscodeEnabled,
       jellyfin: { itemId, container: source.Container ?? '' },
     });
   } catch (err) {
@@ -318,13 +341,17 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
   const { mount, targetPath } = resolved;
   try {
     const session = await resolveJellyfinSession(mount);
-    const upstreamUrl = `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(targetPath)}/stream?static=true&api_key=${session.token}`;
+    const audioTranscode = req.query.at === '1';
+    const upstreamUrl = audioTranscode
+      ? `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(targetPath)}/main.m3u8?api_key=${session.token}&AudioCodec=aac&TranscodingMaxAudioChannels=2&VideoBitrate=8000000&AudioBitrate=192000`
+      : `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(targetPath)}/stream?static=true&api_key=${session.token}`;
+
     await proxyHttpUpstream(req, res, {
       url: upstreamUrl,
       headers: { extra: { 'X-Emby-Token': session.token, Referer: session.client.baseUrl } },
       cors: 'wildcard',
-      defaultContentType: 'video/mp4',
-      logTag: 'jellyfin-proxy',
+      defaultContentType: audioTranscode ? 'application/x-mpegURL' : 'video/mp4',
+      logTag: audioTranscode ? 'jellyfin-proxy-transcode' : 'jellyfin-proxy',
       errorMessage: 'Jellyfin 视频流代理失败',
     });
   } catch (err) {
@@ -359,14 +386,20 @@ router.get('/stream', async (req: AuthenticatedRequest, res: Response): Promise<
 
     const session = await resolveJellyfinSession(mount);
     const itemId = movie.path!;
-    const upstreamUrl = `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`;
+    // 转码判定：与 emby.ts 一致，resolve 阶段检测到音轨编码不兼容时 format 持久化为 'hls'
+    const audioTranscode =
+      req.query.at === '1' ||
+      (movie.format ?? '').toLowerCase() === 'hls';
+    const upstreamUrl = audioTranscode
+      ? `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/main.m3u8?api_key=${session.token}&AudioCodec=aac&TranscodingMaxAudioChannels=2&VideoBitrate=8000000&AudioBitrate=192000`
+      : `${session.client.baseUrl}/emby/Videos/${encodeURIComponent(itemId)}/stream?static=true&api_key=${session.token}`;
 
     await proxyHttpUpstream(req, res, {
       url: upstreamUrl,
       headers: { extra: { 'X-Emby-Token': session.token, Referer: session.client.baseUrl } },
       cors: 'wildcard',
-      defaultContentType: 'video/mp4',
-      logTag: 'jellyfin-stream',
+      defaultContentType: audioTranscode ? 'application/x-mpegURL' : 'video/mp4',
+      logTag: audioTranscode ? 'jellyfin-stream-transcode' : 'jellyfin-stream',
       errorMessage: 'Jellyfin 视频流代理失败',
     });
   } catch (err) {

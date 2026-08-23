@@ -162,6 +162,9 @@ export function WatchTogetherCore({
   const embeddedSubtitleEnabled = useSystemSettingsStore(
     (s) => s.embeddedSubtitleEnabled
   )
+  const audioTranscodeEnabled = useSystemSettingsStore(
+    (s) => s.audioTranscodeEnabled
+  )
   const embeddedSource: EmbeddedSource | null = (() => {
     if (currentMovieSourceType === 'server-files' && currentMoviePath) {
       return { kind: 'server-files', path: currentMoviePath }
@@ -223,15 +226,29 @@ export function WatchTogetherCore({
       currentMovieSourceType === 'jellyfin' ||
       currentMovieSourceType === 'webdav'
     ) {
-      addPlayerNotice(
-        `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，已自动启用服务端音频转码`,
-        'info'
-      )
+      if (audioTranscodeEnabled) {
+        addPlayerNotice(
+          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，已自动启用服务端音频转码`,
+          'info'
+        )
+      } else {
+        addPlayerNotice(
+          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，当前未开启音频转码，可能无声。如需声音请在管理后台「基础设置 → FFmpeg 引擎」开启音频转码开关`,
+          'error'
+        )
+      }
     } else {
-      addPlayerNotice(
-        `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，正在通过服务器 FFmpeg 实时转码为 AAC（若仍无声请确认已安装完整版 FFmpeg）`,
-        'info'
-      )
+      if (audioTranscodeEnabled) {
+        addPlayerNotice(
+          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，正在通过服务器 FFmpeg 实时转码为 AAC（若仍无声请确认已安装完整版 FFmpeg）`,
+          'info'
+        )
+      } else {
+        addPlayerNotice(
+          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，当前未开启音频转码，可能无声。如需声音请在管理后台「基础设置 → FFmpeg 引擎」开启音频转码开关`,
+          'error'
+        )
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -239,6 +256,7 @@ export function WatchTogetherCore({
     watchTogether.audioCodec,
     currentMovieId,
     currentMovieSourceType,
+    audioTranscodeEnabled,
   ])
 
   // ── 切换影片时自动搜索同目录字幕 + 内嵌字幕 ──────────────

@@ -339,6 +339,7 @@ router.get(
           betaFeaturesEnabled: settings.betaFeaturesEnabled,
           dashDisabled: settings.dashDisabled,
           embeddedSubtitleEnabled: settings.embeddedSubtitleEnabled,
+          audioTranscodeEnabled: settings.audioTranscodeEnabled,
         },
       });
     } catch (err) {

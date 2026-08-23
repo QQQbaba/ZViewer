@@ -15,6 +15,7 @@ import {
   isFfmpegTranscodeCapable,
   createAudioTranscodeStream,
 } from '../ffmpeg';
+import { getSystemSettings } from '../system-settings';
 
 const PROBE_CACHE_TTL_MS = 5 * 60 * 1000;
 const probeCache = new Map<
@@ -52,6 +53,10 @@ export async function respondWithAudioTranscode(
 ): Promise<boolean> {
   // 仅对可能含不兼容音轨的容器做探测
   if (!TRANSCODE_CHECK_EXTS.test(opts.fileName)) return false;
+
+  // 音频转码总开关（管理后台基础设置）：关闭时一律直推，不探测
+  const { audioTranscodeEnabled } = await getSystemSettings();
+  if (!audioTranscodeEnabled) return false;
 
   // 探测结果缓存
   const cached = probeCache.get(opts.input);

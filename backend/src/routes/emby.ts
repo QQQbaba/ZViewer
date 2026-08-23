@@ -21,6 +21,7 @@ import {
 import { detectMediaFormat, getContentType } from '../services/mediaFormat';
 import { resolveUserMount, resolveMovieStream, proxyHttpUpstream } from '../services/proxy';
 import { upgradeToHttpsIfNeeded } from '../services/url-utils';
+import { getSystemSettings } from '../services/system-settings';
 
 const router = Router();
 
@@ -386,10 +387,14 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
     const BROWSER_SUPPORTED_AUDIO = new Set(['aac', 'mp3', 'flac', 'opus', 'vorbis']);
     const audioStream = source.MediaStreams?.find((s) => s.Type === 'Audio');
     const audioCodec = audioStream?.Codec ?? null;
-    const needsAudioTranscode =
+    const audioIncompatible =
       !!audioStream &&
       !!audioStream.Codec &&
       !BROWSER_SUPPORTED_AUDIO.has(audioStream.Codec.toLowerCase());
+    // 音频转码总开关（管理后台基础设置）：关闭时即使音轨不兼容也走 static 直推，
+    // 浏览器可能无声，前端据此提示用户前往后台开启。
+    const settings = await getSystemSettings();
+    const needsAudioTranscode = audioIncompatible && settings.audioTranscodeEnabled;
 
     // 标题：从 source.Path 取文件名，或回退 itemId
     const title =
@@ -419,6 +424,7 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
       duration: 0,
       audioCodec,
       needsAudioTranscode,
+      audioTranscodeDisabled: audioIncompatible && !settings.audioTranscodeEnabled,
       emby: {
         itemId,
         container: source.Container ?? '',

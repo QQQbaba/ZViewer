@@ -62,6 +62,7 @@ import {
   type InstallProgress,
   type SubtitleStreamInfo,
 } from '../services/ffmpeg';
+import { getSystemSettings } from '../services/system-settings';
 
 const router = Router();
 
@@ -773,21 +774,25 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
     let transcodeNeeded = false;
     let probeDuration: number | null = null;
     if (format === 'mkv' || format === 'avi' || format === 'wmv' || format === 'ts') {
-      try {
-        const probe = await probeMediaInfo(targetAbs);
-        probeDuration = probe.duration;
-        if (needsAudioTranscode(probe.audioCodec)) {
-          // 检查 FFmpeg 是否具备 AAC 编码能力
-          const capable = await isFfmpegTranscodeCapable();
-          if (capable) {
-            transcodeNeeded = true;
-            console.log(`[server-files] 音频转码: ${probe.audioCodec} → AAC, 文件: ${targetAbs}`);
-          } else {
-            console.warn(`[server-files] 音频需转码 (${probe.audioCodec}) 但 FFmpeg 不支持 AAC 编码，使用直接传输（可能无声音）`);
+      // 音频转码总开关：关闭时跳过探测，一律直推（浏览器可能无声）
+      const { audioTranscodeEnabled } = await getSystemSettings();
+      if (audioTranscodeEnabled) {
+        try {
+          const probe = await probeMediaInfo(targetAbs);
+          probeDuration = probe.duration;
+          if (needsAudioTranscode(probe.audioCodec)) {
+            // 检查 FFmpeg 是否具备 AAC 编码能力
+            const capable = await isFfmpegTranscodeCapable();
+            if (capable) {
+              transcodeNeeded = true;
+              console.log(`[server-files] 音频转码: ${probe.audioCodec} → AAC, 文件: ${targetAbs}`);
+            } else {
+              console.warn(`[server-files] 音频需转码 (${probe.audioCodec}) 但 FFmpeg 不支持 AAC 编码，使用直接传输（可能无声音）`);
+            }
           }
+        } catch {
+          // 探测失败，保守地直接流式传输
         }
-      } catch {
-        // 探测失败，保守地直接流式传输
       }
     }
 
