@@ -11,8 +11,10 @@ import { clearCache as clearKazumiCache } from '../services/kazumi';
 import { clearCache as clearAniSubsCache } from '../services/anisubs';
 import {
   authenticateToken,
+  invalidateUserTokens,
   AuthenticatedRequest,
 } from '../middleware/auth';
+import { writeAuditLog } from '../services/audit';
 
 const router = Router();
 
@@ -113,6 +115,15 @@ router.patch(
 
       user.role = role;
       await userRepo.save(user);
+      writeAuditLog({
+        actorUserId: req.user!.userId,
+        actorUsername: req.user!.username,
+        actorRole: req.user!.role,
+        action: 'role_changed',
+        target: `user:${user.id} (${user.username})`,
+        ip: req.ip,
+        detail: `new role: ${role}`,
+      });
       res.json({ success: true, user: { id: user.id, username: user.username, role: user.role } });
     } catch (err) {
       console.error('admin update role error:', err);
@@ -150,6 +161,14 @@ router.post(
         user.role = 'user';
       }
       await userRepo.save(user);
+      writeAuditLog({
+        actorUserId: req.user!.userId,
+        actorUsername: req.user!.username,
+        actorRole: req.user!.role,
+        action: 'user_approved',
+        target: `user:${user.id} (${user.username})`,
+        ip: req.ip,
+      });
       res.json({ success: true, user: { id: user.id, username: user.username, role: user.role, status: user.status } });
     } catch (err) {
       console.error('admin approve user error:', err);
@@ -186,6 +205,20 @@ router.delete(
       }
 
       await userRepo.remove(user);
+      // V4：删除用户后立即使其所有 token 失效——JWT 无状态，不主动吊销的话
+      // 被删用户的 access token 在过期前（最长 1h）仍可访问认证 API。
+      // User 行已删除，invalidateUserTokens 的 update 不影响任何行，
+      // 但内存缓存会被污染为当前时间 → 认证中间件按 iat < invalidBefore 拒绝。
+      // 这里直接写缓存（userId → now）确保拒绝生效。
+      await invalidateUserTokens(user.id);
+      writeAuditLog({
+        actorUserId: req.user!.userId,
+        actorUsername: req.user!.username,
+        actorRole: req.user!.role,
+        action: 'user_deleted',
+        target: `user:${user.id} (${user.username})`,
+        ip: req.ip,
+      });
       res.json({ success: true });
     } catch (err) {
       console.error('admin delete user error:', err);
@@ -313,6 +346,14 @@ router.post(
         try {
           await deleteRoomAndRelations(roomId);
           count++;
+          writeAuditLog({
+            actorUserId: req.user!.userId,
+            actorUsername: req.user!.username,
+            actorRole: req.user!.role,
+            action: 'room_deleted',
+            target: `room:${roomId}`,
+            ip: req.ip,
+          });
         } catch (err) {
           console.error(`admin batch delete room error: ${roomId}`, err);
         }

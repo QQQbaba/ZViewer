@@ -13,12 +13,43 @@ import {
   setAuthCookies,
   setAccessTokenCookie,
   clearAuthCookies,
+  invalidateUserTokens,
   AuthenticatedRequest,
 } from '../middleware/auth';
+import {
+  authLimiter,
+  loginPreCheck,
+  recordLoginFailure,
+  clearLoginFailures,
+  passwordLimiter,
+} from '../middleware/rate-limit';
 import { AVATARS_DIR } from '../services/paths';
+import { writeAuditLog } from '../services/audit';
 
 const router = Router();
 const userRepository = () => AppDataSource.getRepository(User);
+
+/**
+ * 密码强度软提示（不阻断注册/改密，仅返回建议）。
+ * 评分维度：长度 ≥8、含小写、含大写、含数字、含特殊字符。
+ */
+function passwordStrengthHint(password: string): string | undefined {
+  let score = 0;
+  if (password.length >= 8) score += 1;
+  if (password.length >= 12) score += 1;
+  if (/[a-z]/.test(password)) score += 1;
+  if (/[A-Z]/.test(password)) score += 1;
+  if (/\d/.test(password)) score += 1;
+  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+
+  if (score <= 2) {
+    return '密码强度较弱：建议至少 8 位并混合大小写字母、数字和特殊字符';
+  }
+  if (score === 3) {
+    return '密码强度一般：加入更多字符类型可提高安全性';
+  }
+  return undefined; // 强密码不提示
+}
 
 /** 头像上传 multer 配置：仅接受图片，存储到 AVATARS_DIR。 */
 const avatarStorage = multer.diskStorage({
@@ -50,6 +81,7 @@ const avatarUpload = multer({
 
 router.post(
   '/register',
+  authLimiter,
   async (
     req: import('express').Request,
     res: import('express').Response,
@@ -57,15 +89,19 @@ router.post(
     try {
       const { username, password } = req.body;
 
+      // 用户名格式：2-24 位，允许中文字母数字下划线连字符空格（首尾空白已 trim）
+      const USERNAME_PATTERN = /^[\u4e00-\u9fa5A-Za-z0-9_\- ]{2,24}$/;
       if (
         typeof username !== 'string' ||
         typeof password !== 'string' ||
         !username.trim() ||
+        !USERNAME_PATTERN.test(username.trim()) ||
         password.length < 4
       ) {
         res.status(400).json({
           success: false,
-          message: '用户名或密码格式不正确，密码至少 4 位',
+          message:
+            '用户名需 2-24 位（中文/字母/数字/下划线/连字符/空格），密码至少 4 位',
         });
         return;
       }
@@ -87,7 +123,7 @@ router.post(
         return;
       }
 
-      const passwordHash = bcrypt.hashSync(password, 10);
+      const passwordHash = await bcrypt.hash(password, 10);
       const isOpen = mode === 'open';
       const user = userRepository().create({
         username: trimmedUsername,
@@ -109,6 +145,7 @@ router.post(
         message: isOpen
           ? '注册成功'
           : '注册成功，请等待管理员审核通过后再登录',
+        passwordHint: passwordStrengthHint(password),
         user: {
           id: user.id,
           username: user.username,
@@ -126,6 +163,7 @@ router.post(
 
 router.post(
   '/login',
+  loginPreCheck,
   async (
     req: import('express').Request,
     res: import('express').Response,
@@ -146,7 +184,16 @@ router.post(
       }
 
       const user = await userRepository().findOneBy({ username: username.trim() });
-      if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
+      if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+        // 记录登录失败（防暴力破解：连续失败达阈值后临时锁定）
+        recordLoginFailure(req);
+        writeAuditLog({
+          action: 'login_failed',
+          actorUsername: username.trim(),
+          ip: req.ip,
+          success: false,
+          detail: '用户名或密码错误',
+        });
         res.status(401).json({ success: false, message: '用户名或密码错误' });
         return;
       }
@@ -155,11 +202,28 @@ router.post(
         return;
       }
 
+      clearLoginFailures(req);
+
       const tokens = generateTokens(user.id, user.role, user.username);
       setAuthCookies(req, res, tokens.accessToken, tokens.refreshToken);
+
+      // V3：root 使用默认密码时向响应携带告警标记，前端据此显示安全警告
+      const usingDefaultPassword =
+        user.role === 'root' &&
+        bcrypt.compareSync('root', user.passwordHash);
+
+      writeAuditLog({
+        actorUserId: user.id,
+        actorUsername: user.username,
+        actorRole: user.role,
+        action: 'login',
+        ip: req.ip,
+      });
+
       res.json({
         success: true,
         ...tokens,
+        mustChangePassword: usingDefaultPassword || undefined,
         user: {
           id: user.id,
           username: user.username,
@@ -326,6 +390,7 @@ router.get(
 router.patch(
   '/password',
   authenticateToken,
+  passwordLimiter,
   async (
     req: AuthenticatedRequest,
     res: import('express').Response,
@@ -357,16 +422,30 @@ router.patch(
         return;
       }
 
-      if (!bcrypt.compareSync(oldPassword, user.passwordHash)) {
+      if (!(await bcrypt.compare(oldPassword, user.passwordHash))) {
         res.status(401).json({ success: false, message: '原密码错误' });
         return;
       }
 
-      user.passwordHash = bcrypt.hashSync(newPassword, 10);
+      user.passwordHash = await bcrypt.hash(newPassword, 10);
       await userRepo.save(user);
       // 显式触发 autoSave，确保密码修改立即写入文件
       await (AppDataSource.driver as import('typeorm/driver/sqljs/SqljsDriver').SqljsDriver).autoSave().catch(() => {});
-      res.json({ success: true, message: '密码修改成功' });
+      // V5：改密后使此前签发的所有 token 立即失效（含被盗的 refresh token）。
+      // 客户端下次请求会收到 401，凭新密码重新登录获取新 token。
+      await invalidateUserTokens(user.id);
+      writeAuditLog({
+        actorUserId: user.id,
+        actorUsername: user.username,
+        actorRole: user.role,
+        action: 'password_changed',
+        ip: req.ip,
+      });
+      res.json({
+        success: true,
+        message: '密码修改成功，请重新登录',
+        passwordHint: passwordStrengthHint(newPassword),
+      });
     } catch (err) {
       console.error('change password error:', err);
       res.status(500).json({ success: false, message: '修改密码失败' });
@@ -412,6 +491,13 @@ router.patch(
       await userRepo.save(user);
       // 显式触发 autoSave，确保用户名修改立即写入文件
       await (AppDataSource.driver as import('typeorm/driver/sqljs/SqljsDriver').SqljsDriver).autoSave().catch(() => {});
+      writeAuditLog({
+        actorUserId: user.id,
+        actorUsername: user.username,
+        actorRole: user.role,
+        action: 'username_changed',
+        ip: req.ip,
+      });
       res.json({
         success: true,
         message: '用户名修改成功',

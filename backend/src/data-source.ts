@@ -12,6 +12,7 @@ import { PlaybackState } from './entities/PlaybackState';
 import { ServerFolder } from './entities/ServerFolder';
 import { DanmakuTrack } from './entities/DanmakuTrack';
 import { RoomDanmakuMeta } from './entities/RoomDanmakuMeta';
+import { AuditLog } from './entities/AuditLog';
 import { DATABASE_PATH } from './services/paths';
 
 export const AppDataSource = new DataSource({
@@ -25,7 +26,7 @@ export const AppDataSource = new DataSource({
   useLocalForage: false,
   synchronize: true,
   logging: process.env.NODE_ENV === 'development',
-  entities: [Room, Session, User, Comment, BilibiliCredential, Movie, UserMount, SystemSettings, PlaybackState, ServerFolder, DanmakuTrack, RoomDanmakuMeta],
+  entities: [Room, Session, User, Comment, BilibiliCredential, Movie, UserMount, SystemSettings, PlaybackState, ServerFolder, DanmakuTrack, RoomDanmakuMeta, AuditLog],
   migrations: [],
   subscribers: [],
 });

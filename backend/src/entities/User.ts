@@ -33,6 +33,14 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   avatar!: string | null;
 
+  /**
+   * Token 失效时间戳：早于该时间签发的 JWT 一律拒绝。
+   * 修改密码时更新为当前时间——使改密前签发的所有旧 token（含被盗的
+   * refresh token）全部失效。null 表示未设置过失效要求。
+   */
+  @Column({ type: 'datetime', nullable: true })
+  tokenInvalidBefore!: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 
