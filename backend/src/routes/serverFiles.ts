@@ -491,9 +491,12 @@ router.post('/folder', async (req: AuthenticatedRequest, res: Response): Promise
       return;
     }
     const targetAbs = path.join(parentAbs, name);
-    if (targetAbs !== root.absPath && !targetAbs.startsWith(root.absPath + path.sep)) {
-      res.status(400).json({ success: false, message: '路径越权' });
-      return;
+    {
+      const rel = path.relative(root.absPath, targetAbs);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        res.status(400).json({ success: false, message: '路径越权' });
+        return;
+      }
     }
     if (fs.existsSync(targetAbs)) {
       res.status(400).json({ success: false, message: '同名项目已存在' });
@@ -535,9 +538,12 @@ router.post('/rename', async (req: AuthenticatedRequest, res: Response): Promise
     }
     const parentDir = path.dirname(oldAbs);
     const newAbs = path.join(parentDir, newName);
-    if (newAbs !== root.absPath && !newAbs.startsWith(root.absPath + path.sep)) {
-      res.status(400).json({ success: false, message: '路径越权' });
-      return;
+    {
+      const rel = path.relative(root.absPath, newAbs);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        res.status(400).json({ success: false, message: '路径越权' });
+        return;
+      }
     }
     if (fs.existsSync(newAbs) && oldAbs !== newAbs) {
       res.status(400).json({ success: false, message: '同名项目已存在' });

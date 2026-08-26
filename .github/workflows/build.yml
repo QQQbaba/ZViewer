@@ -168,6 +168,47 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Generate release body with commit summary
+        # 收集自上一个 tag 以来的全部提交摘要，写入 release body。
+        # 配合 generate_release_notes: true，GitHub 还会追加「New Contributors」
+        # 与「Full Changelog」对比链接等结构化信息。
+        shell: bash
+        run: |
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+          # 按创建时间倒序列出所有 tag，跳过当前 tag，取第一个即为上一个 tag
+          PREV_TAG=$(git for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags | grep -v "^${CURRENT_TAG}$" | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            LOG=$(git log --pretty=format:"- %s" "${PREV_TAG}..${CURRENT_TAG}" | head -100)
+          else
+            # 没有上一个 tag（首次发布），列出当前 tag 指向提交的全部历史
+            LOG=$(git log --pretty=format:"- %s" "${CURRENT_TAG}" | head -100)
+          fi
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          {
+            echo "## 更新内容"
+            echo ""
+            if [ -n "$LOG" ]; then
+              echo "${LOG}"
+            else
+              echo "- 无提交记录"
+            fi
+            echo ""
+            echo "---"
+            echo ""
+            echo "## 下载说明"
+            echo ""
+            echo "- **Windows**: 下载 \`zviewer-windows-x64.zip\`，解压后运行 \`start.bat\`"
+            echo "- **Linux**: 下载 \`zviewer-linux-x64.tar.gz\`，解压后运行 \`./start.sh\`"
+            echo "- **Docker**: \`docker pull <username>/zviewer:${VERSION}\`"
+          } > release_body.md
+          echo "=== Generated release body ==="
+          cat release_body.md
+
       - name: Download all artifacts
         uses: actions/download-artifact@v7
         with:
@@ -177,6 +218,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          body_path: release_body.md
           files: |
             zviewer-linux-x64.tar.gz
             zviewer-windows-x64.zip

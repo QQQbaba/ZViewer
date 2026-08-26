@@ -6,3 +6,4 @@
 export { HeartbeatHandler } from './heartbeat.handler';
 export { TrackSyncHandler } from './track-sync.handler';
 export { SeekApprovalHandler } from './seek-approval.handler';
+export { SubtitleSyncHandler } from './subtitle-sync.handler';

@@ -64,6 +64,7 @@ import {
   HeartbeatHandler,
   TrackSyncHandler,
   SeekApprovalHandler,
+  SubtitleSyncHandler,
 } from './modules/sync-playback';
 import {
   PlaybackMemoryHandler,
@@ -442,6 +443,7 @@ async function bootstrap() {
     .add(new PlaybackMemoryHandler())
     .add(new HeartbeatHandler())
     .add(new TrackSyncHandler())
+    .add(new SubtitleSyncHandler())
     .add(new SeekApprovalHandler())
     .add(new CommentHandler())
     .add(new CliHandler())

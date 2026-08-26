@@ -88,7 +88,10 @@ export function resolveSafePath(
   }
   const normalized = relPath.replace(/^\/+/, '');
   const absolute = path.resolve(root.absPath, normalized);
-  if (absolute !== root.absPath && !absolute.startsWith(root.absPath + path.sep)) {
+  // 越权判断：path.relative 在 Windows 盘符根目录（如 D:\）下也能正确计算，
+  // 避免 startsWith(root + path.sep) 在根路径末尾已带分隔符时拼接出双斜杠而误判。
+  const rel = path.relative(root.absPath, absolute);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
     throw new Error('路径越权');
   }
   return { abs: absolute, root };
@@ -122,7 +125,8 @@ export function toRelativePath(absolutePath: string): string {
 export function resolveSafePathLegacy(userPath: string | undefined): string {
   const normalized = (userPath || '').trim().replace(/^\/+/, '');
   const absolute = path.resolve(UPLOADS_ROOT, normalized);
-  if (absolute !== UPLOADS_ROOT && !absolute.startsWith(UPLOADS_ROOT + path.sep)) {
+  const rel = path.relative(UPLOADS_ROOT, absolute);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
     throw new Error('路径越权');
   }
   return absolute;
