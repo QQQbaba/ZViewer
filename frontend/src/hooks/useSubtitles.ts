@@ -88,6 +88,8 @@ export interface SubtitleState {
   subtitleOffset: number
   /** 字幕水平位移（百分比，-50~50），正值右移 */
   subtitleShiftX: number
+  /** 字幕垂直位移（百分比，-50~50），正值下移 */
+  subtitleShiftY: number
   /** 字幕字体族（CSS font-family），空串表示默认 */
   subtitleFontFamily: string
 }
@@ -99,6 +101,7 @@ interface SubtitleBroadcastPayload {
   fontSize: number
   offset: number
   shiftX?: number
+  shiftY?: number
   fontFamily?: string
 }
 
@@ -114,6 +117,7 @@ const DEFAULT_SUBTITLE_STATE: SubtitleState = {
   subtitleFontSize: 20,
   subtitleOffset: 0,
   subtitleShiftX: 0,
+  subtitleShiftY: 0,
   subtitleFontFamily: '',
 }
 
@@ -134,6 +138,17 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
   // 观众本地偏好标记：观众自行修改过字幕设置（开关/轨道/字号/偏移）后，
   // 房主广播的 subtitle-update 只更新轨道数据，不再覆盖观众的本地选择。
   const viewerPrefTouchedRef = useRef(false)
+  /**
+   * 内嵌字幕自动加载防重入标记：
+   * StrictMode 双执行 / sourceUrl·开关异步初始化会重跑加载 effect，
+   * 首次加载还在 await 探测时二次调用会与首路并行、重复建轨
+   * （如 2 条字幕轨变成 4 条）。相同 URL 的 loading/done 均直接跳过；
+   * clearTracks 只重置 done（loading 流无法取消，保留标记防并行）。
+   */
+  const embeddedAutoLoadRef = useRef<{
+    url: string
+    status: 'loading' | 'done'
+  } | null>(null)
 
   const broadcast = useCallback(
     (next: SubtitleState) => {
@@ -145,6 +160,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         fontSize: next.subtitleFontSize,
         offset: next.subtitleOffset,
         shiftX: next.subtitleShiftX,
+        shiftY: next.subtitleShiftY,
         fontFamily: next.subtitleFontFamily,
       }
       socket.emit('subtitle-update', { roomId, ...payload })
@@ -288,6 +304,11 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
   )
 
   const clearTracks = useCallback(() => {
+    // 清理自动加载的 URL 标记：done（已加载完）允许下次重新加载；
+    // loading（进行中）保留——正在加载的流无法取消，标记继续防并行重入
+    if (embeddedAutoLoadRef.current?.status === 'done') {
+      embeddedAutoLoadRef.current = null
+    }
     setState((prev) => {
       const next: SubtitleState = {
         ...prev,
@@ -377,6 +398,20 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
             if (cues.length === 0) return
             setState((prev) => {
               if (trackIndex < 0) {
+                // 去重：相同 label 的轨道已存在（手动重复提取 / 并行流）
+                // 时复用它，避免重复建轨（如 2 条字幕轨变 4 条）
+                const existing = prev.subtitleTracks.findIndex(
+                  (t) => t.label === track.label
+                )
+                if (existing >= 0) {
+                  trackIndex = existing
+                  return {
+                    ...prev,
+                    subtitleTracks: prev.subtitleTracks.map((t, i) =>
+                      i === existing ? { ...t, cues: [...t.cues, ...cues] } : t
+                    ),
+                  }
+                }
                 trackIndex = prev.subtitleTracks.length
                 const next: SubtitleState = {
                   ...prev,
@@ -461,6 +496,11 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
       // 否则 401 → 探测失败显示「未检测到内嵌字幕」。直链 URL 原样返回。
       const url = appendAuthToken(sourceUrl ?? buildServerFileProxyUrl(filePath))
 
+      // 防并行重入：同一 URL 加载中（首路还在探测）或已完成时，
+      // StrictMode/effect 重跑的二次调用直接跳过，避免重复建轨
+      if (embeddedAutoLoadRef.current?.url === url) return 0
+      embeddedAutoLoadRef.current = { url, status: 'loading' }
+
       // 前端路径：MKV demux 探测 + 流式提取（原后端 ffmpeg 职责）
       try {
         const probed = await probeMkvSubtitleTracks(url)
@@ -489,6 +529,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         }
         if (started > 0) {
           // 首段已到达、字幕轨已生效，后台继续补齐，无需等待
+          embeddedAutoLoadRef.current = { url, status: 'done' }
           return started
         }
         // 挂载源（sourceUrl 模式）：无后端回退（直链后端不可访问；
@@ -497,6 +538,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
           console.info(
             '[useSubtitles] 挂载源前端提取内嵌字幕不可用（非 MKV / 位图字幕轨 / CORS 拒绝），跳过自动加载'
           )
+          embeddedAutoLoadRef.current = null
           return 0
         }
         // 前端一条都没提出来（如全部为位图字幕轨）→ 回退后端链路
@@ -506,6 +548,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
             '[useSubtitles] 挂载源前端探测内嵌字幕失败，跳过（直链/中转自动加载无回退）：',
             err instanceof Error ? err.message : err
           )
+          embeddedAutoLoadRef.current = null
           return 0
         }
         console.info(
@@ -528,9 +571,13 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
           '[useSubtitles] resolve server file for embedded subtitles failed:',
           err
         )
+        embeddedAutoLoadRef.current = null
         return 0
       }
-      if (tracks.length === 0) return 0
+      if (tracks.length === 0) {
+        embeddedAutoLoadRef.current = { url, status: 'done' }
+        return 0
+      }
 
       const backendLoaded: SubtitleTrack[] = []
       for (const track of tracks) {
@@ -551,7 +598,10 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         }
       }
 
-      if (backendLoaded.length === 0) return 0
+      if (backendLoaded.length === 0) {
+        embeddedAutoLoadRef.current = { url, status: 'done' }
+        return 0
+      }
 
       setState((prev) => {
         const next: SubtitleState = {
@@ -565,6 +615,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         broadcast(next)
         return next
       })
+      embeddedAutoLoadRef.current = { url, status: 'done' }
       return backendLoaded.length
     },
     [isHost, broadcast]
@@ -746,6 +797,13 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
           lang: language || track.language || undefined,
         }
         setState((prev) => {
+          // 去重：相同 label 的轨道已存在（重复手动提取）时激活它而非重复建轨
+          const existing = prev.subtitleTracks.findIndex(
+            (t) => t.label === newTrack.label
+          )
+          if (existing >= 0) {
+            return prev
+          }
           const next: SubtitleState = {
             ...prev,
             subtitleTracks: [...prev.subtitleTracks, newTrack],
@@ -807,6 +865,19 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     [broadcast, isHost]
   )
 
+  const setShiftY = useCallback(
+    (shiftY: number) => {
+      // 观众本地调垂直位移：标记偏好，后续房主广播不覆盖此选择
+      if (!isHost) viewerPrefTouchedRef.current = true
+      setState((prev) => {
+        const next: SubtitleState = { ...prev, subtitleShiftY: shiftY }
+        broadcast(next)
+        return next
+      })
+    },
+    [broadcast, isHost]
+  )
+
   const setFontFamily = useCallback(
     (fontFamily: string) => {
       // 观众本地换字体：标记偏好，后续房主广播不覆盖此选择
@@ -847,6 +918,9 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         subtitleShiftX: touched
           ? prev.subtitleShiftX
           : payload.shiftX ?? prev.subtitleShiftX,
+        subtitleShiftY: touched
+          ? prev.subtitleShiftY
+          : payload.shiftY ?? prev.subtitleShiftY,
         subtitleFontFamily: touched
           ? prev.subtitleFontFamily
           : payload.fontFamily ?? prev.subtitleFontFamily,
@@ -877,6 +951,7 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     setFontSize,
     setOffset,
     setShiftX,
+    setShiftY,
     setFontFamily,
   }
 }

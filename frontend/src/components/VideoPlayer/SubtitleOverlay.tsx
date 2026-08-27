@@ -22,6 +22,7 @@ interface SubtitleOverlayProps {
   fontSize: number
   offset: number // 秒，正值延迟显示
   shiftX?: number // 百分比，-50~50，正值右移
+  shiftY?: number // 百分比，-50~50，正值下移
   fontFamily?: string // CSS font-family，空串表示默认
 }
 
@@ -73,6 +74,7 @@ export function SubtitleOverlay({
   fontSize,
   offset,
   shiftX = 0,
+  shiftY = 0,
   fontFamily = '',
 }: SubtitleOverlayProps) {
   const [activeCues, setActiveCues] = useState<ParsedCue[]>([])
@@ -126,7 +128,10 @@ export function SubtitleOverlay({
     >
       {laidOut.map((cue, i) => {
         const line = cue.resolvedLine
-        const position = cue.position ?? 50
+        // 垂直位移叠加在防重叠布局后的行位置上（百分比容器高）
+        const top = line + shiftY
+        // 水平位移叠加在 cue 原始位置上（百分比容器宽）
+        const position = (cue.position ?? 50) + shiftX
         const align = cue.align ?? 'center'
 
         return (
@@ -136,7 +141,7 @@ export function SubtitleOverlay({
             style={{
               position: 'absolute',
               left: `${position}%`,
-              top: `${line}%`,
+              top: `${top}%`,
               transform: getTransform(line, align),
               maxWidth: '90%',
               fontSize: `${fontSize}px`,
@@ -149,6 +154,7 @@ export function SubtitleOverlay({
               whiteSpace: 'pre-wrap',
               wordWrap: 'break-word',
               padding: '0 8px',
+              ...(fontFamily ? { fontFamily } : {}),
             }}
           />
         )

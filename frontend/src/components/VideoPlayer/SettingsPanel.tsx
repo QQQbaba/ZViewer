@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import {
   ChevronDown,
+  ChevronRight,
   Check,
   Plus,
   Upload,
@@ -44,6 +45,9 @@ interface SettingsPanelProps {
   activeTrackIndex?: number
   subtitleFontSize?: number
   subtitleOffset?: number
+  subtitleShiftX?: number
+  subtitleShiftY?: number
+  subtitleFontFamily?: string
   browseMovieId?: number
   onToggleSubtitles?: (enabled: boolean) => void
   onSelectSubtitleTrack?: (index: number) => void
@@ -56,6 +60,9 @@ interface SettingsPanelProps {
   ) => void
   onChangeSubtitleFontSize?: (size: number) => void
   onChangeSubtitleOffset?: (offset: number) => void
+  onChangeSubtitleShiftX?: (shiftX: number) => void
+  onChangeSubtitleShiftY?: (shiftY: number) => void
+  onChangeSubtitleFontFamily?: (fontFamily: string) => void
   onAutoSearchSubtitles?: () => Promise<number>
   canAutoSearchSubtitles?: boolean
   canLoadEmbeddedSubtitles?: boolean
@@ -83,6 +90,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
     activeTrackIndex,
     subtitleFontSize,
     subtitleOffset,
+    subtitleShiftX,
+    subtitleShiftY,
+    subtitleFontFamily,
     browseMovieId,
     onToggleSubtitles,
     onSelectSubtitleTrack,
@@ -91,6 +101,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onAddSubtitleContent,
     onChangeSubtitleFontSize,
     onChangeSubtitleOffset,
+    onChangeSubtitleShiftX,
+    onChangeSubtitleShiftY,
+    onChangeSubtitleFontFamily,
     onAutoSearchSubtitles,
     canAutoSearchSubtitles,
     canLoadEmbeddedSubtitles,
@@ -121,7 +134,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
   // 弹幕/字幕视图由 Tab 决定（观众同样拥有字幕设置 Tab，仅少加载类功能）
   const isDanmakuView = !!danmakuStyle && settingsTab === 'danmaku'
   const isSubtitleView = settingsTab === 'subtitle' || !danmakuStyle
-  const showAdvancedPanel = advancedOpen && isDanmakuView
+  // 高级设置侧面板：弹幕与字幕各自的内容，复用同一个展开状态
+  const showAdvancedPanel = advancedOpen && (isDanmakuView || isSubtitleView)
   const showBrowserPanel =
     browserOpen && isSubtitleView && browseMovieId != null
 
@@ -188,7 +202,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
   return (
     <div className="absolute bottom-full right-2 z-[200] mb-1">
-      {/* 延伸面板：高级设置（独立动画组件，absolute 定位不影响主面板） */}
+      {/* 延伸面板：高级设置（独立动画组件，absolute 定位不影响主面板）
+          弹幕与字幕各有独立的高级内容，复用同一个展开状态 */}
       <AnimatedSidePanel
         open={showAdvancedPanel}
         width={SIDE_PANEL_WIDTH}
@@ -196,12 +211,97 @@ export function SettingsPanel(props: SettingsPanelProps) {
         mainPanelWidth={MAIN_PANEL_WIDTH}
         maxHeight={420}
       >
-        <DanmakuAdvancedSettings
-          style={danmakuStyle!}
-          setStyle={onDanmakuStyleChange ?? (() => {})}
-          setFilters={onDanmakuFilterChange ?? (() => {})}
-          setAdvancedStyle={onDanmakuAdvancedChange ?? (() => {})}
-        />
+        {isDanmakuView ? (
+          <DanmakuAdvancedSettings
+            style={danmakuStyle!}
+            setStyle={onDanmakuStyleChange ?? (() => {})}
+            setFilters={onDanmakuFilterChange ?? (() => {})}
+            setAdvancedStyle={onDanmakuAdvancedChange ?? (() => {})}
+          />
+        ) : (
+          <div className="flex flex-col gap-2">
+            <div
+              className="text-xs font-semibold uppercase tracking-wide"
+              style={{ color: 'var(--md-sys-color-on-surface)' }}
+            >
+              高级设置
+            </div>
+            <Slider
+              label="字号"
+              size="sm"
+              value={subtitleFontSize ?? 20}
+              min={12}
+              max={36}
+              step={1}
+              valueFormatter={(v) => `${v}px`}
+              onChange={(v) => onChangeSubtitleFontSize?.(v)}
+            />
+            <Slider
+              label="时间偏移"
+              size="sm"
+              value={subtitleOffset ?? 0}
+              min={-5}
+              max={5}
+              step={0.1}
+              valueFormatter={(v) =>
+                v > 0 ? `+${v.toFixed(1)}s` : `${v.toFixed(1)}s`
+              }
+              onChange={(v) => onChangeSubtitleOffset?.(v)}
+            />
+            <Slider
+              label="水平位移"
+              size="sm"
+              value={subtitleShiftX ?? 0}
+              min={-50}
+              max={50}
+              step={1}
+              valueFormatter={(v) =>
+                v > 0 ? `右移${v}%` : v < 0 ? `左移${-v}%` : '居中'
+              }
+              onChange={(v) => onChangeSubtitleShiftX?.(v)}
+            />
+            <Slider
+              label="垂直位移"
+              size="sm"
+              value={subtitleShiftY ?? 0}
+              min={-50}
+              max={50}
+              step={1}
+              valueFormatter={(v) =>
+                v > 0 ? `下移${v}%` : v < 0 ? `上移${-v}%` : '原始'
+              }
+              onChange={(v) => onChangeSubtitleShiftY?.(v)}
+            />
+            <div>
+              <div
+                className="mb-1 text-[11px] font-medium uppercase tracking-wide"
+                style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+              >
+                字体
+              </div>
+              <select
+                value={subtitleFontFamily ?? ''}
+                onChange={(e) =>
+                  onChangeSubtitleFontFamily?.(e.target.value)
+                }
+                className="w-full rounded-md border bg-transparent px-2 py-1.5 text-xs outline-none"
+                style={{
+                  borderColor: 'var(--md-sys-color-outline)',
+                  color: 'var(--md-sys-color-on-surface)',
+                }}
+              >
+                <option value="">默认</option>
+                <option value="'Microsoft YaHei', sans-serif">微软雅黑</option>
+                <option value="'SimHei', sans-serif">黑体</option>
+                <option value="'SimSun', sans-serif">宋体</option>
+                <option value="'KaiTi', sans-serif">楷体</option>
+                <option value="sans-serif">无衬线 (Sans)</option>
+                <option value="serif">衬线 (Serif)</option>
+                <option value="monospace">等宽 (Mono)</option>
+              </select>
+            </div>
+          </div>
+        )}
       </AnimatedSidePanel>
 
       {/* 延伸面板：字幕目录浏览 */}
@@ -521,7 +621,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
                             size="sm"
                             className="h-7 w-full justify-center gap-1 text-xs"
                             icon={<FolderOpen className="h-3 w-3" />}
-                            onClick={() => setBrowserOpen((v) => !v)}
+                            onClick={() => {
+                              setBrowserOpen((v) => !v)
+                              setAdvancedOpen(false)
+                            }}
                           >
                             {browserOpen ? '关闭浏览' : '浏览目录'}
                           </Button>
@@ -530,45 +633,33 @@ export function SettingsPanel(props: SettingsPanelProps) {
                   )}
                 </div>
                 )}
-                <div
-                  className="mt-1 border-t pt-1"
-                  style={{
-                    borderColor:
-                      'color-mix(in srgb, var(--md-sys-color-outline) 30%, transparent)',
-                  }}
-                >
-                  <Slider
-                    label="字号"
-                    size="sm"
-                    value={subtitleFontSize ?? 20}
-                    min={12}
-                    max={36}
-                    step={1}
-                    valueFormatter={(v) => `${v}px`}
-                    onChange={(v) => onChangeSubtitleFontSize?.(v)}
-                  />
-                </div>
-                {(activeTrackIndex ?? -1) >= 0 && onChangeSubtitleOffset && (
-                  <div
-                    className="mt-1 border-t pt-1"
-                    style={{
-                      borderColor:
-                        'color-mix(in srgb, var(--md-sys-color-outline) 30%, transparent)',
+                {/* 高级设置入口（字号 / 时间偏移 / 水平位移 / 字体在延伸面板中） */}
+                {(onChangeSubtitleFontSize ||
+                  onChangeSubtitleOffset ||
+                  onChangeSubtitleShiftX ||
+                  onChangeSubtitleFontFamily) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdvancedOpen((v) => !v)
+                      setBrowserOpen(false)
                     }}
+                    className={cn(
+                      'mt-1 flex w-full items-center justify-center gap-1 rounded-md border py-1 text-xs font-medium transition-all active:brightness-95',
+                      advancedOpen
+                        ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)] border-transparent'
+                        : 'text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                    )}
+                    style={{ borderColor: 'var(--md-sys-color-outline)' }}
                   >
-                    <Slider
-                      label="时间偏移"
-                      size="sm"
-                      value={subtitleOffset ?? 0}
-                      min={-5}
-                      max={5}
-                      step={0.1}
-                      valueFormatter={(v) =>
-                        v > 0 ? `+${v.toFixed(1)}s` : `${v.toFixed(1)}s`
-                      }
-                      onChange={(v) => onChangeSubtitleOffset?.(v)}
+                    {advancedOpen ? '收起高级设置' : '高级设置'}
+                    <ChevronRight
+                      className={cn(
+                        'h-3.5 w-3.5 transition-transform',
+                        advancedOpen && 'rotate-180'
+                      )}
                     />
-                  </div>
+                  </button>
                 )}
               </>
             )}

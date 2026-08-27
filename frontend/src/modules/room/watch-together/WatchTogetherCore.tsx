@@ -1669,6 +1669,7 @@ export function WatchTogetherCore({
           background-color: transparent;
           color: #ffffff;
           text-shadow: 0 0 4px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.9);
+          ${subtitles.subtitleFontFamily ? `font-family: ${subtitles.subtitleFontFamily};` : ''}
         }
       `}</style>
 
@@ -1705,6 +1706,9 @@ export function WatchTogetherCore({
             enabled={subtitles.subtitleEnabled}
             fontSize={subtitles.subtitleFontSize}
             offset={subtitles.subtitleOffset}
+            shiftX={subtitles.subtitleShiftX}
+            shiftY={subtitles.subtitleShiftY}
+            fontFamily={subtitles.subtitleFontFamily}
           />,
           slots.overlayRoot
         )}
@@ -1826,12 +1830,14 @@ export function WatchTogetherCore({
           slots.panelRoot
         )}
 
-      {/* 设置面板锚点（右下角，控制栏上方） */}
+      {/* 设置面板锚点（右下角，控制栏上方）
+          bottom = 控制栏总高（外层 p-3 + 内层 p-2 + 进度条 + 按钮行 ≈ 88px），
+          使面板底边与控制栏顶边对齐，不再被控制栏遮挡 */}
       {createPortal(
         <div
           ref={settingsAnchorRef}
           className="absolute"
-          style={{ right: 8, bottom: 64 }}
+          style={{ right: 8, bottom: 92 }}
         >
           {settingsOpen && (
             <SettingsPanel
@@ -1842,6 +1848,9 @@ export function WatchTogetherCore({
               activeTrackIndex={subtitles.activeTrackIndex}
               subtitleFontSize={subtitles.subtitleFontSize}
               subtitleOffset={subtitles.subtitleOffset}
+              subtitleShiftX={subtitles.subtitleShiftX}
+              subtitleShiftY={subtitles.subtitleShiftY}
+              subtitleFontFamily={subtitles.subtitleFontFamily}
               browseMovieId={
                 isHost &&
                 currentMovieId != null &&
@@ -1856,6 +1865,9 @@ export function WatchTogetherCore({
               onAddSubtitleContent={subtitles.addTrackFromContent}
               onChangeSubtitleFontSize={subtitles.setFontSize}
               onChangeSubtitleOffset={subtitles.setOffset}
+              onChangeSubtitleShiftX={subtitles.setShiftX}
+              onChangeSubtitleShiftY={subtitles.setShiftY}
+              onChangeSubtitleFontFamily={subtitles.setFontFamily}
               onAutoSearchSubtitles={
                 currentMovieId != null && isHost
                   ? () => subtitles.searchAutoSubtitles(currentMovieId)
