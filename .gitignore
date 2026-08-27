@@ -2,6 +2,7 @@
 node_modules/
 dist/
 build/
+.zcode/
 .next/
 coverage/
 __pycache__/
