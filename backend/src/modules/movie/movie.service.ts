@@ -222,6 +222,7 @@ export class MovieService {
       username: typeof data.username === 'string' ? data.username : null,
       password: typeof data.password === 'string' ? data.password : null,
       directLink: data.directLink === true,
+      wasmEngine: data.wasmEngine === true,
       sourceMeta: normalizeSourceMeta(data.sourceMeta),
       order: nextOrder,
     });
@@ -283,6 +284,7 @@ export class MovieService {
     if (typeof data.username === 'string') update.username = data.username;
     if (typeof data.password === 'string') update.password = data.password;
     if (typeof data.directLink === 'boolean') update.directLink = data.directLink;
+    if (typeof data.wasmEngine === 'boolean') update.wasmEngine = data.wasmEngine;
     if (data.sourceMeta !== undefined) update.sourceMeta = normalizeSourceMeta(data.sourceMeta);
 
     await repo.update({ id: movie.id }, update);
@@ -363,6 +365,7 @@ export class MovieService {
       username: movie.username,
       password: movie.password,
       directLink: movie.directLink,
+      wasmEngine: movie.wasmEngine,
       sourceMeta: parseSourceMeta(movie.sourceMeta),
       order: movie.order,
       createdAt: movie.createdAt.toISOString(),

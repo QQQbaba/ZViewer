@@ -118,9 +118,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const [browserOpen, setBrowserOpen] = useState(false)
   const subtitleFileInputRef = useRef<HTMLInputElement>(null)
 
-  // 当前是否在弹幕视图（房主切到弹幕 Tab，或观众端默认弹幕）
-  const isDanmakuView = !!danmakuStyle && (!isHost || settingsTab === 'danmaku')
-  const isSubtitleView = isHost && (settingsTab === 'subtitle' || !danmakuStyle)
+  // 弹幕/字幕视图由 Tab 决定（观众同样拥有字幕设置 Tab，仅少加载类功能）
+  const isDanmakuView = !!danmakuStyle && settingsTab === 'danmaku'
+  const isSubtitleView = settingsTab === 'subtitle' || !danmakuStyle
   const showAdvancedPanel = advancedOpen && isDanmakuView
   const showBrowserPanel =
     browserOpen && isSubtitleView && browseMovieId != null
@@ -232,8 +232,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
             '0 8px 24px -8px color-mix(in srgb, var(--md-sys-color-shadow) 40%, transparent)',
         }}
       >
-        {/* Tab 切换（仅房主且有弹幕设置时显示） */}
-        {danmakuStyle && isHost ? (
+        {/* Tab 切换（房主与观众均显示；观众同样有字幕设置 Tab） */}
+        {danmakuStyle ? (
           <div
             className="mb-1.5 grid grid-cols-2 gap-1.5 rounded-lg border p-1"
             style={{
@@ -264,13 +264,6 @@ export function SettingsPanel(props: SettingsPanelProps) {
               )
             })}
           </div>
-        ) : danmakuStyle && !isHost ? (
-          <div
-            className="mb-1.5 text-xs font-semibold"
-            style={{ color: 'var(--md-sys-color-on-surface)' }}
-          >
-            弹幕
-          </div>
         ) : (
           <div
             className="mb-1.5 text-xs font-semibold"
@@ -280,8 +273,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </div>
         )}
 
-        {/* 内容 */}
-        {isHost && (settingsTab === 'subtitle' || !danmakuStyle) ? (
+        {/* 内容：房主与观众均显示字幕设置（观众少加载类功能） */}
+        {(settingsTab === 'subtitle' || !danmakuStyle) ? (
           <>
             <div className="flex items-center justify-between py-0.5">
               <span
@@ -292,7 +285,6 @@ export function SettingsPanel(props: SettingsPanelProps) {
               </span>
               <Switch
                 checked={!!subtitleEnabled}
-                disabled={!isHost}
                 onChange={(e) => onToggleSubtitles?.(e.target.checked)}
               />
             </div>
@@ -327,8 +319,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 </div>
               </div>
             )}
-            {isHost && subtitleEnabled && (
+            {subtitleEnabled && (
               <>
+                {/* 加载字幕（URL / 文件 / 自动识别 / 内嵌提取 / 目录浏览）：
+                    仅房主可见。观众的字幕数据来自房主广播，无需也无权加载，
+                    其中「浏览目录」明确不向观众开放 */}
+                {isHost && (
                 <div
                   className="mt-1 border-t pt-1"
                   style={{
@@ -533,6 +529,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                     </div>
                   )}
                 </div>
+                )}
                 <div
                   className="mt-1 border-t pt-1"
                   style={{
@@ -574,14 +571,6 @@ export function SettingsPanel(props: SettingsPanelProps) {
                   </div>
                 )}
               </>
-            )}
-            {!isHost && (
-              <div
-                className="mt-1 text-[11px]"
-                style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-              >
-                字幕由房主控制
-              </div>
             )}
           </>
         ) : (

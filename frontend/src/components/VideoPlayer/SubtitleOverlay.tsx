@@ -21,6 +21,8 @@ interface SubtitleOverlayProps {
   enabled: boolean
   fontSize: number
   offset: number // 秒，正值延迟显示
+  shiftX?: number // 百分比，-50~50，正值右移
+  fontFamily?: string // CSS font-family，空串表示默认
 }
 
 /** 计算字幕元素的 CSS transform */
@@ -70,6 +72,8 @@ export function SubtitleOverlay({
   enabled,
   fontSize,
   offset,
+  shiftX = 0,
+  fontFamily = '',
 }: SubtitleOverlayProps) {
   const [activeCues, setActiveCues] = useState<ParsedCue[]>([])
   // 缓存上次激活的 cue 索引字符串，避免不必要的状态更新

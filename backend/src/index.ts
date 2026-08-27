@@ -318,6 +318,17 @@ async function bootstrap() {
   const hasFrontendDist = fs.existsSync(frontendDist);
   if (hasFrontendDist) {
     console.log(`[static] 提供前端静态文件: ${frontendDist}`);
+    // ffmpeg.wasm 核心文件（~32MB）与 JASSUB 字体等大体积资源：
+    // 强缓存（immutable + 1 年），配合文件名/ETag 变化自动失效。
+    // 避免每次初始化 wasm 引擎都重新下载 32MB 核心。
+    app.use(
+      '/ffmpeg',
+      express.static(path.join(frontendDist, 'ffmpeg'), {
+        fallthrough: false,
+        maxAge: '1y',
+        immutable: true,
+      })
+    );
     app.use(express.static(frontendDist));
     // SPA 回退延迟到所有 API 路由注册之后（见文件末尾）
   } else {

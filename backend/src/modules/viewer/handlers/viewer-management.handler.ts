@@ -104,6 +104,11 @@ export class ViewerManagementHandler implements SocketEventHandler {
           io.to(payload.viewerSocketId).emit('current-movie', {
             movieId: roomStateService.getCurrentMovieId(sharer.roomId),
           });
+          // 补发房主当前字幕状态（观众加入前已加载的字幕）
+          const cachedSubtitle = roomStateService.getSubtitle(sharer.roomId);
+          if (cachedSubtitle != null) {
+            io.to(payload.viewerSocketId).emit('subtitle-update', cachedSubtitle);
+          }
 
           // 广播 viewer-joined 给房间内所有成员
           const joinedPayload: ViewerJoinedPayload = {

@@ -69,6 +69,14 @@ export interface PlayerSource {
   /** 防盗链 headers（由后端 resolve 返回，走代理时使用） */
   headers?: Record<string, string>
   /**
+   * 影片级 FFmpeg WASM 引擎标记。
+   *
+   * 添加影片时勾选「启用 FFmpeg WASM 引擎」并检测到需要（DTS 音轨 /
+   * 内嵌字幕）时为 true：播放该影片直接启用 wasm 引擎，
+   * 不依赖全局 audioTranscodeEnabled 开关（与全局开关为 OR 关系）。
+   */
+  wasmEngine?: boolean
+  /**
    * 从特定时间附近开始加载（仅 MSE 引擎使用）。
    *
    * 用于 seek 到 SourceBuffer 中已清理的位置时，通过 Range 请求从目标位置附近

@@ -85,6 +85,13 @@ export interface MovieDto {
   /** 是否为直链 */
   directLink?: boolean;
   /**
+   * 影片级 FFmpeg WASM 引擎标记。
+   *
+   * 添加影片时勾选并检测到需要（DTS 音轨转码 / 内嵌字幕提取）时为 true，
+   * 播放时该影片直接启用 wasm 引擎，不依赖全局 audioTranscodeEnabled。
+   */
+  wasmEngine?: boolean;
+  /**
    * ani-subs 番剧源元数据。
    *
    * 存储 sourceId 和 episode 信息，用于播放时重新解析播放地址。

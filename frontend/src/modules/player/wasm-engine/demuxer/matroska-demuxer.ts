@@ -20,12 +20,18 @@ export interface DemuxedTrack {
   trackNumber: number
   trackType: number
   codecId: string
-  /** CodecPrivate 原始字节（avcC / AudioSpecificConfig 等，封装器必需） */
+  /** CodecPrivate 原始字节（avcC / AudioSpecificConfig / ASS 头等） */
   codecPrivate: Uint8Array | null
   samplingRate: number | null
   channels: number | null
   pixelWidth: number | null
   pixelHeight: number | null
+  /** 轨道语言（IETF/BCP47 简写，如 'chi'） */
+  language: string | null
+  /** 轨道名称（常存字幕标题） */
+  name: string | null
+  /** ContentCompAlgo：0=none 1=zlib 2=bzip2（>0 时帧数据被压缩） */
+  contentCompAlgo: number
 }
 
 /** 解出的一个媒体帧 */
@@ -36,6 +42,8 @@ export interface DemuxedFrame {
   /** 关键帧标记（BlockGroup 内的 Block 恒为 false） */
   keyframe: boolean
   data: Uint8Array
+  /** BlockDuration（毫秒）；SimpleBlock 无时长（字幕轨靠它界定显示区间） */
+  durationMs: number | null
 }
 
 /** Info 元信息 */
@@ -70,6 +78,9 @@ const MASTER_IDS = new Set<number>([
   EBML_IDS.VIDEO,
   EBML_IDS.CLUSTER,
   EBML_IDS.BLOCK_GROUP,
+  EBML_IDS.CONTENT_ENCODINGS,
+  EBML_IDS.CONTENT_ENCODING,
+  EBML_IDS.CONTENT_COMPRESSION,
 ])
 
 export class MatroskaDemuxer {
@@ -238,7 +249,14 @@ export class MatroskaDemuxer {
           channels: null,
           pixelWidth: null,
           pixelHeight: null,
+          language: null,
+          name: null,
+          contentCompAlgo: 0,
         }
+        break
+      case EBML_IDS.BLOCK_GROUP:
+        this.blockGroupDurationMs = null
+        this.blockGroupFrames = []
         break
       case EBML_IDS.CLUSTER:
         this.currentClusterTimestampMs = null
@@ -254,6 +272,17 @@ export class MatroskaDemuxer {
 
   private handleMasterClose(id: number): void {
     switch (id) {
+      case EBML_IDS.BLOCK_GROUP:
+        // BlockDuration 与 Block 的出现顺序在规范中不确定：统一在组关闭
+        // 时回填（帧对象引用同一实例，回调持有者可见回填后的值）
+        if (this.blockGroupDurationMs !== null) {
+          for (const f of this.blockGroupFrames) {
+            f.durationMs = this.blockGroupDurationMs
+          }
+        }
+        this.blockGroupDurationMs = null
+        this.blockGroupFrames = []
+        break
       case EBML_IDS.TRACK_ENTRY:
         if (
           this.trackScratch &&
@@ -314,6 +343,25 @@ export class MatroskaDemuxer {
         break
       case EBML_IDS.CODEC_PRIVATE:
         if (this.trackScratch) this.trackScratch.codecPrivate = data.slice()
+        break
+      case EBML_IDS.TRACK_NAME:
+        if (this.trackScratch && this.trackScratch.name === null)
+          this.trackScratch.name = decodeUtf8(data)
+        break
+      case EBML_IDS.TRACK_LANGUAGE:
+        if (this.trackScratch && this.trackScratch.language === null)
+          this.trackScratch.language = decodeAscii(data)
+        break
+      case EBML_IDS.CONTENT_COMP_ALGO:
+        // CompAlgo 出现在 ContentCompression 内、TrackEntry 之下，
+        // trackScratch 仍活着
+        if (this.trackScratch && this.trackScratch.contentCompAlgo === 0)
+          this.trackScratch.contentCompAlgo = Number(this.readUint(data))
+        break
+      case EBML_IDS.BLOCK_DURATION:
+        // BlockGroup 内的显式时长（毫秒，按 timestampScale 换算）
+        this.blockGroupDurationMs =
+          (Number(this.readUint(data)) * this.timestampScaleNs) / 1e6
         break
       case EBML_IDS.SAMPLING_FREQ: {
         if (!this.trackScratch) break
@@ -457,14 +505,23 @@ export class MatroskaDemuxer {
 
     for (const f of frames) {
       if (f.length === 0) continue
-      this.cb.onFrame?.({
+      const frame: DemuxedFrame = {
         trackNumber,
         timestampMs: baseMs,
         keyframe,
         data: f.slice(),
-      })
+        durationMs: null,
+      }
+      // Block（非 SimpleBlock）位于 BlockGroup 内：登记以供组关闭时回填
+      // BlockDuration；SimpleBlock 恒无时长
+      if (!simple) this.blockGroupFrames.push(frame)
+      this.cb.onFrame?.(frame)
     }
   }
+
+  /** BlockGroup 内当前显式时长与已发帧（关闭时回填） */
+  private blockGroupDurationMs: number | null = null
+  private blockGroupFrames: DemuxedFrame[] = []
 }
 
 function splitBySizes(
@@ -483,6 +540,11 @@ function splitBySizes(
 
 function decodeAscii(data: Uint8Array): string {
   let s = ''
-  for (let i = 0; i < data.length; i++) s += String.fromCharCode(data[i])
+  for (let i = 0; i < data.length; i++) s += String.fromCharCode(data[i]!)
   return s.trim()
+}
+
+const utf8Decoder = new TextDecoder('utf-8')
+function decodeUtf8(data: Uint8Array): string {
+  return utf8Decoder.decode(data).trim()
 }

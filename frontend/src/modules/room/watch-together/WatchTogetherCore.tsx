@@ -135,6 +135,13 @@ export function WatchTogetherCore({
     (state) =>
       state.movies.find((m) => m.id === state.currentMovieId)?.path ?? null
   )
+  // 当前影片的 WASM 引擎标记（添加影片时勾选并检测到需要时为 true）：
+  // 与全局 audioTranscodeEnabled 开关为 OR 关系，任一开启即走 wasm 转码
+  const currentMovieWasmEngine = useRoomStore(
+    (state) =>
+      state.movies.find((m) => m.id === state.currentMovieId)?.wasmEngine ??
+      false
+  )
   const {
     watchTogether,
     setWatchTogether,
@@ -156,9 +163,12 @@ export function WatchTogetherCore({
   // 字幕状态：房主操作广播同步，观众监听应用
   const subtitles = useSubtitles({ roomId, isHost })
 
-  // 内嵌字幕：仅当系统开关开启 && 视频走服务器中转（后端可访问视频字节）时才可用。
-  // - server-files：后端本地文件，恒为中转
-  // - webdav / openlist：仅 directLink=false（服务器中转）时后端可重建源 URL
+  // 内嵌字幕：开关开启 && 源可访问。
+  // - server-files：后端本地文件（中转），前端提取 + 后端 ffmpeg 回退
+  // - webdav / openlist 中转：前端提取 + 后端 ffmpeg 回退
+  // - webdav / openlist 直链：前端 MKV demux 提取是唯一路径（后端 ffmpeg
+  //   无法访问直链），失败静默
+  // - emby / jellyfin：其自带字幕接口，不受直链/中转限制
   const embeddedSubtitleEnabled = useSystemSettingsStore(
     (s) => s.embeddedSubtitleEnabled
   )
@@ -184,11 +194,15 @@ export function WatchTogetherCore({
       (currentMovieSourceType === 'webdav' ||
         currentMovieSourceType === 'openlist') &&
       currentMovieId != null &&
-      !currentMovieDirectLink
+      watchTogether.sourceUrl
     ) {
       return {
         kind: currentMovieSourceType as 'webdav' | 'openlist',
         movieId: currentMovieId,
+        // 播放 URL（中转或直链）：前端 MKV demux 探测/提取内嵌字幕直接复用
+        url: watchTogether.sourceUrl,
+        // 直链标记：前端失败时不再回退后端 ffmpeg（后端访问不到直链）
+        directLink: currentMovieDirectLink,
       }
     }
     return null
@@ -238,7 +252,8 @@ export function WatchTogetherCore({
       }
     } else {
       // 本地文件 / WebDAV / OpenList / FTP / 直链源：浏览器端 wasm 转码
-      if (audioTranscodeEnabled) {
+      // 全局开关或影片级 wasmEngine 标记（添加影片时勾选并检测到需要）任一开启
+      if (audioTranscodeEnabled || currentMovieWasmEngine) {
         addPlayerNotice(
           `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，正在使用 ffmpeg.wasm 在浏览器内实时转码为 AAC（首次加载约需 30MB 转码核心）`,
           'info'
@@ -257,6 +272,7 @@ export function WatchTogetherCore({
     currentMovieId,
     currentMovieSourceType,
     audioTranscodeEnabled,
+    currentMovieWasmEngine,
   ])
 
   // ── 切换影片时自动搜索同目录字幕 + 内嵌字幕 ──────────────
@@ -282,6 +298,19 @@ export function WatchTogetherCore({
     ) {
       void subtitles.loadEmbeddedSubtitles(currentMoviePath)
     }
+    // 挂载源（webdav/openlist，中转或直链）：前端 MKV demux 提取内嵌
+    // 字幕轨道（直链时这是唯一可用路径）
+    if (
+      embeddedSubtitleEnabled &&
+      (currentMovieSourceType === 'webdav' ||
+        currentMovieSourceType === 'openlist') &&
+      watchTogether.sourceUrl
+    ) {
+      void subtitles.loadEmbeddedSubtitles(
+        currentMoviePath ?? '',
+        watchTogether.sourceUrl
+      )
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     currentMovieId,
@@ -289,6 +318,7 @@ export function WatchTogetherCore({
     currentMovieSourceType,
     currentMoviePath,
     embeddedSubtitleEnabled,
+    watchTogether.sourceUrl,
   ])
 
   // ── CLI 代理上线后自动重新加载 ──────────────────────────

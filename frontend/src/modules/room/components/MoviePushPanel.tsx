@@ -86,6 +86,10 @@ import {
 import { useAuthStore } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import { cn } from '@/lib/utils'
+import { Switch } from '@/components/ui/Switch'
+import { needsWasmAudioTranscode } from '@/lib/audioCodecs'
+import { probeMkvMediaInfo } from '@/modules/subtitles/mkv-embedded'
+import { appendAuthToken } from '@/modules/player/services/url-proxy'
 
 type SourceType =
   | 'bilibili'
@@ -146,6 +150,87 @@ interface MoviePushPanelProps {
   isHost: boolean
 }
 
+/** WASM 引擎检测结果 */
+interface WasmDetectResult {
+  /** 该影片是否需要 WASM 引擎 */
+  wasmEngine: boolean
+  /** 探测到的音轨编码（可回填 movie.audioCodec 供引擎选择参考） */
+  audioCodec?: string
+  /** 检测说明（用于提示用户） */
+  reason: string
+}
+
+/**
+ * 检测影片是否需要 FFmpeg WASM 引擎（DTS 音频流转码 / 内嵌字幕提取）。
+ *
+ * 判定依据（按优先级）：
+ * 1. format 非 mkv → 不需要（wasm 引擎仅支持 MKV 容器）
+ * 2. 音轨编码已知 → 不受浏览器支持的编码（DTS/AC3 等）需要转码
+ * 3. 编码未知 → 前端 Range 拉取 MKV 头探测：音轨编码 + 文本字幕轨
+ * 4. 探测失败（跨域等）→ 保守启用（用户已显式勾选）
+ */
+async function detectWasmEngineNeed(
+  probeUrl: string | null,
+  format: string | undefined,
+  audioCodec?: string | null
+): Promise<WasmDetectResult> {
+  if (format !== 'mkv') {
+    return { wasmEngine: false, reason: '非 MKV 容器，无需 WASM 引擎' }
+  }
+  if (audioCodec) {
+    if (needsWasmAudioTranscode(audioCodec)) {
+      return {
+        wasmEngine: true,
+        audioCodec,
+        reason: `检测到 ${audioCodec.toUpperCase()} 音轨，将使用 WASM 引擎在浏览器内转码为 AAC`,
+      }
+    }
+    return {
+      wasmEngine: false,
+      audioCodec,
+      reason: `音轨 ${audioCodec.toUpperCase()} 浏览器原生支持，无需 WASM 引擎`,
+    }
+  }
+  if (probeUrl) {
+    try {
+      const info = await probeMkvMediaInfo(appendAuthToken(probeUrl))
+      const badAudio = info.audioCodecs.find((c) => needsWasmAudioTranscode(c))
+      if (badAudio) {
+        return {
+          wasmEngine: true,
+          audioCodec: badAudio,
+          reason: `检测到 ${badAudio.toUpperCase()} 音轨，将使用 WASM 引擎在浏览器内转码为 AAC`,
+        }
+      }
+      if (info.textSubtitleTracks > 0) {
+        return {
+          wasmEngine: true,
+          reason: `检测到 ${info.textSubtitleTracks} 条内嵌字幕轨，已启用 WASM 引擎支持字幕提取`,
+        }
+      }
+      return {
+        wasmEngine: false,
+        reason: '音轨浏览器原生支持且无内嵌字幕轨，无需 WASM 引擎',
+      }
+    } catch {
+      return {
+        wasmEngine: true,
+        reason: '无法探测影片信息，已默认启用 WASM 引擎',
+      }
+    }
+  }
+  return { wasmEngine: true, reason: '无法探测影片信息，已默认启用 WASM 引擎' }
+}
+
+/** 支持 WASM 引擎检测的源类型（emby/jellyfin 由服务端转码，无需检测） */
+const WASM_DETECTABLE_SOURCES: readonly string[] = [
+  'mp4',
+  'webdav',
+  'ftp',
+  'openlist',
+  'server-files',
+]
+
 export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
   const userRole = useAuthStore((state) => state.user?.role)
   const { betaFeaturesEnabled, fetchSettings } = useSystemSettingsStore()
@@ -159,6 +244,11 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [qualityLoading, setQualityLoading] = useState(false)
+  // 「启用 FFmpeg WASM 引擎」勾选项：默认关闭。
+  // 开启后添加影片时自动检测是否需要 WASM 引擎（DTS 音轨转码 / 内嵌字幕提取），
+  // 检测到需要时为该片标记 wasmEngine，播放时直接启用 wasm 引擎，
+  // 不依赖管理后台的全局「音频转码」开关。
+  const [wasmEngineChecked, setWasmEngineChecked] = useState(false)
   const [resolvedMovie, setResolvedMovie] = useState<ResolvedSource | null>(
     null
   )
@@ -908,11 +998,26 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         // 自动检测媒体格式：m3u8 -> hls，mp4/mkv/webm -> 对应格式
         // 后端存储 format 字段，播放时据此选择 HLS/Direct 引擎
         const detectedFormat = detectMediaFormat(movieUrl)
+        // 勾选「启用 FFmpeg WASM 引擎」：添加前自动检测 DTS 音轨 / 内嵌字幕
+        let wasmEngine: boolean | undefined
+        let detectedAudioCodec: string | undefined
+        if (wasmEngineChecked) {
+          setResolveProgress('正在检测是否需要 WASM 引擎...')
+          const detect = await detectWasmEngineNeed(
+            movieUrl,
+            detectedFormat !== 'unknown' ? detectedFormat : undefined
+          )
+          wasmEngine = detect.wasmEngine
+          detectedAudioCodec = detect.audioCodec
+          message.info(detect.reason)
+        }
         await addMovie(roomId, {
           url: movieUrl,
           title,
           source: 'mp4',
           format: detectedFormat !== 'unknown' ? detectedFormat : undefined,
+          wasmEngine,
+          audioCodec: detectedAudioCodec,
         })
         resetForm()
         message.success('影片已添加')
@@ -967,6 +1072,16 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           format = resolved.format
           duration = resolved.duration
         }
+        // 勾选「启用 FFmpeg WASM 引擎」：添加前自动检测 DTS 音轨 / 内嵌字幕
+        let wasmEngine: boolean | undefined
+        let detectedAudioCodec: string | undefined
+        if (wasmEngineChecked) {
+          setResolveProgress('正在检测是否需要 WASM 引擎...')
+          const detect = await detectWasmEngineNeed(movieUrl, format)
+          wasmEngine = detect.wasmEngine
+          detectedAudioCodec = detect.audioCodec
+          message.info(detect.reason)
+        }
         await addMovie(roomId, {
           url: movieUrl,
           title,
@@ -976,6 +1091,8 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           serverUrl: mountServerUrl,
           path: mountPath,
           directLink: isDirect,
+          wasmEngine,
+          audioCodec: detectedAudioCodec,
         })
         resetForm()
         message.success('影片已添加')
@@ -1008,6 +1125,16 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           movieUrl = resolved.videoUrl
           format = resolved.format
         }
+        // 勾选「启用 FFmpeg WASM 引擎」：添加前自动检测 DTS 音轨 / 内嵌字幕
+        let ftpWasmEngine: boolean | undefined
+        let ftpAudioCodec: string | undefined
+        if (wasmEngineChecked) {
+          setResolveProgress('正在检测是否需要 WASM 引擎...')
+          const detect = await detectWasmEngineNeed(movieUrl, format)
+          ftpWasmEngine = detect.wasmEngine
+          ftpAudioCodec = detect.audioCodec
+          message.info(detect.reason)
+        }
         await addMovie(roomId, {
           url: movieUrl,
           title,
@@ -1017,6 +1144,8 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           path: ftp.path.trim(),
           username: ftp.username || undefined,
           password: ftp.password || undefined,
+          wasmEngine: ftpWasmEngine,
+          audioCodec: ftpAudioCodec,
         })
         resetForm()
         message.success('影片已添加')
@@ -1090,6 +1219,21 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
         setResolveProgress('正在解析服务器文件...')
         const resolved = await resolveServerFile(serverFilePath.trim())
         const movieUrl = buildServerFileProxyUrl(serverFilePath.trim())
+        // 勾选「启用 FFmpeg WASM 引擎」：添加前自动检测 DTS 音轨 / 内嵌字幕
+        // server-files 的 resolve 已带 audioCodec（后端 ffprobe），无值时前端补探测
+        let sfWasmEngine: boolean | undefined
+        let sfAudioCodec = resolved.audioCodec ?? undefined
+        if (wasmEngineChecked) {
+          setResolveProgress('正在检测是否需要 WASM 引擎...')
+          const detect = await detectWasmEngineNeed(
+            movieUrl,
+            resolved.format,
+            resolved.audioCodec
+          )
+          sfWasmEngine = detect.wasmEngine
+          if (detect.audioCodec) sfAudioCodec = detect.audioCodec
+          message.info(detect.reason)
+        }
         await addMovie(roomId, {
           url: movieUrl,
           title: resolved.title,
@@ -1097,7 +1241,8 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           format: resolved.format as MediaFormat,
           path: serverFilePath.trim(),
           duration: resolved.duration ?? undefined,
-          audioCodec: resolved.audioCodec ?? undefined,
+          audioCodec: sfAudioCodec,
+          wasmEngine: sfWasmEngine,
         })
         resetForm()
         message.success('影片已添加')
@@ -1630,6 +1775,34 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
           />
 
           {renderSourceForm()}
+
+          {/* FFmpeg WASM 引擎勾选项：仅文件类源显示（emby/jellyfin 服务端转码、
+              bilibili/anime/kazumi 不适用）。开启后添加时自动检测 DTS 音轨 / 内嵌字幕 */}
+          {WASM_DETECTABLE_SOURCES.includes(sourceType) && (
+            <div
+              className="flex items-center justify-between rounded-[var(--md-sys-shape-corner)] px-3 py-2"
+              style={{
+                backgroundColor: 'var(--md-sys-color-surface-container-high)',
+              }}
+            >
+              <div className="flex min-w-0 flex-col">
+                <Text className="text-xs font-medium leading-tight">
+                  启用 FFmpeg WASM 引擎
+                </Text>
+                <Text
+                  type="secondary"
+                  className="text-[10px] leading-tight"
+                >
+                  添加时自动检测 DTS 音频流转码与内嵌字幕提取需求
+                </Text>
+              </div>
+              <Switch
+                checked={wasmEngineChecked}
+                onChange={(e) => setWasmEngineChecked(e.target.checked)}
+                disabled={!isHost}
+              />
+            </div>
+          )}
 
           {renderActionButton()}
 

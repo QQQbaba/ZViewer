@@ -28,6 +28,12 @@ export interface RoomRuntimeState {
   currentMovieId: number | string | null;
   /** 房主最近一次广播的播放状态（用于房主刷新/重连恢复） */
   playback?: PlaybackStateDto;
+  /**
+   * 房主最近一次广播的字幕状态（subtitle-update payload 原样缓存）。
+   * 观众中途加入/刷新时下发，解决「观众加入前房主已加载字幕但无人重播」
+   * 导致观众无字幕的问题。房间关闭时随 delete 一并清理。
+   */
+  subtitle?: unknown;
 }
 
 /** 房主重连宽限期（毫秒） */
@@ -165,6 +171,17 @@ export class RoomStateService {
   /** 获取房主播放状态 */
   getPlayback(roomId: string): PlaybackStateDto | undefined {
     return this.get(roomId).playback;
+  }
+
+  /** 缓存房主最近一次广播的字幕状态（subtitle-update payload 原样保存） */
+  setSubtitle(roomId: string, subtitle: unknown): void {
+    this.get(roomId).subtitle = subtitle;
+    // 字幕状态不写穿透到存储适配器（体积大且时效性强，重连后由房主重新广播）
+  }
+
+  /** 获取缓存的字幕状态（观众加入时补发） */
+  getSubtitle(roomId: string): unknown | undefined {
+    return this.get(roomId).subtitle;
   }
 
   /** 启动房主重连定时器 */

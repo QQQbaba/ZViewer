@@ -121,6 +121,16 @@ export class Movie {
   directLink!: boolean;
 
   /**
+   * 影片级 FFmpeg WASM 引擎标记。
+   *
+   * 添加影片时勾选「启用 FFmpeg WASM 引擎」且检测到需要（DTS 等音轨需
+   * 浏览器内转码、或存在可前端提取的内嵌字幕轨）时置 true。
+   * 播放时该影片绕过全局 audioTranscodeEnabled 开关直接启用 wasm 引擎。
+   */
+  @Column({ type: 'boolean', default: false })
+  wasmEngine!: boolean;
+
+  /**
    * ani-subs 番剧源元数据（JSON 字符串）。
    *
    * 存储 sourceId 和 episode 信息，用于播放时重新解析播放地址。

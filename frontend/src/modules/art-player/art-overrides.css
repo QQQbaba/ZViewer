@@ -143,6 +143,15 @@
   pointer-events: none;
 }
 
+/* overlay layer（字幕渲染层 / 加载动画的宿主）必须常显。
+   实测该 layer 会在特定时序下被写入 inline display: none
+   （来源未定位，非项目代码与 ArtPlayer 显式调用），
+   导致已提取的内嵌字幕 DOM 存在但不可见。
+   !important 优先级高于 inline 的非 important 声明，确保兜底可见。 */
+.zart-stage .art-layer-overlay {
+  display: block !important;
+}
+
 /* 浮动面板根（设置面板挂载点，append 到 $player） */
 .zart-panel-root {
   position: absolute;

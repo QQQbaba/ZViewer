@@ -12,6 +12,7 @@ import type { Server as SocketIOServer, Socket } from 'socket.io';
 import type { AckCallback, SocketEventHandler } from '../socket';
 import { safeAck } from '../socket';
 import { roomPermissionService } from '../room/room-permission.service';
+import { roomStateService } from '../room/room-state.service';
 
 export class SubtitleSyncHandler implements SocketEventHandler {
   readonly name = 'SubtitleSyncHandler';
@@ -39,6 +40,10 @@ export class SubtitleSyncHandler implements SocketEventHandler {
             });
           }
 
+          // 缓存最近一次字幕状态：观众中途加入/刷新时补发，
+          // 否则观众只能在房主下次变更字幕时才收到（加入前已加载的字幕无法同步）
+          roomStateService.setSubtitle(data.roomId, payload);
+
           // 转发给房间内其他成员（不含发送者，房主本地状态已是最新）
           socket.to(data.roomId).emit('subtitle-update', payload);
           safeAck(callback, { success: true });
@@ -48,5 +53,20 @@ export class SubtitleSyncHandler implements SocketEventHandler {
         }
       },
     );
+
+    // 观众挂载字幕监听器后主动拉取：加入时立即回发的 subtitle-update
+    // 早于观众前端 useEffect 挂载而丢失，此处回发房主缓存的当前状态。
+    socket.on('subtitle-request', (payload: unknown) => {
+      try {
+        const data = payload as { roomId?: string } | undefined;
+        if (!data?.roomId) return;
+        const cached = roomStateService.getSubtitle(data.roomId);
+        if (cached != null) {
+          socket.emit('subtitle-update', cached);
+        }
+      } catch (err) {
+        console.error('[subtitle-request] error:', err);
+      }
+    });
   }
 }

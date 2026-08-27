@@ -113,6 +113,7 @@ export const EBML_IDS = {
   SIMPLE_BLOCK: 0xa3,
   BLOCK_GROUP: 0xa0,
   BLOCK: 0xa1,
+  BLOCK_DURATION: 0x9b,
 } as const
 
 /** TrackType 枚举值 */

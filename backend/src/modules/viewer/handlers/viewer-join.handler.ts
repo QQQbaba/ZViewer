@@ -38,6 +38,20 @@ interface RequestJoinPayload {
 const HOST_JOIN_GRACE_MS = 5 * 60 * 1000; // 5 分钟
 
 /**
+ * 给新观众补发房主当前的字幕状态（外挂/内嵌字幕轨道数据）。
+ *
+ * subtitle-update 仅在房主变更字幕时实时转发；观众中途加入或刷新页面时
+ * 无法收到加入前已加载的字幕，导致观众端无字幕。此处从 roomStateService
+ * 读取房主最近一次广播的缓存，单独下发给新观众 socket。
+ */
+function sendCachedSubtitle(io: SocketIOServer, roomId: string, socketId: string): void {
+  const subtitle = roomStateService.getSubtitle(roomId);
+  if (subtitle != null) {
+    io.to(socketId).emit('subtitle-update', subtitle);
+  }
+}
+
+/**
  * 观众加入事件处理器。
  */
 export class ViewerJoinHandler implements SocketEventHandler {
@@ -176,6 +190,8 @@ export class ViewerJoinHandler implements SocketEventHandler {
             io.to(socket.id).emit('current-movie', {
               movieId: roomStateService.getCurrentMovieId(payload.roomId),
             });
+            // 补发房主当前字幕状态（观众加入前已加载的字幕）
+            sendCachedSubtitle(io, payload.roomId, socket.id);
 
             // 广播 viewer-joined 给房间内所有成员
             const joinedPayload: ViewerJoinedPayload = {
@@ -233,6 +249,8 @@ export class ViewerJoinHandler implements SocketEventHandler {
               io.to(socket.id).emit('current-movie', {
                 movieId: roomStateService.getCurrentMovieId(payload.roomId),
               });
+              // 补发房主当前字幕状态（观众加入前已加载的字幕）
+              sendCachedSubtitle(io, payload.roomId, socket.id);
 
               const joinedPayload: ViewerJoinedPayload = {
                 viewerSocketId: socket.id,
