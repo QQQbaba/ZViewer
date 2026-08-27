@@ -198,11 +198,11 @@ export function WatchTogetherCore({
 
   // ── 音频编码兼容性提示 ──────────────────────────────
   // 浏览器 <video> 仅支持 AAC/MP3/Opus/FLAC 等少数音频编码。
-  // DTS/AC3/EAC3 等编码需要服务器 FFmpeg 实时转码为 AAC 才能出声：
-  // - server-files 源：后端 proxy 自动转码（转码会有数秒启动延迟）
-  // - emby 源：resolve 阶段已自动切换为 Emby 服务端转码 HLS
-  // 若服务器 FFmpeg 缺失/精简版不支持 AAC 编码，视频将无声——
-  // 提示让用户明白无声原因与等待转码的原因，而不是以为播放器坏了。
+  // DTS/AC3/EAC3 等编码的处理方式：
+  // - emby/jellyfin 源：resolve 阶段自动切换为远端媒体服务器转码 HLS
+  // - MKV 源 + 「浏览器端音频转码」开关开启：ffmpeg.wasm 在浏览器内实时
+  //   转码为 AAC（中转与直链均支持，无需服务端 FFmpeg）
+  // - 开关关闭：直推原始流，视频可能无声——提示用户到管理后台开启开关。
   const BROWSER_SUPPORTED_AUDIO = new Set([
     'aac',
     'mp3',
@@ -223,12 +223,11 @@ export function WatchTogetherCore({
 
     if (
       currentMovieSourceType === 'emby' ||
-      currentMovieSourceType === 'jellyfin' ||
-      currentMovieSourceType === 'webdav'
+      currentMovieSourceType === 'jellyfin'
     ) {
       if (audioTranscodeEnabled) {
         addPlayerNotice(
-          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，已自动启用服务端音频转码`,
+          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，已由媒体服务器转码为 AAC`,
           'info'
         )
       } else {
@@ -238,9 +237,10 @@ export function WatchTogetherCore({
         )
       }
     } else {
+      // 本地文件 / WebDAV / OpenList / FTP / 直链源：浏览器端 wasm 转码
       if (audioTranscodeEnabled) {
         addPlayerNotice(
-          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，正在通过服务器 FFmpeg 实时转码为 AAC（若仍无声请确认已安装完整版 FFmpeg）`,
+          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，正在使用 ffmpeg.wasm 在浏览器内实时转码为 AAC（首次加载约需 30MB 转码核心）`,
           'info'
         )
       } else {

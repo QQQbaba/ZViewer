@@ -30,10 +30,9 @@ import { detectMediaFormat, getContentType } from '../services/mediaFormat';
 import { parseRangeHeader, pipeRangeStream, setWildcardCors } from '../services/proxy';
 import {
   UPLOADS_ROOT,
-  UPLOADS_ROOT_KEY,
   resolveSafePath,
   toPrefixedPath,
-  getUploadsRoot,
+  loadRootRegistry,
   basename,
   type RootRegistry,
 } from '../services/server-files/pathResolver';
@@ -55,14 +54,10 @@ import {
   probeMediaInfo,
   extractSubtitleTrack,
   mapCodecToSubtitleFormat,
-  needsAudioTranscode,
-  isFfmpegTranscodeCapable,
-  createAudioTranscodeStream,
   resetFfmpegCache,
   type InstallProgress,
   type SubtitleStreamInfo,
 } from '../services/ffmpeg';
-import { getSystemSettings } from '../services/system-settings';
 
 const router = Router();
 
@@ -93,26 +88,6 @@ const MAX_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024;
 
 /** ServerFolder 仓库。 */
 const folderRepo = () => AppDataSource.getRepository(ServerFolder);
-
-/**
- * 加载所有根目录到注册表。
- * uploads 根始终存在；自定义根按数据库记录注册。
- */
-async function loadRootRegistry(): Promise<RootRegistry> {
-  const map: RootRegistry = new Map();
-  map.set(UPLOADS_ROOT_KEY, getUploadsRoot());
-  const folders = await folderRepo().find({ order: { id: 'ASC' } });
-  for (const f of folders) {
-    const key = `custom:${f.id}`;
-    map.set(key, {
-      key,
-      name: f.name,
-      absPath: path.resolve(f.absPath),
-      readonly: !!f.readonly,
-    });
-  }
-  return map;
-}
 
 /** multer 存储：写到目标目录（运行时按 root 解析）。 */
 const storage = multer.diskStorage({
@@ -773,135 +748,10 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
     const rangeHeader = req.headers.range;
     const format = detectMediaFormat(target);
 
-    // ── 音频转码检测 ──
-    // 对于 MKV 等容器，浏览器可能不支持其音频编码（如 DTS/AC3/EAC3）。
-    // 使用 ffprobe 检测音频编码，若不支持则用 FFmpeg 实时转码为 AAC。
-    // 必须同时检查 FFmpeg 是否具备 AAC 编码能力（精简版 FFmpeg 不支持）。
-    let transcodeNeeded = false;
-    let probeDuration: number | null = null;
-    if (format === 'mkv' || format === 'avi' || format === 'wmv' || format === 'ts') {
-      // 音频转码总开关：关闭时跳过探测，一律直推（浏览器可能无声）
-      const { audioTranscodeEnabled } = await getSystemSettings();
-      if (audioTranscodeEnabled) {
-        try {
-          const probe = await probeMediaInfo(targetAbs);
-          probeDuration = probe.duration;
-          if (needsAudioTranscode(probe.audioCodec)) {
-            // 检查 FFmpeg 是否具备 AAC 编码能力
-            const capable = await isFfmpegTranscodeCapable();
-            if (capable) {
-              transcodeNeeded = true;
-              console.log(`[server-files] 音频转码: ${probe.audioCodec} → AAC, 文件: ${targetAbs}`);
-            } else {
-              console.warn(`[server-files] 音频需转码 (${probe.audioCodec}) 但 FFmpeg 不支持 AAC 编码，使用直接传输（可能无声音）`);
-            }
-          }
-        } catch {
-          // 探测失败，保守地直接流式传输
-        }
-      }
-    }
-
-    if (transcodeNeeded) {
-      // ── 转码路径：FFmpeg 实时转码音频为 AAC，输出 fragmented MP4 ──
-      // 估算 seek 时间：Range 字节位置 / 文件总大小 * 时长
-      let seekTime = 0;
-      if (rangeHeader && probeDuration && fileSize > 0) {
-        const parsed = parseRangeHeader(rangeHeader, fileSize);
-        if (parsed !== 'invalid' && parsed) {
-          seekTime = (parsed.start / fileSize) * probeDuration;
-        }
-      }
-
-      let transcodeResult;
-      try {
-        transcodeResult = createAudioTranscodeStream(targetAbs, seekTime);
-      } catch (err) {
-        // FFmpeg 不可用，回退到直接流式传输
-        console.warn('[server-files] FFmpeg 转码不可用，回退到直接传输:', err);
-        transcodeNeeded = false;
-      }
-
-      if (transcodeNeeded && transcodeResult) {
-        const { stream, process: ffmpegProc } = transcodeResult;
-
-        // ── 等待 FFmpeg 产生第一块数据 ──
-        // 在发送响应头之前等待 FFmpeg 实际输出数据。
-        // 如果 FFmpeg 在产生数据前就退出（如编码器不存在），则回退到直接传输。
-        // 超时 5 秒也视为失败。
-        const firstChunk = await new Promise<Buffer | null>((resolve) => {
-          let settled = false;
-          const timer = setTimeout(() => {
-            if (!settled) { settled = true; resolve(null); }
-          }, 5000);
-
-          stream.once('data', (chunk: Buffer) => {
-            if (!settled) { settled = true; clearTimeout(timer); resolve(chunk); }
-          });
-          ffmpegProc.once('exit', (code) => {
-            if (!settled) { settled = true; clearTimeout(timer); resolve(null); }
-            if (code !== 0 && code !== null) {
-              console.error(`[server-files] FFmpeg 启动失败，退出码 ${code}`);
-            }
-          });
-          ffmpegProc.once('error', () => {
-            if (!settled) { settled = true; clearTimeout(timer); resolve(null); }
-          });
-        });
-
-        if (firstChunk) {
-          // FFmpeg 已开始产出数据，提交转码响应
-          setWildcardCors(res);
-          res.setHeader('Content-Type', 'video/mp4');
-          // 转码流不支持 Range，不设置 Accept-Ranges 和 Content-Length
-          // 但提供探测时长，供前端在 video.duration=Infinity 时回退使用
-          if (probeDuration && probeDuration > 0) {
-            res.setHeader('X-Content-Duration', probeDuration.toFixed(3));
-          }
-          res.status(200);
-
-          // 客户端断连时 kill FFmpeg 进程
-          res.on('close', () => {
-            if (!res.writableFinished) {
-              try { ffmpegProc.kill('SIGKILL'); } catch { /* ignore */ }
-            }
-          });
-
-          // FFmpeg stderr 仅用于错误日志
-          let stderrBuffer = '';
-          ffmpegProc.stderr?.on('data', (chunk: Buffer) => {
-            stderrBuffer += chunk.toString();
-            if (stderrBuffer.length > 4096) {
-              stderrBuffer = stderrBuffer.slice(-2048);
-            }
-          });
-
-          ffmpegProc.on('error', (err) => {
-            console.error('[server-files] FFmpeg 进程错误:', err);
-            if (!res.writableFinished) { res.destroy(); }
-          });
-
-          ffmpegProc.on('exit', (code) => {
-            if (code !== 0 && code !== null) {
-              console.error(`[server-files] FFmpeg 退出码 ${code}: ${stderrBuffer.slice(-500)}`);
-              if (!res.writableFinished) { res.destroy(); }
-            }
-          });
-
-          // 先写入第一块数据，然后 pipe 剩余数据
-          res.write(firstChunk);
-          stream.pipe(res);
-          return;
-        } else {
-          // FFmpeg 未产生数据（编码器不存在或启动失败），回退到直接传输
-          console.warn('[server-files] FFmpeg 转码未产生数据，回退到直接传输');
-          try { ffmpegProc.kill('SIGKILL'); } catch { /* ignore */ }
-          // 继续走直接流式传输路径
-        }
-      }
-    }
-
-    // ── 直接流式传输路径（原始逻辑）──
+    // ── 直接流式传输路径 ──
+    // 音频转码已迁移至浏览器端（ffmpeg.wasm）：无论服务器中转还是直链，
+    // 前端根据影片 audioCodec 自行决定是否在浏览器内将不支持的音轨
+    // （DTS/AC3 等）实时转为 AAC，服务端始终纯字节中转（保留 Range）。
     if (rangeHeader) {
       const parsed = parseRangeHeader(rangeHeader, fileSize);
       if (parsed === 'invalid') {
@@ -969,10 +819,9 @@ router.get('/ffmpeg-status', async (req: AuthenticatedRequest, res: Response): P
       resetFfmpegCache();
     }
     const status = await checkFfmpeg();
-    // 如果 FFmpeg 可用，进一步检测是否具备 AAC 编码能力
-    const transcodeCapable = status.available
-      ? await isFfmpegTranscodeCapable()
-      : false;
+    // 音频转码已迁移至浏览器端（ffmpeg.wasm），服务端不再依赖 AAC 编码器；
+    // 保留 transcodeCapable 字段仅为兼容旧版管理前端响应结构。
+    const transcodeCapable = status.available;
     // 手动下载链接：提供全部支持平台的官方下载地址，由用户在弹窗中自选
     // （下载的是浏览器所在机器的文件，上传到服务端时才需要与服务端平台匹配）
     const manualDownloadUrls = [
@@ -1092,15 +941,12 @@ router.post('/ffmpeg-upload', ffmpegUpload.single('file'), async (req: Authentic
 
     // 验证安装结果
     const status = await checkFfmpeg();
-    const transcodeCapable = status.available
-      ? await isFfmpegTranscodeCapable()
-      : false;
+    // 音频转码已迁移至浏览器端，transcodeCapable 仅保留字段兼容
+    const transcodeCapable = status.available;
 
     res.json({
       success: status.available,
-      message: status.available
-        ? `FFmpeg 安装成功${transcodeCapable ? '（完整版，支持音频转码）' : '（精简版，不支持音频转码）'}`
-        : '安装后仍未检测到 FFmpeg，请检查压缩包内容',
+      message: status.available ? 'FFmpeg 安装成功' : '安装后仍未检测到 FFmpeg，请检查压缩包内容',
       available: status.available,
       source: status.source,
       version: status.version,

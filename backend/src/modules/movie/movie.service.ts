@@ -15,6 +15,7 @@
 import { AppDataSource } from '../../data-source';
 import { Movie } from '../../entities/Movie';
 import type { MovieDto, MovieSourceType } from '../shared';
+import { scheduleAudioCodecProbe } from '../../services/movie-audio-probe';
 
 /** 影片实体别名，便于类型引用 */
 type MovieEntity = Movie;
@@ -239,6 +240,9 @@ export class MovieService {
       movie.url = streamUrl;
     }
 
+    // 入库期异步探测音轨编码（MKV 等），持久化 audioCodec 供浏览器端转码判定
+    if (movie.id) scheduleAudioCodecProbe(movie.id);
+
     return this.serializeMovie(movie);
   }
 
@@ -282,6 +286,14 @@ export class MovieService {
     if (data.sourceMeta !== undefined) update.sourceMeta = normalizeSourceMeta(data.sourceMeta);
 
     await repo.update({ id: movie.id }, update);
+
+    // url/path/source 变化后重新异步探测音轨（audioCodec 已有值时内部会跳过）
+    if (
+      (update.url !== undefined || update.path !== undefined || update.source !== undefined) &&
+      !update.audioCodec
+    ) {
+      scheduleAudioCodecProbe(movie.id);
+    }
 
     // 重新查询以获取更新后的实体（含 ValueTransformer 解密后的 password）
     const refreshed = await repo.findOneBy({ id: movie.id, roomId });

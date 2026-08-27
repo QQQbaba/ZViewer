@@ -25,6 +25,7 @@ export { dashEngine } from './engines/dash-engine'
 export { hlsEngine } from './engines/hls-engine'
 export { flvEngine } from './engines/flv-engine'
 export { directEngine } from './engines/direct-engine'
+export { wasmEngine, isWasmEngineSupported } from './wasm-engine/engine'
 export { selectEngine } from './engine-selector'
 
 // 工具函数

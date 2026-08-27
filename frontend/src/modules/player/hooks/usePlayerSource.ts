@@ -21,8 +21,12 @@
  */
 import { useCallback, useRef } from 'react'
 import type { RefObject, MutableRefObject } from 'react'
-import { selectEngine, resetVideoElement } from '@/modules/player'
+import { selectEngine, resetVideoElement, directEngine } from '@/modules/player'
 import type { PlayerSource, PlayerController } from '@/modules/player'
+import { useSystemSettingsStore } from '@/store/systemSettingsStore'
+
+/** 引擎实例直查表（仅回退场景使用；selectEngine 不应返回 wasm 的兜底） */
+const ENGINES = { direct: directEngine } as const
 import {
   isBrowserPlayableFormat,
   getUnsupportedFormatMessage,
@@ -133,13 +137,40 @@ export function usePlayerSource(
         cleanup()
         resetVideoElement(video)
         appliedSourceUrlRef.current = source.url
-        const engine = selectEngine(source)
-        const result = await engine.attach(video, source)
-        if (result.blobUrl) {
-          blobUrlRef.current = result.blobUrl
+        // 「浏览器端音频转码」开关：MKV + DTS 等音轨时启用 wasm 引擎
+        const wasmEnabled =
+          useSystemSettingsStore.getState().audioTranscodeEnabled
+        let engine = selectEngine(source, {
+          wasmAudioTranscodeEnabled: wasmEnabled,
+        })
+        try {
+          const result = await engine.attach(video, source)
+          if (result.blobUrl) {
+            blobUrlRef.current = result.blobUrl
+          }
+          engineCleanupRef.current = result.cleanup
+          playerRef.current = result.player ?? null
+        } catch (err) {
+          // wasm 引擎失败（视频轨 MSE 不支持 / 媒体流不可达等）时自动回退
+          // direct 原生播放：宁可无声也不能让整段视频放不出来。
+          if (engine.type !== 'wasm') throw err
+          console.warn(
+            '[usePlayerSource] wasm 引擎挂载失败，回退原生播放:',
+            err
+          )
+          resetVideoElement(video)
+          engine = selectEngine({ ...source, format: undefined }, {})
+          if (engine.type === 'wasm') {
+            // 防御：selectEngine 不应再返回 wasm，此处兜底直取 direct
+            engine = ENGINES.direct
+          }
+          const result2 = await engine.attach(video, source)
+          if (result2.blobUrl) {
+            blobUrlRef.current = result2.blobUrl
+          }
+          engineCleanupRef.current = result2.cleanup
+          playerRef.current = result2.player ?? null
         }
-        engineCleanupRef.current = result.cleanup
-        playerRef.current = result.player ?? null
       } catch (err) {
         // 加载失败时回滚 appliedSourceUrlRef，允许下次重试
         appliedSourceUrlRef.current = previousUrl

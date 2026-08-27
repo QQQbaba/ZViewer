@@ -13,6 +13,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { UPLOADS_DIR } from '../paths';
+import { AppDataSource } from '../../data-source';
+import { ServerFolder } from '../../entities/ServerFolder';
 
 /** 服务器文件默认存储根目录（config/uploads）。 */
 export const UPLOADS_ROOT = UPLOADS_DIR;
@@ -50,6 +52,28 @@ export function getUploadsRoot(): RootInfo {
     absPath: UPLOADS_ROOT,
     readonly: false,
   };
+}
+
+/**
+ * 加载所有根目录到注册表（uploads 根 + 数据库中的自定义根）。
+ * 供 serverFiles 路由与音轨探测等需要解析服务器文件路径的模块共用。
+ */
+export async function loadRootRegistry(): Promise<RootRegistry> {
+  const map: RootRegistry = new Map();
+  map.set(UPLOADS_ROOT_KEY, getUploadsRoot());
+  const folders = await AppDataSource.getRepository(ServerFolder).find({
+    order: { id: 'ASC' },
+  });
+  for (const f of folders) {
+    const key = `custom:${f.id}`;
+    map.set(key, {
+      key,
+      name: f.name,
+      absPath: path.resolve(f.absPath),
+      readonly: !!f.readonly,
+    });
+  }
+  return map;
 }
 
 /**

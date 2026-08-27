@@ -1621,7 +1621,7 @@ export default function AdminPage() {
                 </Title>
                 <div className="mb-4">
                   <Switch
-                    label="启用 FFmpeg 音频转码"
+                    label="启用浏览器端音频转码（ffmpeg.wasm）"
                     checked={settings.audioTranscodeEnabled}
                     onChange={(e) =>
                       setSettings((prev) => ({
@@ -1631,7 +1631,12 @@ export default function AdminPage() {
                     }
                   />
                   <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                    开启后，服务器中转播放时若检测到浏览器不支持的音轨编码（DTS/AC3/EAC3/TrueHD 等），将由 FFmpeg 实时转码为 AAC。需安装完整版 FFmpeg。关闭时一律直推，浏览器可能无声。
+                    开启后，播放 MKV
+                    时若检测到浏览器不支持的音轨编码（DTS/AC3/EAC3
+                    等），将在浏览器内用 ffmpeg.wasm 实时转码为
+                    AAC。服务器中转与直链模式均支持，无需在服务器安装
+                    FFmpeg；观众端首次加载需下载约 30MB
+                    转码核心。关闭时一律直推，浏览器可能无声。
                   </p>
                 </div>
                 <div
@@ -1725,7 +1730,9 @@ export default function AdminPage() {
                                 <Button
                                   variant="secondary"
                                   size="sm"
-                                  icon={<ExternalLink className="h-3.5 w-3.5" />}
+                                  icon={
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                  }
                                   onClick={() => setManualDownloadOpen(true)}
                                 >
                                   手动下载
@@ -1840,7 +1847,8 @@ export default function AdminPage() {
                   <div className="flex flex-col gap-2">
                     <Text className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
                       请选择与<b>服务器操作系统</b>匹配的 FFmpeg
-                      安装包。下载完成后，通过上方「手动安装」上传 zip / tar.xz 文件。
+                      安装包。下载完成后，通过上方「手动安装」上传 zip / tar.xz
+                      文件。
                     </Text>
                     {(ffmpegStatus?.manualDownloadUrls ?? []).map((item) => (
                       <a

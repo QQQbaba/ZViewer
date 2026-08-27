@@ -12,7 +12,6 @@ import { Router, Response } from 'express';
 import { AuthenticatedRequest } from '../../middleware/auth';
 import { statFTPFile, createFTPReadStream } from '../../services/ftp';
 import { pipeRangeStream } from '../../services/proxy';
-import { respondWithAudioTranscode } from '../../services/proxy/audio-transcode';
 
 const router = Router();
 
@@ -46,24 +45,6 @@ function readFtpParams(
     port:
       typeof port === 'string' && port.trim() ? Number(port.trim()) : undefined,
   };
-}
-
-/**
- * 构造 FFmpeg 可读取的 ftp:// URL（凭证内嵌，特殊字符已编码）。
- * serverUrl 可能已含端口（host:port 形式），直接拼接。
- */
-function buildFtpUrlForFfmpeg(params: FtpQueryParams): string | null {
-  try {
-    const hostWithPort = params.serverUrl.replace(/^ftp:\/\//i, '');
-    const auth =
-      params.username || params.password
-        ? `${encodeURIComponent(params.username ?? '')}:${encodeURIComponent(params.password ?? '')}@`
-        : '';
-    const path = params.path.startsWith('/') ? params.path : `/${params.path}`;
-    return `ftp://${auth}${hostWithPort}${path}`;
-  } catch {
-    return null;
-  }
 }
 
 function buildProxyUrl(
@@ -114,23 +95,6 @@ router.get('/proxy-ftp', async (req: AuthenticatedRequest, res: Response) => {
   if (!params) return;
 
   try {
-    // ── 音频转码检测（V6）────────────────────────────
-    // mkv/avi/wmv/ts 容器的音轨可能是 DTS/AC3/EAC3 等浏览器不支持的编码。
-    // FFmpeg 通过 ftp:// URL 直读源文件探测；需要转码时以 fMP4 转码流接管
-    // 响应。探测失败或无需转码则回退原有 FTP 流转发。
-    if (/\.(mkv|avi|wmv|ts)$/i.test(params.path)) {
-      const ftpUrl = buildFtpUrlForFfmpeg(params);
-      if (ftpUrl) {
-        const handled = await respondWithAudioTranscode(res, {
-          input: ftpUrl,
-          fileName: params.path,
-          duration: null,
-          logTag: 'proxy-ftp-transcode',
-        });
-        if (handled) return;
-      }
-    }
-
     const stream = createFTPReadStream(params);
     pipeRangeStream(res, {
       stream,

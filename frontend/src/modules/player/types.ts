@@ -7,7 +7,7 @@
 import type { MediaFormat } from '@/lib/mediaFormat'
 
 /** 引擎类型标识 */
-export type EngineType = 'hls' | 'flv' | 'direct' | 'dash'
+export type EngineType = 'hls' | 'flv' | 'direct' | 'dash' | 'wasm'
 
 /**
  * seek 操作返回结果（公共类型，供 MSE / DASH 等引擎实现共享）。
