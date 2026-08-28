@@ -58,11 +58,17 @@ English | **[中文](README.md)**
 
 | Source | Description |
 |---|---|
-| **Bilibili** | Parse BV/AV video links, DASH audio+video merging, quality switching, premium credentials |
+| **Bilibili** | Parse BV/AV video links, quality switching, premium credentials |
 | **MP4 Direct Link** | Play MP4 videos directly from accessible URLs |
 | **WebDAV** | Mount WebDAV servers, browse and play video files |
 | **FTP** | Mount FTP servers, browse and play video files |
 | **OpenList** | Mount OpenList services, browse and play video files |
+
+### Subtitles & Audio Compatibility
+
+- **Native subtitle system**: directly parses SRT / ASS / SSA / VTT / SMI / SUB and renders with HTML/CSS — no WebVTT conversion, higher style fidelity.
+- **Browser-side embedded subtitle extraction**: text subtitle tracks inside MKV containers are extracted directly in the browser (custom MKV demux with sparse scanning that skips audio/video payload) — subtitles appear in seconds even for multi-gigabyte files, no server-side FFmpeg required.
+- **Browser-side audio transcode (ffmpeg.wasm)**: browser-incompatible audio tracks (DTS / AC3 / EAC3, etc.) can be transcoded to AAC in real time in the browser (requires the global permission in the admin panel plus a per-movie opt-in; off by default).
 
 ### Real-Time Interaction
 
@@ -400,7 +406,7 @@ New users register as `guest` with `pending` status. Only `root` can approve use
 
 ### Bilibili
 
-Parse BV/AV video links, DASH audio+video playback, quality switching, premium content. Configure Bilibili credentials in the admin panel for premium quality. Supports ZViewerCLI for local cookie-based high-quality streaming.
+Parse BV/AV video links, with quality switching and premium content support. Configure Bilibili credentials in the admin panel for premium quality. Supports ZViewerCLI for local cookie-based high-quality streaming.
 
 ### Direct Links & Mounts
 

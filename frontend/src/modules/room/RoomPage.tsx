@@ -8,6 +8,7 @@ import { useSocket } from '@/hooks/useSocket'
 import { VoiceChatPanel } from '@/modules/voice-chat'
 import { RoomPanel } from '@/modules/room/components/RoomPanel'
 import { WatchTogetherPanel } from '@/modules/room/watch-together/WatchTogetherPanel'
+import { usePlayerRemountKey } from '@/modules/room/watch-together/usePlayerRemountKey'
 import { RoomLayout } from '@/modules/room/components/RoomLayout'
 import { RoomInfoPanel } from '@/modules/room/components/RoomInfoPanel'
 import { MovieListPanel } from '@/modules/room/components/MovieListPanel'
@@ -64,6 +65,10 @@ function RoomPage() {
   const setDanmakuTracks = useDanmakuStore((state) => state.setTracks)
   const loadDanmakuMeta = useDanmakuStore((state) => state.loadMeta)
   const setDanmakuMeta = useDanmakuStore((state) => state.setMeta)
+
+  // 切换影片时强制整个播放器重挂载（跨引擎切换时彻底清理旧引擎残留，
+  // 避免复用同一 <video> 导致的卡死；首次加载不触发重挂载）
+  const playerRemountKey = usePlayerRemountKey()
 
   // 房主刷新/重连恢复时由后端返回的最近一次播放状态
   const [recoveredPlayback, setRecoveredPlayback] = useState<{
@@ -342,6 +347,7 @@ function RoomPage() {
         // 在 initialPlayback=null 时执行而丢失播放进度恢复。
         hostRegistered ? (
           <WatchTogetherPanel
+            key={playerRemountKey}
             roomId={roomId}
             isHost
             isWebFullscreen={isWebFullscreen}

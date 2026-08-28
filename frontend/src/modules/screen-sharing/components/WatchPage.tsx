@@ -22,6 +22,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Text } from '@/components/ui/Typography'
 import { CommentPanel } from '@/components/CommentPanel'
 import { WatchTogetherPanel } from '@/modules/room/watch-together/WatchTogetherPanel'
+import { usePlayerRemountKey } from '@/modules/room/watch-together/usePlayerRemountKey'
 import { RoomLayout } from '@/modules/room/components/RoomLayout'
 import { RoomInfoPanel } from '@/modules/room/components/RoomInfoPanel'
 import { MovieListPanel } from '@/modules/room/components/MovieListPanel'
@@ -73,6 +74,9 @@ function WatchPage() {
   const streamKey = useRoomStore((state) => state.streamKey)
   const exitRoom = useRoomStore((state) => state.exitRoom)
 
+  // 切换影片时强制整个播放器重挂载（与房主端一致，跨引擎切换彻底清理）
+  const playerRemountKey = usePlayerRemountKey()
+
   // 3.1 已加入且 roomMode === 'watch-together'：观众使用与房主统一的 RoomLayout
   if (joinStatus === 'approved' && roomMode === 'watch-together') {
     return (
@@ -81,6 +85,7 @@ function WatchPage() {
         isHost={false}
         mainContent={
           <WatchTogetherPanel
+            key={playerRemountKey}
             roomId={roomId ?? ''}
             isHost={false}
             isWebFullscreen={isWebFullscreen}
