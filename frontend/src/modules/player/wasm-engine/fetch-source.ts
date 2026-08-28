@@ -20,6 +20,31 @@ const MAX_RETRY_PER_STREAM = 8
 const RETRY_DELAY_MS = 800
 /** 假 EOS（响应体提前结束）最大续传次数；超出视为源不可用 */
 const MAX_PREMATURE_EOS = 64
+/**
+ * 聚合输出的最小块大小（首块直通除外）。
+ *
+ * Firefox 的 fetch ReadableStream 以小 chunk（8-64KB）交付网络数据，
+ * Chrome 通常 64KB-1MB+。demuxer.append 每次调用都要拷贝未消费 buffer
+ * 并跑一遍 EBML 解析——小 chunk 逐块 append 在 GB 级文件上会产生数十
+ * 万次小解析调用，未消费 buffer 又大，形成 O(n²) 拷贝爆炸，下载管线
+ * 被 CPU 拖死（Chrome 无此问题的原因即 chunk 天然够大）。聚合到该
+ * 水位再返回可把 append 次数降低一个数量级以上。
+ */
+const MIN_READ_BATCH_BYTES = 512 * 1024
+
+/** 拼接聚合块（单块时零拷贝直接返回） */
+function concatParts(parts: Uint8Array[]): Uint8Array {
+  if (parts.length === 1) return parts[0]
+  let total = 0
+  for (const p of parts) total += p.byteLength
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const p of parts) {
+    out.set(p, offset)
+    offset += p.byteLength
+  }
+  return out
+}
 
 /** 可回退代理的 URL 判定（与 direct-engine canFallbackToProxy 相同语义） */
 function canFallbackToProxy(url: string): boolean {
@@ -63,6 +88,8 @@ export class MediaByteSource {
   private prematureEosCount = 0
   /** 下次打开连接的起始偏移 */
   private pendingOffset: number
+  /** 首块是否已直通返回（EBML 头/Tracks 需尽快解析，不凑批） */
+  private firstChunkServed = false
 
   constructor(url: string, opts: ByteSourceOptions = {}) {
     this.sourceUrl = url
@@ -130,8 +157,17 @@ export class MediaByteSource {
     }
   }
 
-  /** 产出下一块数据；流结束时抛 StreamEndedError */
+  /**
+   * 产出下一块数据；流结束时抛 StreamEndedError。
+   *
+   * 聚合输出：底层小 chunk 累积到 MIN_READ_BATCH_BYTES 才返回（见常量
+   * 注释——Firefox 小 chunk 直传会导致 demuxer O(n²) 拷贝爆炸）；首块
+   * 直通，保证 EBML 头/Tracks 尽快解析出首帧。假 EOS / 网络中断重连
+   * 期间已聚合的 parts 保留在闭包中续用，数据不丢、偏移不重不漏。
+   */
   async read(): Promise<Uint8Array> {
+    const parts: Uint8Array[] = []
+    let partsBytes = 0
     for (let retry = 0; ; retry++) {
       if (this.stopped) throw new StreamEndedError('stopped')
       if (!this.active) await this.openAt(this.pendingOffset)
@@ -167,10 +203,20 @@ export class MediaByteSource {
             retry = -1
             continue
           }
+          // 真 EOS：先吐出已聚合的数据（若有），下次调用再抛结束
+          if (partsBytes > 0) return concatParts(parts)
           throw new StreamEndedError('eos')
         }
+        parts.push(value)
+        partsBytes += value.byteLength
         stream.offset += value.byteLength
-        return value
+        if (
+          !this.firstChunkServed ||
+          partsBytes >= MIN_READ_BATCH_BYTES
+        ) {
+          this.firstChunkServed = true
+          return concatParts(parts)
+        }
       } catch (err) {
         if (err instanceof StreamEndedError || err instanceof StreamFatalError)
           throw err

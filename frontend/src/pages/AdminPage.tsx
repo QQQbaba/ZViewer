@@ -14,10 +14,6 @@ import {
   Download,
   UserCheck,
   Upload,
-  Check,
-  AlertCircle,
-  Loader2,
-  ExternalLink,
 } from 'lucide-react'
 import { PageBackButton } from '@/components/PageBackButton'
 import { Button } from '@/components/ui/Button'
@@ -26,7 +22,7 @@ import { Space } from '@/components/ui/Space'
 import { Title, Text } from '@/components/ui/Typography'
 import { Tag } from '@/components/ui/Tag'
 import { Spinner } from '@/components/ui/Spinner'
-import { Modal, ConfirmModal } from '@/components/ui/Modal'
+import { ConfirmModal } from '@/components/ui/Modal'
 import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/Switch'
 import { Input } from '@/components/ui/Input'
@@ -37,15 +33,6 @@ import { message } from '@/components/ui/message'
 import { useAuthStore } from '@/store/authStore'
 import { useSystemSettingsStore } from '@/store/systemSettingsStore'
 import { apiFetch, getApiUrl } from '@/lib/api'
-import {
-  checkFfmpeg,
-  installFfmpeg,
-  uploadFfmpeg,
-} from '@/modules/server-files/serverFilesApi'
-import type {
-  FfmpegStatus,
-  FfmpegInstallProgress,
-} from '@/modules/server-files/types'
 
 interface AdminUser {
   id: number
@@ -113,6 +100,7 @@ function formatBytes(bytes: number): string {
 
 type RegistrationMode = 'open' | 'approval' | 'closed'
 type RoomCreationMode = 'admin-only' | 'all-users'
+type WasmCoreSource = 'author' | 'server' | 'custom'
 
 interface AdminSettings {
   autoDeleteInactiveRooms: boolean
@@ -123,8 +111,9 @@ interface AdminSettings {
   dashDisabled: boolean
   cdnAccelerate: boolean
   cdnProxyUrl: string
-  embeddedSubtitleEnabled: boolean
   audioTranscodeEnabled: boolean
+  wasmCoreSource: WasmCoreSource
+  wasmCoreCustomUrl: string
   dataSourceConfig?: {
     aniSubsSubscriptions?: string[]
     kazumiRules?: string[]
@@ -156,8 +145,9 @@ export default function AdminPage() {
     dashDisabled: false,
     cdnAccelerate: false,
     cdnProxyUrl: 'https://gh-proxy.com',
-    embeddedSubtitleEnabled: true,
     audioTranscodeEnabled: false,
+    wasmCoreSource: 'author',
+    wasmCoreCustomUrl: '',
   })
   const [loading, setLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -188,18 +178,6 @@ export default function AdminPage() {
     () => localStorage.getItem('update-include-prerelease') === 'true'
   )
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-
-  // FFmpeg 状态
-  const [ffmpegStatus, setFfmpegStatus] = useState<FfmpegStatus | null>(null)
-  const [ffmpegChecking, setFfmpegChecking] = useState(false)
-  const [ffmpegInstalling, setFfmpegInstalling] = useState(false)
-  const [ffmpegInstallStage, setFfmpegInstallStage] = useState('')
-  const [ffmpegInstallPercent, setFfmpegInstallPercent] = useState(0)
-  const [ffmpegUploading, setFfmpegUploading] = useState(false)
-  const [ffmpegUploadPercent, setFfmpegUploadPercent] = useState(0)
-  const ffmpegFileInputRef = useRef<HTMLInputElement | null>(null)
-  // 手动下载弹窗：用户自选目标平台的 FFmpeg 安装包
-  const [manualDownloadOpen, setManualDownloadOpen] = useState(false)
 
   const authHeaders = {
     'Content-Type': 'application/json',
@@ -606,91 +584,12 @@ export default function AdminPage() {
     }
   }
 
-  // FFmpeg 状态检测
-  const refreshFfmpegStatus = async (force: boolean = false) => {
-    setFfmpegChecking(true)
-    try {
-      const status = await checkFfmpeg(force)
-      setFfmpegStatus(status)
-    } catch (err) {
-      setFfmpegStatus({
-        available: false,
-        source: null,
-        path: null,
-        version: null,
-        transcodeCapable: false,
-        error: err instanceof Error ? err.message : '检测失败',
-      })
-    } finally {
-      setFfmpegChecking(false)
-    }
-  }
-
-  // FFmpeg 在线安装
-  const handleInstallFfmpeg = async () => {
-    setFfmpegInstalling(true)
-    setFfmpegInstallStage('正在下载 FFmpeg...')
-    setFfmpegInstallPercent(0)
-    try {
-      await installFfmpeg((p: FfmpegInstallProgress) => {
-        if (p.status === 'downloading') {
-          setFfmpegInstallStage('下载中')
-          setFfmpegInstallPercent(p.percent ?? 0)
-        } else if (p.status === 'extracting') {
-          setFfmpegInstallStage('解压中')
-          setFfmpegInstallPercent(100)
-        }
-      })
-      message.success('FFmpeg 安装完成')
-      // 安装后强制刷新，绕过缓存重新检测
-      await refreshFfmpegStatus(true)
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '安装失败')
-    } finally {
-      setFfmpegInstalling(false)
-      setFfmpegInstallStage('')
-      setFfmpegInstallPercent(0)
-    }
-  }
-
-  // FFmpeg 手动上传安装
-  const handleUploadFfmpeg = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    if (!file.name.toLowerCase().match(/\.(zip|tar\.xz|tar\.gz|tgz)$/)) {
-      message.error('请上传 .zip、.tar.xz 或 .tar.gz 格式的 FFmpeg 压缩包')
-      return
-    }
-    setFfmpegUploading(true)
-    setFfmpegUploadPercent(0)
-    try {
-      const status = await uploadFfmpeg(file, (loaded, total) => {
-        setFfmpegUploadPercent(Math.round((loaded / total) * 100))
-      })
-      setFfmpegStatus(status)
-      if (status.transcodeCapable) {
-        message.success('FFmpeg 安装成功（完整版，支持音频转码）')
-      } else if (status.available) {
-        message.warning('FFmpeg 安装成功，但不支持音频转码（精简版）')
-      } else {
-        message.error('安装后仍未检测到 FFmpeg，请检查压缩包内容')
-      }
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '上传安装失败')
-    } finally {
-      setFfmpegUploading(false)
-      setFfmpegUploadPercent(0)
-    }
-  }
-
   useEffect(() => {
     if (!isAuthenticated) return
     /* eslint-disable react-hooks/set-state-in-effect -- tab 切换时加载对应数据 */
     if (activeTab === 'settings') {
       void loadSettings()
       void checkUpdate()
-      if (!ffmpegStatus && !ffmpegChecking) void refreshFfmpegStatus()
     } else if (activeTab === 'users') {
       void loadData()
       void loadSettings()
@@ -868,8 +767,9 @@ export default function AdminPage() {
         dashDisabled: settings.dashDisabled,
         cdnAccelerate: settings.cdnAccelerate,
         cdnProxyUrl: settings.cdnProxyUrl,
-        embeddedSubtitleEnabled: settings.embeddedSubtitleEnabled,
         audioTranscodeEnabled: settings.audioTranscodeEnabled,
+        wasmCoreSource: settings.wasmCoreSource,
+        wasmCoreCustomUrl: settings.wasmCoreCustomUrl,
       }
       if (settings.dataSourceConfig) {
         payload.dataSourceConfig = settings.dataSourceConfig
@@ -1621,7 +1521,7 @@ export default function AdminPage() {
                 </Title>
                 <div className="mb-4">
                   <Switch
-                    label="启用浏览器端音频转码（ffmpeg.wasm）"
+                    label="允许浏览器端音频转码（ffmpeg.wasm）"
                     checked={settings.audioTranscodeEnabled}
                     onChange={(e) =>
                       setSettings((prev) => ({
@@ -1631,250 +1531,52 @@ export default function AdminPage() {
                     }
                   />
                   <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                    开启后，播放 MKV
-                    时若检测到浏览器不支持的音轨编码（DTS/AC3/EAC3
-                    等），将在浏览器内用 ffmpeg.wasm 实时转码为
-                    AAC。服务器中转与直链模式均支持，无需在服务器安装
-                    FFmpeg；观众端首次加载需下载约 30MB
-                    转码核心。关闭时一律直推，浏览器可能无声。
+                    全局许可开关：仅允许房主在添加影片时勾选「启用 FFmpeg
+                    WASM 引擎」（添加时检测 DTS/AC3/EAC3
+                    等不兼容音轨并标记）。两者同时开启后，播放该片才会在浏览器内用
+                    ffmpeg.wasm 实时转码为 AAC（首次加载约 30MB
+                    转码核心）。本开关单独开启不会对任何影片自动转码；关闭则所有影片直推，不兼容音轨可能无声。
                   </p>
                 </div>
-                <div
-                  className="mb-6 flex flex-col gap-2 rounded-[var(--md-sys-shape-corner)] p-3"
-                  style={{
-                    backgroundColor:
-                      'var(--md-sys-color-surface-container-high)',
-                  }}
-                >
-                  {(() => {
-                    const available = !!ffmpegStatus?.available
-                    const capable = !!ffmpegStatus?.transcodeCapable
-                    const needFullVersion = available && !capable
-                    return (
-                      <>
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <div
-                              className="flex h-7 w-7 items-center justify-center rounded-[var(--md-sys-shape-corner)]"
-                              style={{
-                                backgroundColor:
-                                  available && capable
-                                    ? 'var(--md-sys-color-primary-container)'
-                                    : needFullVersion
-                                      ? 'var(--md-sys-color-tertiary-container)'
-                                      : 'var(--md-sys-color-surface-container-highest)',
-                                color:
-                                  available && capable
-                                    ? 'var(--md-sys-color-on-primary-container)'
-                                    : needFullVersion
-                                      ? 'var(--md-sys-color-on-tertiary-container)'
-                                      : 'var(--md-sys-color-on-surface-variant)',
-                              }}
-                            >
-                              {ffmpegChecking ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : available && capable ? (
-                                <Check className="h-3.5 w-3.5" />
-                              ) : (
-                                <AlertCircle className="h-3.5 w-3.5" />
-                              )}
-                            </div>
-                            <div className="flex flex-col">
-                              <Text className="text-xs font-medium text-[var(--md-sys-color-on-surface)]">
-                                FFmpeg{' '}
-                                {!available
-                                  ? '未安装'
-                                  : capable
-                                    ? '完整版'
-                                    : '精简版'}
-                              </Text>
-                              <Text className="text-[10px] uppercase tracking-wide text-[var(--md-sys-color-on-surface-variant)]">
-                                {available
-                                  ? `${ffmpegStatus?.source === 'builtin' ? '内置' : '系统'} · v${ffmpegStatus?.version ?? ''}${!capable ? ' · 不支持音频转码' : ''}`
-                                  : '高画质下载与音频转码需要 FFmpeg'}
-                              </Text>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {(!available || needFullVersion) &&
-                              !ffmpegInstalling &&
-                              !ffmpegUploading && (
-                                <Button
-                                  variant="primary"
-                                  size="sm"
-                                  icon={<Download className="h-3.5 w-3.5" />}
-                                  onClick={handleInstallFfmpeg}
-                                >
-                                  {needFullVersion
-                                    ? '下载完整版'
-                                    : '下载 FFmpeg'}
-                                </Button>
-                              )}
-                            {(!available || needFullVersion) &&
-                              !ffmpegInstalling &&
-                              !ffmpegUploading && (
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  icon={<Upload className="h-3.5 w-3.5" />}
-                                  onClick={() =>
-                                    ffmpegFileInputRef.current?.click()
-                                  }
-                                >
-                                  手动安装
-                                </Button>
-                              )}
-                            {(!available || needFullVersion) &&
-                              !ffmpegInstalling &&
-                              !ffmpegUploading && (
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  icon={
-                                    <ExternalLink className="h-3.5 w-3.5" />
-                                  }
-                                  onClick={() => setManualDownloadOpen(true)}
-                                >
-                                  手动下载
-                                </Button>
-                              )}
-                            <input
-                              ref={ffmpegFileInputRef}
-                              type="file"
-                              accept=".zip,.tar.xz,.tar.gz"
-                              className="hidden"
-                              onChange={handleUploadFfmpeg}
-                            />
-                            {ffmpegUploading && (
-                              <div className="flex flex-col gap-1.5">
-                                <div className="flex items-center gap-1.5 text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                  <span>
-                                    {ffmpegUploadPercent < 100
-                                      ? `上传中 ${ffmpegUploadPercent}%`
-                                      : '安装中...'}
-                                  </span>
-                                </div>
-                                <div className="h-1.5 w-32 overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container)]">
-                                  <div
-                                    className="h-full rounded-full transition-all"
-                                    style={{
-                                      width: `${ffmpegUploadPercent < 100 ? ffmpegUploadPercent : 100}%`,
-                                      backgroundColor:
-                                        'var(--md-sys-color-primary)',
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            )}
-                            {!ffmpegInstalling && !ffmpegUploading && (
-                              <button
-                                onClick={() => refreshFfmpegStatus(true)}
-                                disabled={ffmpegChecking}
-                                className="rounded-[var(--md-sys-shape-corner)] p-1.5 text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)] disabled:opacity-40"
-                                title="重新检测"
-                              >
-                                <RefreshCw className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        {needFullVersion &&
-                          !ffmpegInstalling &&
-                          !ffmpegUploading && (
-                            <Text className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                              当前 FFmpeg 缺少 AAC 编码器，无法转码 DTS/AC3
-                              等音频。点击「下载完整版」自动下载，或「手动安装」上传
-                              zip 压缩包。
-                            </Text>
-                          )}
-                        {ffmpegInstalling && (
-                          <div className="flex flex-col gap-1.5">
-                            <div className="flex items-center justify-between text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                              <span>{ffmpegInstallStage}</span>
-                              <span>{ffmpegInstallPercent}%</span>
-                            </div>
-                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container)]">
-                              <div
-                                className="h-full rounded-full transition-all"
-                                style={{
-                                  width: `${ffmpegInstallPercent}%`,
-                                  backgroundColor:
-                                    'var(--md-sys-color-primary)',
-                                }}
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    )
-                  })()}
-                </div>
-
-                <div className="mb-6">
-                  <Switch
-                    label="允许内嵌字幕（仅服务器中转）"
-                    checked={settings.embeddedSubtitleEnabled}
-                    onChange={(e) =>
+                <div className="mb-6 max-w-md">
+                  <Select
+                    label="wasm 引擎下载来源"
+                    value={settings.wasmCoreSource}
+                    options={[
+                      { label: '作者直链（推荐）', value: 'author' },
+                      { label: '服务器中转', value: 'server' },
+                      { label: '自定义链接', value: 'custom' },
+                    ]}
+                    onChange={(value) =>
                       setSettings((prev) => ({
                         ...prev,
-                        embeddedSubtitleEnabled: e.target.checked,
+                        wasmCoreSource: value as WasmCoreSource,
                       }))
                     }
                   />
                   <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                    开启后，视频走服务器中转（后端可直接访问视频字节）时可识别并播放视频内封字幕轨道；直链模式不支持。
+                    转码核心（约 32MB
+                    wasm）的下载地址。作者直链与自定义链接不占用服务器带宽，直链加载失败时自动回退服务器中转。更改后需刷新页面生效。
                   </p>
+                  {settings.wasmCoreSource === 'custom' && (
+                    <div className="mt-3">
+                      <Input
+                        placeholder="https://example.com/ffmpeg-core.wasm"
+                        value={settings.wasmCoreCustomUrl}
+                        onChange={(e) =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            wasmCoreCustomUrl: e.target.value,
+                          }))
+                        }
+                      />
+                      <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                        指向 ffmpeg-core.wasm 的完整直链（需 http(s)://
+                        开头，且目标服务器允许跨域访问）。
+                      </p>
+                    </div>
+                  )}
                 </div>
-
-                {/* 手动下载弹窗：用户自选目标平台的 FFmpeg 安装包。
-                    下载发生在浏览器所在机器，上传到服务端时才需要与服务端平台匹配，
-                    因此提供全部平台由用户自行选择，而非按服务端平台限定。 */}
-                <Modal
-                  open={manualDownloadOpen}
-                  onClose={() => setManualDownloadOpen(false)}
-                  title="手动下载 FFmpeg"
-                  className="max-w-lg"
-                  footer={
-                    <Button
-                      variant="secondary"
-                      onClick={() => setManualDownloadOpen(false)}
-                    >
-                      关闭
-                    </Button>
-                  }
-                >
-                  <div className="flex flex-col gap-2">
-                    <Text className="text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                      请选择与<b>服务器操作系统</b>匹配的 FFmpeg
-                      安装包。下载完成后，通过上方「手动安装」上传 zip / tar.xz
-                      文件。
-                    </Text>
-                    {(ffmpegStatus?.manualDownloadUrls ?? []).map((item) => (
-                      <a
-                        key={item.platform}
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() => setManualDownloadOpen(false)}
-                        className="flex items-center justify-between rounded-[var(--md-sys-shape-corner)] px-3 py-2.5 text-sm transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
-                      >
-                        <span>{item.label}</span>
-                        <ExternalLink className="h-4 w-4 shrink-0 text-[var(--md-sys-color-on-surface-variant)]" />
-                      </a>
-                    ))}
-                    {ffmpegStatus?.platform && (
-                      <Text className="mt-1 text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                        当前检测到服务器平台：
-                        {ffmpegStatus.platform === 'win32'
-                          ? 'Windows'
-                          : ffmpegStatus.platform === 'linux'
-                            ? 'Linux'
-                            : ffmpegStatus.platform}
-                      </Text>
-                    )}
-                  </div>
-                </Modal>
 
                 <Title level={5} className="mb-4 mt-6">
                   版本更新

@@ -123,9 +123,9 @@ export class Movie {
   /**
    * 影片级 FFmpeg WASM 引擎标记。
    *
-   * 添加影片时勾选「启用 FFmpeg WASM 引擎」且检测到需要（DTS 等音轨需
-   * 浏览器内转码、或存在可前端提取的内嵌字幕轨）时置 true。
-   * 播放时该影片绕过全局 audioTranscodeEnabled 开关直接启用 wasm 引擎。
+   * 添加影片时勾选「启用 FFmpeg WASM 引擎」且检测到需要（DTS 等不兼容
+   * 音轨需浏览器内转码）时置 true。播放时为 wasm 转码的实际触发条件——
+   * 需与全局 audioTranscodeEnabled 许可开关同时满足才启用 wasm 引擎。
    */
   @Column({ type: 'boolean', default: false })
   wasmEngine!: boolean;

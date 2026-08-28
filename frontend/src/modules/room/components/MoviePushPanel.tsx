@@ -161,13 +161,17 @@ interface WasmDetectResult {
 }
 
 /**
- * 检测影片是否需要 FFmpeg WASM 引擎（DTS 音频流转码 / 内嵌字幕提取）。
+ * 检测影片是否需要 FFmpeg WASM 引擎（DTS 等音频流转码）。
  *
  * 判定依据（按优先级）：
  * 1. format 非 mkv → 不需要（wasm 引擎仅支持 MKV 容器）
  * 2. 音轨编码已知 → 不受浏览器支持的编码（DTS/AC3 等）需要转码
- * 3. 编码未知 → 前端 Range 拉取 MKV 头探测：音轨编码 + 文本字幕轨
+ * 3. 编码未知 → 前端 Range 拉取 MKV 头探测音轨编码（无论结果都回填
+ *    audioCodec，播放时引擎选择器可精确判断，避免「编码未知」误入 wasm）
  * 4. 探测失败（跨域等）→ 保守启用（用户已显式勾选）
+ *
+ * 注：内嵌字幕提取已独立为前端 MatroskaDemuxer 模块（与 wasm 引擎无关），
+ * 字幕轨不再参与本判定。
  */
 async function detectWasmEngineNeed(
   probeUrl: string | null,
@@ -202,15 +206,10 @@ async function detectWasmEngineNeed(
           reason: `检测到 ${badAudio.toUpperCase()} 音轨，将使用 WASM 引擎在浏览器内转码为 AAC`,
         }
       }
-      if (info.textSubtitleTracks > 0) {
-        return {
-          wasmEngine: true,
-          reason: `检测到 ${info.textSubtitleTracks} 条内嵌字幕轨，已启用 WASM 引擎支持字幕提取`,
-        }
-      }
       return {
         wasmEngine: false,
-        reason: '音轨浏览器原生支持且无内嵌字幕轨，无需 WASM 引擎',
+        audioCodec: info.audioCodecs[0] || undefined,
+        reason: '音轨浏览器原生支持，无需 WASM 引擎',
       }
     } catch {
       return {
@@ -234,6 +233,11 @@ const WASM_DETECTABLE_SOURCES: readonly string[] = [
 export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
   const userRole = useAuthStore((state) => state.user?.role)
   const { betaFeaturesEnabled, fetchSettings } = useSystemSettingsStore()
+  // 全局许可开关：管理后台「允许浏览器端音频转码」未开启时，
+  // 添加影片处不显示「启用 FFmpeg WASM 引擎」勾选 UI（勾了也不会生效）
+  const audioTranscodeEnabled = useSystemSettingsStore(
+    (s) => s.audioTranscodeEnabled
+  )
   const addMovie = useRoomStore((state) => state.addMovie)
   const fetchMovies = useRoomStore((state) => state.fetchMovies)
   const setPendingPreviewPlay = useRoomStore(
@@ -245,9 +249,9 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
   const [loading, setLoading] = useState(false)
   const [qualityLoading, setQualityLoading] = useState(false)
   // 「启用 FFmpeg WASM 引擎」勾选项：默认关闭。
-  // 开启后添加影片时自动检测是否需要 WASM 引擎（DTS 音轨转码 / 内嵌字幕提取），
-  // 检测到需要时为该片标记 wasmEngine，播放时直接启用 wasm 引擎，
-  // 不依赖管理后台的全局「音频转码」开关。
+  // 开启后添加影片时自动检测是否需要 WASM 引擎（DTS 等不兼容音轨转码），
+  // 检测到需要时为该片标记 wasmEngine；播放时需与管理后台的全局
+  // 「允许浏览器端音频转码」许可开关同时满足才启用 wasm 引擎。
   const [wasmEngineChecked, setWasmEngineChecked] = useState(false)
   const [resolvedMovie, setResolvedMovie] = useState<ResolvedSource | null>(
     null
@@ -1776,33 +1780,36 @@ export function MoviePushPanel({ isHost }: MoviePushPanelProps) {
 
           {renderSourceForm()}
 
-          {/* FFmpeg WASM 引擎勾选项：仅文件类源显示（emby/jellyfin 服务端转码、
-              bilibili/anime/kazumi 不适用）。开启后添加时自动检测 DTS 音轨 / 内嵌字幕 */}
-          {WASM_DETECTABLE_SOURCES.includes(sourceType) && (
-            <div
-              className="flex items-center justify-between rounded-[var(--md-sys-shape-corner)] px-3 py-2"
-              style={{
-                backgroundColor: 'var(--md-sys-color-surface-container-high)',
-              }}
-            >
-              <div className="flex min-w-0 flex-col">
-                <Text className="text-xs font-medium leading-tight">
-                  启用 FFmpeg WASM 引擎
-                </Text>
-                <Text
-                  type="secondary"
-                  className="text-[10px] leading-tight"
-                >
-                  添加时自动检测 DTS 音频流转码与内嵌字幕提取需求
-                </Text>
+          {/* FFmpeg WASM 引擎勾选项：管理后台「允许浏览器端音频转码」开启时才显示，
+              且仅文件类源（emby/jellyfin 服务端转码、bilibili/anime/kazumi 不适用）。
+              开启后添加时自动检测 DTS 等不兼容音轨 */}
+          {audioTranscodeEnabled &&
+            WASM_DETECTABLE_SOURCES.includes(sourceType) && (
+              <div
+                className="flex items-center justify-between rounded-[var(--md-sys-shape-corner)] px-3 py-2"
+                style={{
+                  backgroundColor:
+                    'var(--md-sys-color-surface-container-high)',
+                }}
+              >
+                <div className="flex min-w-0 flex-col">
+                  <Text className="text-xs font-medium leading-tight">
+                    启用 FFmpeg WASM 引擎
+                  </Text>
+                  <Text
+                    type="secondary"
+                    className="text-[10px] leading-tight"
+                  >
+                    开启则自动检测 DTS 等音轨并在浏览器内转码为 AAC
+                  </Text>
+                </div>
+                <Switch
+                  checked={wasmEngineChecked}
+                  onChange={(e) => setWasmEngineChecked(e.target.checked)}
+                  disabled={!isHost}
+                />
               </div>
-              <Switch
-                checked={wasmEngineChecked}
-                onChange={(e) => setWasmEngineChecked(e.target.checked)}
-                disabled={!isHost}
-              />
-            </div>
-          )}
+            )}
 
           {renderActionButton()}
 

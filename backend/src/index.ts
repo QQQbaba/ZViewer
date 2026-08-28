@@ -368,6 +368,9 @@ async function bootstrap() {
       methods: ['GET', 'POST'],
       credentials: true,
     },
+    // 房主广播的 subtitle-update 含完整轨道 cues（手动上传的 ASS 特效
+    // 字幕可达数 MB），默认 1MB 会让大字幕同步静默失败
+    maxHttpBufferSize: 20 * 1024 * 1024,
   });
 
   // 注入 io：playbackMemoryService.isHostOnline 据此校验 hostSocketId 的

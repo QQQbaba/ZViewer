@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/Input'
 import { Switch } from '@/components/ui/Switch'
 import { Slider } from '@/components/ui/Slider'
 import { Button } from '@/components/ui/Button'
+import { FontPickerPanel } from '@/components/ui/FontPicker'
 import { cn } from '@/lib/utils'
 import type { SubtitleTrack, EmbeddedTrackInfo } from '@/hooks/useSubtitles'
 import {
@@ -22,11 +23,15 @@ import {
 } from '@/modules/room/watch-together/DanmakuStylePanel'
 import { AnimatedSidePanel } from './AnimatedSidePanel'
 import { SubtitleBrowser } from './SubtitleBrowser'
+import { DEFAULT_DANMAKU_STYLE } from '@/store/danmakuStore'
 import type {
   DanmakuStyleState,
   DanmakuTypeFilters,
   DanmakuAdvancedStyle,
 } from '@/store/danmakuStore'
+
+/** 弹幕默认字体栈（FontPickerPanel 的「默认」项映射值） */
+const DANMAKU_DEFAULT_FONT = DEFAULT_DANMAKU_STYLE.advanced.fontFamily
 
 /** 主面板宽度（固定，副面板据此定位） */
 const MAIN_PANEL_WIDTH = 260
@@ -34,6 +39,8 @@ const MAIN_PANEL_WIDTH = 260
 const SIDE_PANEL_WIDTH = 200
 /** 字幕浏览面板宽度 */
 const BROWSER_PANEL_WIDTH = 220
+/** 字体选择面板宽度 */
+const FONT_PANEL_WIDTH = 220
 /** 副面板与主面板间距 */
 const PANEL_GAP = 8
 
@@ -119,6 +126,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     'danmaku'
   )
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [fontPanelOpen, setFontPanelOpen] = useState(false)
   const [showSubtitleLoader, setShowSubtitleLoader] = useState(false)
   const [subtitleUrlInput, setSubtitleUrlInput] = useState('')
   const [autoSearching, setAutoSearching] = useState(false)
@@ -136,6 +144,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const isSubtitleView = settingsTab === 'subtitle' || !danmakuStyle
   // 高级设置侧面板：弹幕与字幕各自的内容，复用同一个展开状态
   const showAdvancedPanel = advancedOpen && (isDanmakuView || isSubtitleView)
+  // 字体面板与高级设置面板互斥（同为向右侧滑出的延伸面板）；
+  // 字幕/弹幕 Tab 各自渲染对应的字体选择内容（Tab 切换时已关闭）
+  const showFontPanel = fontPanelOpen
   const showBrowserPanel =
     browserOpen && isSubtitleView && browseMovieId != null
 
@@ -217,6 +228,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
             setStyle={onDanmakuStyleChange ?? (() => {})}
             setFilters={onDanmakuFilterChange ?? (() => {})}
             setAdvancedStyle={onDanmakuAdvancedChange ?? (() => {})}
+            onFontPanelToggle={() => {
+              setAdvancedOpen(false)
+              setFontPanelOpen((v) => !v)
+            }}
           />
         ) : (
           <div className="flex flex-col gap-2">
@@ -279,28 +294,56 @@ export function SettingsPanel(props: SettingsPanelProps) {
               >
                 字体
               </div>
-              <select
-                value={subtitleFontFamily ?? ''}
-                onChange={(e) =>
-                  onChangeSubtitleFontFamily?.(e.target.value)
-                }
-                className="w-full rounded-md border bg-transparent px-2 py-1.5 text-xs outline-none"
-                style={{
-                  borderColor: 'var(--md-sys-color-outline)',
-                  color: 'var(--md-sys-color-on-surface)',
+              <button
+                type="button"
+                onClick={() => {
+                  setAdvancedOpen(false)
+                  setFontPanelOpen((v) => !v)
                 }}
+                className="zen-input-glow flex w-full items-center justify-between gap-2 rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-1 text-xs text-[var(--md-sys-color-on-surface)] transition-all duration-200 hover:border-[var(--md-sys-color-primary)] hover:shadow-sm focus:border-[var(--md-sys-color-primary)] focus:outline-none"
               >
-                <option value="">默认</option>
-                <option value="'Microsoft YaHei', sans-serif">微软雅黑</option>
-                <option value="'SimHei', sans-serif">黑体</option>
-                <option value="'SimSun', sans-serif">宋体</option>
-                <option value="'KaiTi', sans-serif">楷体</option>
-                <option value="sans-serif">无衬线 (Sans)</option>
-                <option value="serif">衬线 (Serif)</option>
-                <option value="monospace">等宽 (Mono)</option>
-              </select>
+                <span
+                  className="truncate"
+                  style={{ fontFamily: subtitleFontFamily || undefined }}
+                >
+                  {subtitleFontFamily
+                    ? subtitleFontFamily.replace(/["']/g, '').split(',')[0]?.trim() ||
+                      '自定义'
+                    : '默认'}
+                </span>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--md-sys-color-on-surface-variant)]" />
+              </button>
             </div>
           </div>
+        )}
+      </AnimatedSidePanel>
+
+      {/* 延伸面板：字体选择（字幕/弹幕 Tab 各自的内容） */}
+      <AnimatedSidePanel
+        open={showFontPanel}
+        width={FONT_PANEL_WIDTH}
+        gap={PANEL_GAP}
+        mainPanelWidth={MAIN_PANEL_WIDTH}
+        maxHeight={280}
+      >
+        {isDanmakuView ? (
+          <FontPickerPanel
+            value={
+              danmakuStyle?.advanced.fontFamily === DANMAKU_DEFAULT_FONT
+                ? ''
+                : (danmakuStyle?.advanced.fontFamily ?? '')
+            }
+            onChange={(v) =>
+              onDanmakuAdvancedChange?.({
+                fontFamily: v || DANMAKU_DEFAULT_FONT,
+              })
+            }
+          />
+        ) : (
+          <FontPickerPanel
+            value={subtitleFontFamily ?? ''}
+            onChange={(v) => onChangeSubtitleFontFamily?.(v)}
+          />
         )}
       </AnimatedSidePanel>
 
@@ -351,6 +394,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                     setSettingsTab(tab)
                     setAdvancedOpen(false)
                     setBrowserOpen(false)
+                    setFontPanelOpen(false)
                   }}
                   className={cn(
                     'rounded-md py-1 text-xs font-medium transition-all',
@@ -624,6 +668,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                             onClick={() => {
                               setBrowserOpen((v) => !v)
                               setAdvancedOpen(false)
+                              setFontPanelOpen(false)
                             }}
                           >
                             {browserOpen ? '关闭浏览' : '浏览目录'}
@@ -643,6 +688,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                     onClick={() => {
                       setAdvancedOpen((v) => !v)
                       setBrowserOpen(false)
+                      setFontPanelOpen(false)
                     }}
                     className={cn(
                       'mt-1 flex w-full items-center justify-center gap-1 rounded-md border py-1 text-xs font-medium transition-all active:brightness-95',
@@ -670,7 +716,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
             setStyle={onDanmakuStyleChange ?? (() => {})}
             resetStyle={onResetDanmakuStyle ?? (() => {})}
             advancedOpen={advancedOpen}
-            onAdvancedToggle={() => setAdvancedOpen((v) => !v)}
+            onAdvancedToggle={() => {
+              setAdvancedOpen((v) => !v)
+              setBrowserOpen(false)
+              setFontPanelOpen(false)
+            }}
           />
         )}
       </div>

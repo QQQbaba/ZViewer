@@ -17,30 +17,16 @@ export interface ServerBrowseResult {
   readonly?: boolean
 }
 
-/** 视频文件内嵌字幕轨道信息。 */
-export interface EmbeddedSubtitleTrack {
-  /** ffprobe 流索引（绝对索引） */
-  index: number
-  /** 字幕编码格式（如 'subrip', 'ass'） */
-  codecName: string
-  /** 语言标签（如 'chi', 'eng'） */
-  language: string | null
-  /** 轨道标题（如 '简体中文'） */
-  title: string | null
-}
-
 /** 解析文件返回结果。 */
 export interface ServerFileResolved {
   title: string
   videoUrl: string
   format: string
   size: number
-  /** 音频编码（用于判断是否需要转码） */
+  /** 音频编码（由前端 MKV demux 探测回填） */
   audioCodec?: string | null
-  /** 视频时长（秒），由 ffprobe 探测 */
+  /** 视频时长（秒） */
   duration?: number | null
-  /** 内嵌字幕轨道列表 */
-  subtitleTracks?: EmbeddedSubtitleTrack[]
 }
 
 /** 上传成功的文件信息。 */
@@ -85,18 +71,16 @@ export interface SystemDirBrowseResult {
 
 /** B站下载进度行（NDJSON 流式响应）。 */
 export interface BilibiliDownloadProgress {
-  status: 'parsing' | 'downloading' | 'merging' | 'done' | 'error'
+  status: 'parsing' | 'downloading' | 'done' | 'error'
   /** parsing 阶段的步骤标识 */
   step?: string
-  /** downloading 阶段的子阶段：video/audio */
-  phase?: 'video' | 'audio'
   /** 进度说明文本 */
   message?: string
   /** downloading 阶段已接收字节数 */
   received?: number
   /** downloading 阶段总字节数（未知时为 0） */
   total?: number
-  /** downloading/merging 阶段百分比 0-100 */
+  /** downloading 阶段百分比 0-100 */
   percent?: number
   /** done 阶段的文件信息 */
   file?: { name: string; path: string; size: number }
@@ -115,47 +99,10 @@ export interface BilibiliDownloadedFile {
 export interface BilibiliDownloadCallbacks {
   /** 解析阶段进度（step + message） */
   onParsing?: (step: string, message: string) => void
-  /** 下载阶段进度（phase + received/total/percent） */
+  /** 下载阶段进度（received/total/percent） */
   onDownloading?: (
-    phase: 'video' | 'audio',
     received: number,
     total: number,
     percent: number
   ) => void
-  /** 合并阶段进度（percent + message） */
-  onMerging?: (percent: number, message: string) => void
-}
-
-// ============ FFmpeg 状态 ============
-
-/** FFmpeg 检测结果 */
-export interface FfmpegStatus {
-  available: boolean
-  source: 'builtin' | 'system' | null
-  path: string | null
-  version: string | null
-  /** 是否具备 AAC 编码能力（精简版 FFmpeg 可能为 false） */
-  transcodeCapable?: boolean
-  /** 服务器平台（'win32' | 'linux' | 'darwin'） */
-  platform?: string
-  /**
-   * 手动下载链接清单（各平台的官方下载地址）。
-   * 下载发生在浏览器所在机器，上传到服务端时才需要与服务端平台匹配，
-   * 因此提供全部平台供用户自行选择。
-   */
-  manualDownloadUrls?: Array<{
-    platform: 'win32' | 'linux64'
-    label: string
-    url: string
-  }>
-  error?: string
-}
-
-/** FFmpeg 安装进度行（NDJSON 流式响应） */
-export interface FfmpegInstallProgress {
-  status: 'downloading' | 'extracting' | 'done' | 'error'
-  received?: number
-  total?: number
-  percent?: number
-  message: string
 }

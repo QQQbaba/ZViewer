@@ -21,6 +21,8 @@ const DEFAULT_SETTINGS: Partial<SystemSettings> = {
   cdnProxyUrl: 'https://gh-proxy.com',
   embeddedSubtitleEnabled: true,
   audioTranscodeEnabled: false,
+  wasmCoreSource: 'author',
+  wasmCoreCustomUrl: '',
 };
 
 /**

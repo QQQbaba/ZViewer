@@ -136,7 +136,8 @@ export function WatchTogetherCore({
       state.movies.find((m) => m.id === state.currentMovieId)?.path ?? null
   )
   // 当前影片的 WASM 引擎标记（添加影片时勾选并检测到需要时为 true）：
-  // 与全局 audioTranscodeEnabled 开关为 OR 关系，任一开启即走 wasm 转码
+  // 与全局 audioTranscodeEnabled 开关为 AND 关系——全局开关只做许可，
+  // 影片级勾选才是实际触发条件，两者同时满足才走 wasm 转码
   const currentMovieWasmEngine = useRoomStore(
     (state) =>
       state.movies.find((m) => m.id === state.currentMovieId)?.wasmEngine ??
@@ -163,15 +164,11 @@ export function WatchTogetherCore({
   // 字幕状态：房主操作广播同步，观众监听应用
   const subtitles = useSubtitles({ roomId, isHost })
 
-  // 内嵌字幕：开关开启 && 源可访问。
-  // - server-files：后端本地文件（中转），前端提取 + 后端 ffmpeg 回退
-  // - webdav / openlist 中转：前端提取 + 后端 ffmpeg 回退
-  // - webdav / openlist 直链：前端 MKV demux 提取是唯一路径（后端 ffmpeg
-  //   无法访问直链），失败静默
+  // 内嵌字幕：源可访问即可（提取已全部前端化，中转/直链均可用）。
+  // - server-files：后端本地文件（中转），前端 MKV demux 提取
+  // - webdav / openlist 中转或直链：前端 MKV demux 提取（直链时这是
+  //   唯一路径，失败静默）
   // - emby / jellyfin：其自带字幕接口，不受直链/中转限制
-  const embeddedSubtitleEnabled = useSystemSettingsStore(
-    (s) => s.embeddedSubtitleEnabled
-  )
   const audioTranscodeEnabled = useSystemSettingsStore(
     (s) => s.audioTranscodeEnabled
   )
@@ -207,8 +204,7 @@ export function WatchTogetherCore({
     }
     return null
   })()
-  const canEnableEmbedded =
-    isHost && embeddedSubtitleEnabled && embeddedSource !== null
+  const canEnableEmbedded = isHost && embeddedSource !== null
 
   // ── 音频编码兼容性提示 ──────────────────────────────
   // 浏览器 <video> 仅支持 AAC/MP3/Opus/FLAC 等少数音频编码。
@@ -252,15 +248,21 @@ export function WatchTogetherCore({
       }
     } else {
       // 本地文件 / WebDAV / OpenList / FTP / 直链源：浏览器端 wasm 转码
-      // 全局开关或影片级 wasmEngine 标记（添加影片时勾选并检测到需要）任一开启
-      if (audioTranscodeEnabled || currentMovieWasmEngine) {
+      // 需全局开关（许可）+ 影片级 wasmEngine 标记（添加影片时勾选并检测到
+      // 需要）同时满足；只开全局开关不会对未勾选的影片自动转码。
+      if (audioTranscodeEnabled && currentMovieWasmEngine) {
         addPlayerNotice(
           `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，正在使用 ffmpeg.wasm 在浏览器内实时转码为 AAC（首次加载约需 30MB 转码核心）`,
           'info'
         )
+      } else if (currentMovieWasmEngine) {
+        addPlayerNotice(
+          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，本片已标记需要转码，但管理后台「浏览器端音频转码」开关未开启（该开关为全局许可），可能无声。请管理员在「基础设置 → FFmpeg 引擎」开启后重试`,
+          'error'
+        )
       } else {
         addPlayerNotice(
-          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，当前未开启音频转码，可能无声。如需声音请在管理后台「基础设置 → FFmpeg 引擎」开启音频转码开关`,
+          `音轨编码 ${codec.toUpperCase()} 不受浏览器支持，本片未启用浏览器端转码，可能无声。如需声音请在添加影片时勾选「启用 FFmpeg WASM 引擎」`,
           'error'
         )
       }
@@ -280,32 +282,38 @@ export function WatchTogetherCore({
   // - WebDAV/FTP/OpenList/服务器文件：在影片所在目录中搜索同名字幕文件
   // - 服务器文件：额外探测并提取视频内嵌字幕轨道
   // 其他源类型（如 bilibili）仅清空旧字幕。
+  // 观众端不搜索外挂字幕（跟随房主广播），但同样本地提取内嵌字幕
+  // （seek 感知：观众跟随房主跳转后字幕秒级可用，不依赖房主广播快照）。
   const supportedSubtitleSources = ['webdav', 'ftp', 'openlist', 'server-files']
   useEffect(() => {
     if (currentMovieId == null) return
-    if (!isHost) return
-    // 先清空旧字幕（切换影片时旧字幕不再适用）
-    subtitles.clearTracks()
-    // 支持的源类型才触发自动搜索
-    if (supportedSubtitleSources.includes(currentMovieSourceType)) {
-      void subtitles.searchAutoSubtitles(currentMovieId)
+    if (isHost) {
+      // 先清空旧字幕（切换影片时旧字幕不再适用）
+      subtitles.clearTracks()
+      // 支持的源类型才触发自动搜索
+      if (supportedSubtitleSources.includes(currentMovieSourceType)) {
+        void subtitles.searchAutoSubtitles(currentMovieId)
+      }
     }
     // 内嵌字幕探测需预取数 MB 文件头并占用同源连接（HTTP/1.1 同源仅
     // 6 并发），延迟到视频首帧拉流之后发起，避免拖慢初次加载
     let embeddedTimer: ReturnType<typeof setTimeout> | undefined
     if (
-      embeddedSubtitleEnabled &&
       currentMovieSourceType === 'server-files' &&
       currentMoviePath
     ) {
       embeddedTimer = setTimeout(() => {
-        void subtitles.loadEmbeddedSubtitles(currentMoviePath)
+        void subtitles.loadEmbeddedSubtitles(
+          currentMoviePath,
+          undefined,
+          // seek 感知：稀疏提取优先处理播放位置附近（跳转后字幕秒级可用）
+          () => videoRef.current?.currentTime ?? null
+        )
       }, 3000)
     }
     // 挂载源（webdav/openlist，中转或直链）：前端 MKV demux 提取内嵌
     // 字幕轨道（直链时这是唯一可用路径）
     if (
-      embeddedSubtitleEnabled &&
       (currentMovieSourceType === 'webdav' ||
         currentMovieSourceType === 'openlist') &&
       watchTogether.sourceUrl
@@ -313,7 +321,8 @@ export function WatchTogetherCore({
       embeddedTimer = setTimeout(() => {
         void subtitles.loadEmbeddedSubtitles(
           currentMoviePath ?? '',
-          watchTogether.sourceUrl
+          watchTogether.sourceUrl,
+          () => videoRef.current?.currentTime ?? null
         )
       }, 3000)
     }
@@ -324,7 +333,6 @@ export function WatchTogetherCore({
     isHost,
     currentMovieSourceType,
     currentMoviePath,
-    embeddedSubtitleEnabled,
     watchTogether.sourceUrl,
   ])
 
@@ -1455,6 +1463,14 @@ export function WatchTogetherCore({
     if (!settingsOpen) return
     const handleMouseDown = (e: MouseEvent) => {
       const target = e.target as Node
+      // portal 到 body 的浮动菜单（如 FontPicker 下拉）虽在 anchor 外，
+      // 但点击它们不应关闭设置面板（否则菜单瞬间卸载无法选中）
+      if (
+        target instanceof Element &&
+        target.closest?.('[data-portal-menu]')
+      ) {
+        return
+      }
       if (
         settingsOpen &&
         settingsAnchorRef.current &&

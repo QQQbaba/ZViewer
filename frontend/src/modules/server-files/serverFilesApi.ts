@@ -3,9 +3,6 @@ import type {
   BilibiliDownloadedFile,
   BilibiliDownloadCallbacks,
   BilibiliDownloadProgress,
-  EmbeddedSubtitleTrack,
-  FfmpegInstallProgress,
-  FfmpegStatus,
   ServerBrowseResult,
   ServerFileEntry,
   ServerFileResolved,
@@ -152,7 +149,6 @@ export async function resolveServerFile(
     size?: number
     audioCodec?: string | null
     duration?: number | null
-    subtitleTracks?: EmbeddedSubtitleTrack[]
   }
   if (!res.ok || !data.success || !data.videoUrl) {
     throw new Error(data.message || '解析服务器文件失败')
@@ -164,43 +160,6 @@ export async function resolveServerFile(
     size: data.size ?? 0,
     audioCodec: data.audioCodec,
     duration: data.duration,
-    subtitleTracks: data.subtitleTracks,
-  }
-}
-
-/**
- * 提取视频文件中指定内嵌字幕轨道的内容。
- *
- * 后端使用 ffmpeg 将字幕轨道导出为 SRT 格式。
- */
-export async function extractEmbeddedSubtitle(
-  path: string,
-  streamIndex: number
-): Promise<{
-  content: string
-  format: string
-  label: string
-  language: string | null
-}> {
-  const res = await apiFetch(
-    `/api/server-files/extract-subtitle?path=${encodeURIComponent(path)}&index=${streamIndex}`
-  )
-  const data = (await res.json()) as {
-    success: boolean
-    message?: string
-    content?: string
-    format?: string
-    label?: string
-    language?: string | null
-  }
-  if (!res.ok || !data.success || !data.content) {
-    throw new Error(data.message || '提取字幕失败')
-  }
-  return {
-    content: data.content,
-    format: data.format || 'srt',
-    label: data.label || `轨道 ${streamIndex}`,
-    language: data.language ?? null,
   }
 }
 
@@ -322,13 +281,10 @@ const BILIBILI_DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000
  * 后端以 NDJSON 流式响应推送进度：
  *   - `parsing` 阶段：调用 `onParsing(step, message)`
  *   - `downloading` 阶段：调用 `onDownloading(phase, received, total, percent)`
- *   - `merging` 阶段（仅 DASH 模式）：调用 `onMerging(percent, message)`
  *   - `done` 阶段：resolve 出文件信息
  *   - `error` 阶段：reject 错误
  *
- * 模式：
- *   - `mp4`（默认）：MP4 单文件直链，最高 1080P，无需 FFmpeg
- *   - `dash`：DASH 分离流，支持 4K/8K/HDR，需要服务器安装 FFmpeg
+ * 仅 MP4 单文件直链模式（最高 720P）。高画质请使用 CLI 模式下载。
  *
  * 与 `resolveBilibili` 一样采用先 `res.text()` 再按行解析的方式，
  * 避免部分浏览器在流式读取时记录 `net::ERR_ABORTED`。
@@ -340,7 +296,6 @@ export async function downloadBilibiliVideo(
     filename?: string
     qn?: number
     page?: number
-    mode?: 'mp4' | 'dash'
   },
   callbacks?: BilibiliDownloadCallbacks
 ): Promise<BilibiliDownloadedFile> {
@@ -387,13 +342,10 @@ export async function downloadBilibiliVideo(
           callbacks?.onParsing?.(data.step, data.message)
         } else if (data.status === 'downloading') {
           callbacks?.onDownloading?.(
-            data.phase ?? 'video',
             data.received ?? 0,
             data.total ?? 0,
             data.percent ?? 0
           )
-        } else if (data.status === 'merging') {
-          callbacks?.onMerging?.(data.percent ?? 0, data.message ?? '')
         } else if (data.status === 'done' && data.file) {
           result = data.file
         } else if (data.status === 'error') {
@@ -410,164 +362,6 @@ export async function downloadBilibiliVideo(
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new Error('下载 B站 视频超时，请稍后重试', { cause: err })
-    }
-    throw err
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-/**
- * 手动上传 zip 文件安装 FFmpeg。
- *
- * 用户上传包含 ffmpeg 可执行文件的 zip 压缩包，
- * 后端解压并提取 ffmpeg 到 bin/ 目录。
- *
- * @param file      用户选择的 zip 文件
- * @param onProgress 上传进度回调（loaded, total）
- */
-export async function uploadFfmpeg(
-  file: File,
-  onProgress?: (loaded: number, total: number) => void,
-): Promise<FfmpegStatus> {
-  const formData = new FormData()
-  formData.append('file', file)
-
-  return new Promise<FfmpegStatus>((resolve, reject) => {
-    const xhr = new XMLHttpRequest()
-    xhr.open('POST', `${getApiUrl()}/api/server-files/ffmpeg-upload`)
-    xhr.withCredentials = true
-
-    if (onProgress) {
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) onProgress(e.loaded, e.total)
-      }
-    }
-
-    xhr.onload = () => {
-      try {
-        const data = JSON.parse(xhr.responseText) as FfmpegStatus & {
-          success?: boolean
-          message?: string
-        }
-        if (xhr.status >= 200 && xhr.status < 300 && data.success) {
-          resolve({
-            available: !!data.available,
-            source: data.source,
-            path: data.path,
-            version: data.version,
-            transcodeCapable: data.transcodeCapable,
-            platform: data.platform,
-          })
-        } else {
-          reject(new Error(data.message || '上传安装失败'))
-        }
-      } catch {
-        reject(new Error('解析响应失败'))
-      }
-    }
-
-    xhr.onerror = () => reject(new Error('网络错误，上传失败'))
-    xhr.send(formData)
-  })
-}
-
-// ============ FFmpeg 状态检测与在线安装 ============
-
-/** 检测服务器 FFmpeg 状态。 */
-export async function checkFfmpeg(
-  force: boolean = false
-): Promise<FfmpegStatus> {
-  const query = force ? '?force=true' : ''
-  const res = await apiFetch(`/api/server-files/ffmpeg-status${query}`)
-  const data = (await res.json()) as FfmpegStatus & { success?: boolean }
-  if (!res.ok || data.success === false) {
-    return {
-      available: false,
-      source: null,
-      path: null,
-      version: null,
-      transcodeCapable: false,
-      platform: data.platform,
-      manualDownloadUrls: data.manualDownloadUrls,
-      error: data.error || '检测失败',
-    }
-  }
-  return {
-    available: !!data.available,
-    source: data.source,
-    path: data.path,
-    version: data.version,
-    transcodeCapable: data.transcodeCapable,
-    platform: data.platform,
-    manualDownloadUrls: data.manualDownloadUrls,
-  }
-}
-
-/** FFmpeg 安装整体超时（10 分钟，覆盖大文件下载+解压） */
-const FFMPEG_INSTALL_TIMEOUT_MS = 10 * 60 * 1000
-
-/**
- * 在线下载并安装 FFmpeg。
- *
- * 后端以 NDJSON 流式响应推送进度：
- *   - `downloading` 阶段：拉取二进制压缩包
- *   - `extracting` 阶段：解压并提取 ffmpeg 可执行文件
- *   - `done` 阶段：安装完成
- *   - `error` 阶段：reject 错误
- */
-export async function installFfmpeg(
-  onProgress?: (p: FfmpegInstallProgress) => void
-): Promise<void> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), FFMPEG_INSTALL_TIMEOUT_MS)
-
-  try {
-    const res = await apiFetch('/api/server-files/ffmpeg-install', {
-      method: 'POST',
-      signal: controller.signal,
-    })
-
-    const contentType = res.headers.get('content-type') || ''
-    if (!contentType.includes('application/x-ndjson')) {
-      const data = (await res.json().catch(() => null)) as {
-        success?: boolean
-        message?: string
-      } | null
-      throw new Error(data?.message || '安装 FFmpeg 失败')
-    }
-
-    let text: string
-    try {
-      text = await res.text()
-    } catch (err) {
-      throw new Error('读取安装响应失败', { cause: err })
-    }
-
-    let streamError: Error | null = null
-    const lines = text.split('\n')
-    for (const line of lines) {
-      if (!line.trim()) continue
-      try {
-        const data = JSON.parse(line) as FfmpegInstallProgress
-        if (data.status === 'done') {
-          return
-        }
-        if (data.status === 'error') {
-          streamError = new Error(data.message || '安装失败')
-        } else {
-          onProgress?.(data)
-        }
-      } catch (err) {
-        console.warn('[installFfmpeg] 解析进度行失败:', line, err)
-      }
-    }
-
-    if (streamError) throw streamError
-    throw new Error('安装未完成')
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('安装 FFmpeg 超时，请稍后重试', { cause: err })
     }
     throw err
   } finally {

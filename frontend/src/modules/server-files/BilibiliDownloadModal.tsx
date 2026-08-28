@@ -7,9 +7,8 @@
  *   3. 显示视频卡片（标题、时长、多 P 选择、清晰度按钮组）
  *   4. 选择清晰度后点击「开始下载」
  *
- * 模式自动判定：
- *   - 后端返回的 acceptQuality 中，qn > 80（1080P）的清晰度需要 DASH 模式
- *   - DASH 模式需要 FFmpeg，未安装时高画质按钮禁用
+ * 仅 MP4 单文件直链模式（最高 720P）。高画质（需服务器端 FFmpeg 合并）已移除，
+ * 请使用 CLI 模式下载高画质。
  *
  * 设计语言要点：
  * - 8x8 rounded icon container + 135° gradient header
@@ -17,7 +16,6 @@
  * - 自定义清晰度按钮组，避免原生 select 直角边框
  * - surface-container-high 圆角 inset 承载进度区域
  * - 含 root 切换 + 目录浏览副面板
- * - FFmpeg 状态检测 + 在线下载（支持 DASH 高画质模式）
  */
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -29,7 +27,6 @@ import {
   ChevronLeft,
   Folder,
   Check,
-  Wand2,
   Search,
   Film,
   Clock,
@@ -45,12 +42,11 @@ import { resolveBilibili } from '@/modules/bilibili/bilibiliApi'
 import type { QualityOption, ResolvedSource } from '@/modules/bilibili/types'
 import {
   browseServerFiles,
-  checkFfmpeg,
   downloadBilibiliVideo,
   extractRootKey,
   listServerRoots,
 } from './serverFilesApi'
-import type { FfmpegStatus, ServerFileEntry, ServerFileRoot } from './types'
+import type { ServerFileEntry, ServerFileRoot } from './types'
 
 /** 需要大会员的清晰度 qn 列表 */
 const VIP_ONLY_QNS = [112, 116, 120, 125, 126, 127]
@@ -97,15 +93,8 @@ export function BilibiliDownloadModal({
   const [dirEntries, setDirEntries] = useState<ServerFileEntry[]>([])
   const [dirLoading, setDirLoading] = useState(false)
 
-  // FFmpeg 状态
-  const [ffmpegStatus, setFfmpegStatus] = useState<FfmpegStatus | null>(null)
-  const [ffmpegChecking, setFfmpegChecking] = useState(false)
-
   // 下载状态
-  const [stage, setStage] = useState<
-    'parsing' | 'downloading' | 'merging' | null
-  >(null)
-  const [stagePhase, setStagePhase] = useState<'video' | 'audio'>('video')
+  const [stage, setStage] = useState<'parsing' | 'downloading' | null>(null)
   const [stageMessage, setStageMessage] = useState('')
   const [percent, setPercent] = useState(0)
   const [received, setReceived] = useState(0)
@@ -118,11 +107,6 @@ export function BilibiliDownloadModal({
   const currentRootKey = extractRootKey(targetPath)
   const currentRoot = roots.find((r) => r.key === currentRootKey)
   const readonly = !!currentRoot?.readonly
-
-  // 当前选中清晰度是否需要 DASH 模式
-  const requiresDash = selectedQn > MP4_MAX_QN
-  const canUseDash = !!ffmpegStatus?.available
-  const mode: 'mp4' | 'dash' = requiresDash && canUseDash ? 'dash' : 'mp4'
 
   // React Compiler 严格规则误报：visible/exiting 仅用于入场/退场动画状态同步。
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -152,32 +136,11 @@ export function BilibiliDownloadModal({
     }
   }, [])
 
-  // 检测 FFmpeg 状态
-  const refreshFfmpegStatus = useCallback(async () => {
-    setFfmpegChecking(true)
-    try {
-      const status = await checkFfmpeg()
-      setFfmpegStatus(status)
-    } catch (err) {
-      setFfmpegStatus({
-        available: false,
-        source: null,
-        path: null,
-        version: null,
-        transcodeCapable: false,
-        error: err instanceof Error ? err.message : '检测失败',
-      })
-    } finally {
-      setFfmpegChecking(false)
-    }
-  }, [])
-
-  // React Compiler 严格规则误报：Modal 可见时一次性加载根目录与 FFmpeg 状态。
+  // React Compiler 严格规则误报：Modal 可见时一次性加载根目录。
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (visible) {
       if (roots.length === 0) void loadRoots()
-      if (!ffmpegStatus && !ffmpegChecking) void refreshFfmpegStatus()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible])
@@ -232,8 +195,7 @@ export function BilibiliDownloadModal({
 
   // 完全关闭
   const handleClose = () => {
-    if (stage === 'parsing' || stage === 'downloading' || stage === 'merging')
-      return
+    if (stage === 'parsing' || stage === 'downloading') return
     resetToInput()
     setUrl('')
     setDirPickerOpen(false)
@@ -262,15 +224,12 @@ export function BilibiliDownloadModal({
       setResolved(result)
       setSelectedPage(result.currentPage ?? 1)
       // 默认选中最高可用清晰度（优先 720P，无则取列表第一个）
+      // 高于 720P 的画质需要服务器端 FFmpeg 合并（已移除），统一回退 720P
       const accept = result.acceptQuality ?? []
       const preferred = accept.find((q) => q.id === MP4_MAX_QN) ??
+        accept.find((q) => q.id <= MP4_MAX_QN) ??
         accept[0] ?? { id: MP4_MAX_QN, label: '720P' }
-      // 如果默认选中的是高画质但 FFmpeg 不可用，回退到 720P
-      const fallback =
-        preferred.id > MP4_MAX_QN && !canUseDash
-          ? (accept.find((q) => q.id <= MP4_MAX_QN) ?? preferred)
-          : preferred
-      setSelectedQn(fallback.id)
+      setSelectedQn(preferred.id)
       setStep('resolved')
     } catch (err) {
       message.error(err instanceof Error ? err.message : '解析失败')
@@ -287,10 +246,6 @@ export function BilibiliDownloadModal({
       message.warning('目标目录为只读，请选择其他目录')
       return
     }
-    if (requiresDash && !canUseDash) {
-      message.warning('该清晰度需要 FFmpeg，请先安装或选择 720P 及以下')
-      return
-    }
     setStep('downloading')
     setStage('parsing')
     setStageMessage('正在请求下载...')
@@ -305,24 +260,17 @@ export function BilibiliDownloadModal({
           filename: filename.trim() || undefined,
           qn: selectedQn,
           page: selectedPage > 0 ? selectedPage : undefined,
-          mode,
         },
         {
           onParsing: (_step, msg) => {
             setStage('parsing')
             setStageMessage(msg)
           },
-          onDownloading: (phase, r, t, p) => {
+          onDownloading: (r, t, p) => {
             setStage('downloading')
-            setStagePhase(phase)
             setReceived(r)
             setTotal(t)
             setPercent(p)
-          },
-          onMerging: (p, msg) => {
-            setStage('merging')
-            setPercent(p)
-            setStageMessage(msg)
           },
         }
       )
@@ -532,7 +480,6 @@ export function BilibiliDownloadModal({
                 <QualitySelector
                   acceptQuality={resolved.acceptQuality}
                   selectedQn={selectedQn}
-                  canUseDash={canUseDash}
                   disabled={!!stage}
                   vipStatus={resolved.vipStatus ?? 0}
                   onSelect={setSelectedQn}
@@ -543,17 +490,11 @@ export function BilibiliDownloadModal({
                   <div
                     className="h-1.5 w-1.5 rounded-full"
                     style={{
-                      backgroundColor: requiresDash
-                        ? 'var(--md-sys-color-tertiary)'
-                        : 'var(--md-sys-color-primary)',
+                      backgroundColor: 'var(--md-sys-color-primary)',
                     }}
                   />
                   <Text className="text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                    {requiresDash
-                      ? canUseDash
-                        ? `DASH 模式 · FFmpeg 合并 · ${ffmpegStatus?.version ?? ''}`
-                        : 'DASH 模式 · 需要在权限管理 → 基础设置中安装 FFmpeg'
-                      : 'MP4 直链模式 · 无需 FFmpeg'}
+                    MP4 直链模式 · 最高 720P（高画质请使用 CLI 模式下载）
                   </Text>
                 </div>
 
@@ -670,22 +611,14 @@ export function BilibiliDownloadModal({
                       <div className="flex items-center gap-2">
                         {stage === 'parsing' ? (
                           <Spinner size={16} />
-                        ) : stage === 'merging' ? (
-                          <Wand2 className="h-3.5 w-3.5 text-[var(--md-sys-color-tertiary)]" />
                         ) : (
                           <Download className="h-3.5 w-3.5 text-[var(--md-sys-color-primary)]" />
                         )}
                         <Text className="text-xs font-medium text-[var(--md-sys-color-on-surface)]">
-                          {stage === 'parsing'
-                            ? '解析中'
-                            : stage === 'merging'
-                              ? '合并中'
-                              : stagePhase === 'audio'
-                                ? '下载音频流'
-                                : '下载视频流'}
+                          {stage === 'parsing' ? '解析中' : '下载视频'}
                         </Text>
                       </div>
-                      {(stage === 'downloading' || stage === 'merging') && (
+                      {stage === 'downloading' && (
                         <Text className="text-[10px] font-medium uppercase tracking-wide text-[var(--md-sys-color-primary)]">
                           {percent}%
                         </Text>
@@ -697,30 +630,25 @@ export function BilibiliDownloadModal({
                     >
                       {stageMessage || '处理中...'}
                     </Text>
-                    {(stage === 'downloading' || stage === 'merging') && (
+                    {stage === 'downloading' && (
                       <>
                         <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container)]">
                           <div
                             className="h-full rounded-full transition-all"
                             style={{
                               width: `${percent}%`,
-                              backgroundColor:
-                                stage === 'merging'
-                                  ? 'var(--md-sys-color-tertiary)'
-                                  : 'var(--md-sys-color-primary)',
+                              backgroundColor: 'var(--md-sys-color-primary)',
                             }}
                           />
                         </div>
-                        {stage === 'downloading' && (
-                          <div className="flex items-center justify-between text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
-                            <span>{formatSize(received)}</span>
-                            <span>
-                              {total > 0
-                                ? `共 ${formatSize(total)}`
-                                : '大小未知'}
-                            </span>
-                          </div>
-                        )}
+                        <div className="flex items-center justify-between text-[10px] text-[var(--md-sys-color-on-surface-variant)]">
+                          <span>{formatSize(received)}</span>
+                          <span>
+                            {total > 0
+                              ? `共 ${formatSize(total)}`
+                              : '大小未知'}
+                          </span>
+                        </div>
                       </>
                     )}
                   </div>
@@ -745,7 +673,7 @@ export function BilibiliDownloadModal({
                 size="sm"
                 icon={<Download className="h-4 w-4" />}
                 onClick={() => void handleDownload()}
-                disabled={!!stage || readonly || (requiresDash && !canUseDash)}
+                disabled={!!stage || readonly || selectedQn > MP4_MAX_QN}
               >
                 开始下载
               </Button>
@@ -853,7 +781,6 @@ function VideoInfoCard({ resolved, duration }: VideoInfoCardProps) {
 interface QualitySelectorProps {
   acceptQuality: QualityOption[] | undefined
   selectedQn: number
-  canUseDash: boolean
   disabled: boolean
   vipStatus: number
   onSelect: (qn: number) => void
@@ -862,7 +789,6 @@ interface QualitySelectorProps {
 function QualitySelector({
   acceptQuality,
   selectedQn,
-  canUseDash,
   disabled,
   vipStatus,
   onSelect,
@@ -910,15 +836,15 @@ function QualitySelector({
       <div className="grid grid-cols-4 gap-1.5">
         {list.map((opt) => {
           const active = selectedQn === opt.id
-          const requiresDash = opt.id > MP4_MAX_QN
-          const disabledByFfmpeg = requiresDash && !canUseDash
+          // 高于 720P 的画质需要服务器端 FFmpeg 合并（已移除），恒禁用
+          const disabledByNoMerge = opt.id > MP4_MAX_QN
           const isVipOnly = VIP_ONLY_QNS.includes(opt.id)
           const disabledByVip = isVipOnly && !isVip
-          const isDisabled = disabled || disabledByFfmpeg || disabledByVip
+          const isDisabled = disabled || disabledByNoMerge || disabledByVip
           const title = disabledByVip
             ? '需要大会员账号才能下载此画质'
-            : disabledByFfmpeg
-              ? '需要先安装 FFmpeg 才能下载此画质'
+            : disabledByNoMerge
+              ? '服务器端 FFmpeg 已移除，高画质请使用 CLI 模式下载'
               : undefined
           return (
             <button

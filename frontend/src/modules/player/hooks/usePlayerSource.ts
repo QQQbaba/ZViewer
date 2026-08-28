@@ -137,11 +137,11 @@ export function usePlayerSource(
         cleanup()
         resetVideoElement(video)
         appliedSourceUrlRef.current = source.url
-        // 「浏览器端音频转码」开关：MKV + DTS 等音轨时启用 wasm 引擎。
-        // 影片级 wasmEngine 标记（添加影片时勾选并检测到需要）优先级与之并列，
-        // 任一开启即启用——避免房主添加 DTS 影片后还要去管理后台开全局开关。
+        // 「浏览器端音频转码」：全局开关仅做许可（管理员允许），影片级
+        // wasmEngine 标记（添加影片时勾选并检测到需要）才是实际触发条件，
+        // 两者同时满足才启用 wasm 引擎——避免全局开关一开所有 MKV 都走转码。
         const wasmEnabled =
-          useSystemSettingsStore.getState().audioTranscodeEnabled ||
+          useSystemSettingsStore.getState().audioTranscodeEnabled &&
           source.wasmEngine === true
         let engine = selectEngine(source, {
           wasmAudioTranscodeEnabled: wasmEnabled,

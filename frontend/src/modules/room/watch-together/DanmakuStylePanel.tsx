@@ -1,7 +1,6 @@
 import { RotateCcw, ChevronRight } from 'lucide-react'
 import { Switch } from '@/components/ui/Switch'
 import { Slider } from '@/components/ui/Slider'
-import { Input } from '@/components/ui/Input'
 import { cn } from '@/lib/utils'
 import type {
   DanmakuStyleState,
@@ -134,6 +133,8 @@ interface DanmakuAdvancedSettingsProps {
   setStyle: (updates: Partial<DanmakuStyleState>) => void
   setFilters: (updates: Partial<DanmakuTypeFilters>) => void
   setAdvancedStyle: (updates: Partial<DanmakuAdvancedStyle>) => void
+  /** 打开/关闭字体选择延伸面板 */
+  onFontPanelToggle?: () => void
 }
 
 /**
@@ -145,6 +146,7 @@ export function DanmakuAdvancedSettings({
   setStyle,
   setFilters,
   setAdvancedStyle,
+  onFontPanelToggle,
 }: DanmakuAdvancedSettingsProps) {
   return (
     <div className="flex flex-col gap-2">
@@ -199,7 +201,7 @@ export function DanmakuAdvancedSettings({
         onChange={(v) => setStyle({ speed: v })}
       />
 
-      {/* 字体 */}
+      {/* 字体（点击打开字体选择延伸面板） */}
       <div>
         <label
           className="mb-1 block text-[11px] font-medium uppercase tracking-wide"
@@ -207,11 +209,22 @@ export function DanmakuAdvancedSettings({
         >
           字体
         </label>
-        <Input
-          size="sm"
-          value={style.advanced.fontFamily}
-          onChange={(e) => setAdvancedStyle({ fontFamily: e.target.value })}
-        />
+        <button
+          type="button"
+          onClick={() => onFontPanelToggle?.()}
+          className="zen-input-glow flex w-full items-center justify-between gap-2 rounded-[var(--md-sys-shape-corner)] border border-[var(--md-sys-color-outline)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-1 text-xs text-[var(--md-sys-color-on-surface)] transition-all duration-200 hover:border-[var(--md-sys-color-primary)] hover:shadow-sm focus:border-[var(--md-sys-color-primary)] focus:outline-none"
+        >
+          <span
+            className="truncate"
+            style={{ fontFamily: style.advanced.fontFamily || undefined }}
+          >
+            {style.advanced.fontFamily
+              ? style.advanced.fontFamily.replace(/["']/g, '').split(',')[0]?.trim() ||
+                '自定义'
+              : '默认'}
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--md-sys-color-on-surface-variant)]" />
+        </button>
       </div>
 
       <Slider

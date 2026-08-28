@@ -87,8 +87,9 @@ export interface MovieDto {
   /**
    * 影片级 FFmpeg WASM 引擎标记。
    *
-   * 添加影片时勾选并检测到需要（DTS 音轨转码 / 内嵌字幕提取）时为 true，
-   * 播放时该影片直接启用 wasm 引擎，不依赖全局 audioTranscodeEnabled。
+   * 添加影片时勾选并检测到需要（DTS 等不兼容音轨转码）时为 true。
+   * 播放时为 wasm 转码的实际触发条件——需与全局 audioTranscodeEnabled
+   * 许可开关同时满足才启用 wasm 引擎。
    */
   wasmEngine?: boolean;
   /**

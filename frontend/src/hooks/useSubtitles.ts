@@ -8,11 +8,7 @@ import {
   type SubtitleFormat,
   type ParsedCue,
 } from '@/lib/subtitleParser'
-import {
-  extractEmbeddedSubtitle,
-  resolveServerFile,
-  buildServerFileProxyUrl,
-} from '@/modules/server-files/serverFilesApi'
+import { buildServerFileProxyUrl } from '@/modules/server-files/serverFilesApi'
 import {
   probeMkvSubtitleTracks,
   streamMkvSubtitleTrack,
@@ -32,20 +28,19 @@ export interface EmbeddedTrackInfo {
   language: string | null
   title: string | null
   label: string
-  /** MKV TrackNumber（前端提取路径的轨道标识；后端 ffmpeg 轨道无此字段） */
+  /** MKV TrackNumber（前端 demux 提取路径的轨道标识；Emby/Jellyfin 轨道无此字段） */
   trackNumber?: number
-  /** 前端 demux 提取（非后端 ffmpeg）时为 true */
+  /** 前端 MKV demux 提取的轨道为 true；Emby/Jellyfin 轨道为 false */
   frontend?: boolean
 }
 
 /**
  * 内嵌字幕提取的源描述。
  * - server-files：后端本地文件路径
- * - webdav / openlist：中转与直链均可——直链时前端 MKV demux 是唯一路径
- *   （后端 ffmpeg 无法访问直链），失败静默（无回退）
+ * - webdav / openlist：中转与直链均可——前端 MKV demux 是唯一提取路径，失败静默（无回退）
  * - emby / jellyfin：直接用其自带字幕接口（PlaybackInfo / Subtitles Stream），不受直链限制
  * url：可 fetch 的中转/代理/直链 URL（提供时优先走前端 MKV demux 提取）
- * directLink：直链模式标记——后端 ffmpeg 端点不可用，前端失败时不回退
+ * directLink：直链模式标记——前端失败时不回退
  */
 export type EmbeddedSource =
   | { kind: 'server-files'; path: string; url?: string }
@@ -54,7 +49,7 @@ export type EmbeddedSource =
   | { kind: 'emby'; movieId: number }
   | { kind: 'jellyfin'; movieId: number }
 
-/** 后端字幕提取返回的格式 → subtitleParser 的 SubtitleFormat（'webvtt' → 'vtt'）。 */
+/** Emby/Jellyfin 字幕接口返回的格式 → subtitleParser 的 SubtitleFormat（'webvtt' → 'vtt'）。 */
 function mapOutputFormat(format: string): SubtitleFormat {
   switch (format) {
     case 'ass':
@@ -138,6 +133,18 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
   // 观众本地偏好标记：观众自行修改过字幕设置（开关/轨道/字号/偏移）后，
   // 房主广播的 subtitle-update 只更新轨道数据，不再覆盖观众的本地选择。
   const viewerPrefTouchedRef = useRef(false)
+  /** 最新字幕状态镜像：延迟任务/回调读取，避免闭包陈旧 */
+  const stateRef = useRef(state)
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
+  /**
+   * 内嵌字幕提取世代 + 取消：切影片/清空轨道时使进行中的提取流立即
+   * 失效（abort 网络拉流 + epoch 丢弃 in-flight chunk），防止旧影片
+   * 的流式提取继续 append 污染新影片的字幕轨道。
+   */
+  const embeddedEpochRef = useRef(0)
+  const embeddedAbortRef = useRef<AbortController | null>(null)
   /**
    * 内嵌字幕自动加载防重入标记：
    * StrictMode 双执行 / sourceUrl·开关异步初始化会重跑加载 effect，
@@ -304,8 +311,13 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
   )
 
   const clearTracks = useCallback(() => {
+    // 使进行中的内嵌提取流失效：abort 网络拉流 + 世代递增丢弃
+    // in-flight chunk，防止旧影片的流继续 append 污染新轨道列表
+    embeddedEpochRef.current++
+    embeddedAbortRef.current?.abort()
+    embeddedAbortRef.current = null
     // 清理自动加载的 URL 标记：done（已加载完）允许下次重新加载；
-    // loading（进行中）保留——正在加载的流无法取消，标记继续防并行重入
+    // loading（进行中）保留——正在加载的流已被 abort，标记防并行重入
     if (embeddedAutoLoadRef.current?.status === 'done') {
       embeddedAutoLoadRef.current = null
     }
@@ -386,14 +398,21 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     (
       url: string,
       track: { trackNumber: number; label: string; language: string | null },
-      activate: boolean
+      activate: boolean,
+      getPriorityTime?: () => number | null,
+      signal?: AbortSignal
     ): Promise<void> => {
+      // 捕获提取世代：clearTracks/切影片递增后，本流的所有 chunk 丢弃
+      const epoch = embeddedEpochRef.current
       return new Promise<void>((resolve, reject) => {
         let trackIndex = -1
         let settled = false
         let broadcastDone = false
         streamMkvSubtitleTrack(url, track.trackNumber, {
+          getPriorityTime,
+          signal,
           onChunk: (chunk) => {
+            if (embeddedEpochRef.current !== epoch) return
             const cues = parseSubtitle(chunk.text, chunk.format)
             if (cues.length === 0) return
             setState((prev) => {
@@ -405,10 +424,19 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
                 )
                 if (existing >= 0) {
                   trackIndex = existing
+                  // 时间戳去重：观众本地提取与房主广播全量数据并存时，
+                  // 同一轨的 cue（start 相同）只保留一份，避免重复字幕
+                  const starts = new Set(
+                    prev.subtitleTracks[existing]!.cues.map((c) => c.start)
+                  )
+                  const deduped = cues.filter((c) => !starts.has(c.start))
+                  if (deduped.length === 0) return prev
                   return {
                     ...prev,
                     subtitleTracks: prev.subtitleTracks.map((t, i) =>
-                      i === existing ? { ...t, cues: [...t.cues, ...cues] } : t
+                      i === existing
+                        ? { ...t, cues: [...t.cues, ...deduped] }
+                        : t
                     ),
                   }
                 }
@@ -482,14 +510,19 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
 
   /**
    * 加载视频文件中的内嵌字幕轨道。
-   * @param filePath server-files 路径（后端回退链路使用）
-   * @param sourceUrl 挂载源（webdav/openlist，中转或直链）播放 URL——
-   *   提供时走前端提取且失败无后端回退（直链后端不可访问；中转的
-   *   回退需要 movieId，由手动提取路径承担）
+   * @param filePath server-files 路径
+   * @param sourceUrl 挂载源（webdav/openlist，中转或直链）播放 URL
+   * 全部走前端 MKV demux 提取（后端 ffmpeg 已移除，无回退链路）
    */
   const loadEmbeddedSubtitles = useCallback(
-    async (filePath: string, sourceUrl?: string): Promise<number> => {
-      if (!isHost) return 0
+    async (
+      filePath: string,
+      sourceUrl?: string,
+      getPriorityTime?: () => number | null
+    ): Promise<number> => {
+      // 观众已从房主广播获得字幕轨道时无需本地提取（广播数据优先）；
+      // 房主提取中（大文件耗时数分钟）或广播缺失时观众本地提取
+      if (!isHost && stateRef.current.subtitleTracks.length > 0) return 0
 
       // mkv-embedded 的 fetch 无法携带 Authorization 头，
       // 本站 /api/ URL 必须附加 token query（与播放引擎 appendAuthToken 一致），
@@ -501,9 +534,22 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
       if (embeddedAutoLoadRef.current?.url === url) return 0
       embeddedAutoLoadRef.current = { url, status: 'loading' }
 
-      // 前端路径：MKV demux 探测 + 流式提取（原后端 ffmpeg 职责）
+      // 上一次提取流若还在跑（另一影片/URL），先取消防污染
+      embeddedAbortRef.current?.abort()
+      const controller = new AbortController()
+      embeddedAbortRef.current = controller
+
+      const finish = (started: number): number => {
+        embeddedAutoLoadRef.current = { url, status: 'done' }
+        return started
+      }
+
       try {
-        const probed = await probeMkvSubtitleTracks(url)
+        const probed = await probeMkvSubtitleTracks(
+          url,
+          undefined,
+          controller.signal
+        )
         const extractable = probed.filter((t) => t.supported)
         let started = 0
         for (const track of extractable) {
@@ -516,10 +562,13 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
                 label: track.label,
                 language: track.language,
               },
-              started === 0 // 首条成功轨激活；后续轨保持当前激活不变
+              started === 0, // 首条成功轨激活；后续轨保持当前激活不变
+              getPriorityTime,
+              controller.signal
             )
             started++
           } catch (err) {
+            if (controller.signal.aborted) return 0
             console.error(
               '[useSubtitles] frontend stream embedded subtitle failed:',
               track.trackNumber,
@@ -529,103 +578,31 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         }
         if (started > 0) {
           // 首段已到达、字幕轨已生效，后台继续补齐，无需等待
-          embeddedAutoLoadRef.current = { url, status: 'done' }
-          return started
+          return finish(started)
         }
-        // 挂载源（sourceUrl 模式）：无后端回退（直链后端不可访问；
-        // 中转自动加载无 movieId 回退链路，交给手动提取路径兜底）
-        if (sourceUrl) {
-          console.info(
-            '[useSubtitles] 挂载源前端提取内嵌字幕不可用（非 MKV / 位图字幕轨 / CORS 拒绝），跳过自动加载'
-          )
-          embeddedAutoLoadRef.current = null
-          return 0
-        }
-        // 前端一条都没提出来（如全部为位图字幕轨）→ 回退后端链路
-      } catch (err) {
-        if (sourceUrl) {
-          console.info(
-            '[useSubtitles] 挂载源前端探测内嵌字幕失败，跳过（直链/中转自动加载无回退）：',
-            err instanceof Error ? err.message : err
-          )
-          embeddedAutoLoadRef.current = null
-          return 0
-        }
+        // 一条都没提出来（如非 MKV 容器 / 全部为位图字幕轨）
         console.info(
-          '[useSubtitles] 前端探测内嵌字幕失败，回退后端 ffmpeg：',
-          err instanceof Error ? err.message : err
+          '[useSubtitles] 前端提取内嵌字幕不可用（非 MKV / 位图字幕轨 / CORS 拒绝），跳过自动加载'
         )
-      }
-
-      // 后端回退链路（仅 server-files：非 MKV 容器 / 位图字幕轨 / 前端探测失败）
-      let tracks: {
-        index: number
-        language: string | null
-        title: string | null
-      }[]
-      try {
-        const resolved = await resolveServerFile(filePath)
-        tracks = resolved.subtitleTracks ?? []
+        return finish(0)
       } catch (err) {
-        console.error(
-          '[useSubtitles] resolve server file for embedded subtitles failed:',
-          err
+        if (controller.signal.aborted) return 0
+        console.info(
+          '[useSubtitles] 前端探测内嵌字幕失败，跳过（无后端回退）：',
+          err instanceof Error ? err.message : err
         )
         embeddedAutoLoadRef.current = null
         return 0
       }
-      if (tracks.length === 0) {
-        embeddedAutoLoadRef.current = { url, status: 'done' }
-        return 0
-      }
-
-      const backendLoaded: SubtitleTrack[] = []
-      for (const track of tracks) {
-        try {
-          const result = await extractEmbeddedSubtitle(filePath, track.index)
-          const cues = parseSubtitle(
-            result.content,
-            mapOutputFormat(result.format)
-          )
-          const label = embeddedTrackLabel(track)
-          backendLoaded.push({ cues, label, lang: track.language || undefined })
-        } catch (err) {
-          console.error(
-            '[useSubtitles] extract embedded subtitle failed:',
-            track.index,
-            err
-          )
-        }
-      }
-
-      if (backendLoaded.length === 0) {
-        embeddedAutoLoadRef.current = { url, status: 'done' }
-        return 0
-      }
-
-      setState((prev) => {
-        const next: SubtitleState = {
-          ...prev,
-          subtitleTracks: [...prev.subtitleTracks, ...backendLoaded],
-          subtitleEnabled:
-            prev.subtitleEnabled || prev.subtitleTracks.length === 0,
-          activeTrackIndex:
-            prev.subtitleTracks.length === 0 ? 0 : prev.activeTrackIndex,
-        }
-        broadcast(next)
-        return next
-      })
-      embeddedAutoLoadRef.current = { url, status: 'done' }
-      return backendLoaded.length
     },
-    [isHost, broadcast]
+    [isHost, streamEmbeddedTrack]
   )
 
   /**
    * 列出视频文件内的内嵌字幕轨道（仅探测，不提取内容）。
    * 供 UI 先展示可用轨道，再由用户挑选某一条提取播放。
-   * 优先前端 MKV demux 探测（server-files / 有中转 URL 的挂载源），
-   * 失败回退后端探测端点。
+   * - server-files / webdav / openlist：前端 MKV demux 探测（唯一路径，无后端回退）
+   * - emby / jellyfin：后端调用其自带 PlaybackInfo 接口
    */
   const listEmbeddedTracks = useCallback(
     async (source: EmbeddedSource): Promise<EmbeddedTrackInfo[]> => {
@@ -641,51 +618,27 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         if (url) {
           try {
             const probed = await probeMkvSubtitleTracks(url)
-            if (probed.length > 0) {
-              return probed.map((t, i) => ({
-                index: i,
-                codecName: t.codecId,
-                language: t.language,
-                title: t.title,
-                label: t.label,
-                trackNumber: t.trackNumber,
-                frontend: true,
-              }))
-            }
-            return [] // MKV 无字幕轨，无需后端再探测
+            return probed.map((t, i) => ({
+              index: i,
+              codecName: t.codecId,
+              language: t.language,
+              title: t.title,
+              label: t.label,
+              trackNumber: t.trackNumber,
+              frontend: true,
+            }))
           } catch (err) {
-            // 直链模式：后端 ffmpeg 无法访问直链，无回退（常见失败原因：
-            // 直链服务器未开 CORS、非 MKV 容器）
-            if (
-              (source.kind === 'webdav' || source.kind === 'openlist') &&
-              source.directLink
-            ) {
-              console.info(
-                '[useSubtitles] 直链前端探测字幕轨失败（无后端回退）：',
-                err instanceof Error ? err.message : err
-              )
-              return []
-            }
+            // 唯一路径失败（常见原因：直链服务器未开 CORS、非 MKV 容器），无回退
             console.info(
-              '[useSubtitles] 前端探测字幕轨失败，回退后端：',
+              '[useSubtitles] 前端探测字幕轨失败（无后端回退）：',
               err instanceof Error ? err.message : err
             )
           }
         }
+        return []
       }
       try {
-        if (source.kind === 'server-files') {
-          const resolved = await resolveServerFile(source.path)
-          const tracks = resolved.subtitleTracks ?? []
-          return tracks.map((t) => ({
-            index: t.index,
-            codecName: t.codecName,
-            language: t.language,
-            title: t.title,
-            label: embeddedTrackLabel(t),
-          }))
-        }
-        // 挂载源（服务器中转）：通过 movieId 走后端探测端点
+        // Emby/Jellyfin：后端调用其 PlaybackInfo 接口
         const res = await apiFetch(
           `/api/subtitles/embedded-tracks?movieId=${source.movieId}`
         )
@@ -708,8 +661,8 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
 
   /**
    * 提取指定一条内嵌字幕轨道并添加为可播放的字幕轨道。
-   * 优先前端 MKV demux 提取（track.frontend 标记），失败回退后端
-   * ffmpeg 提取（ass/webvtt/srt），保留 ASS 样式。
+   * - server-files / webdav / openlist：前端 MKV demux 流式提取（track.frontend 标记，保留 ASS 样式）
+   * - emby / jellyfin：后端调用其自带 Subtitles Stream 端点
    */
   const extractEmbeddedTrack = useCallback(
     async (
@@ -747,54 +700,36 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
               track.trackNumber,
               err
             )
-            // 直链模式：后端 ffmpeg 无法访问直链，无回退
-            if (
-              (source.kind === 'webdav' || source.kind === 'openlist') &&
-              source.directLink
-            ) {
-              return 0
-            }
-            // 落到后端回退
+            return 0 // 唯一路径失败，无后端回退
           }
         }
       }
 
+      // Emby/Jellyfin：后端调用其自带 Subtitles Stream 端点
+      if (source.kind !== 'emby' && source.kind !== 'jellyfin') return 0
       try {
-        let content: string
-        let format: string
-        let label: string
-        let language: string | null
-        if (source.kind === 'server-files') {
-          const result = await extractEmbeddedSubtitle(source.path, track.index)
-          content = result.content
-          format = result.format
-          label = result.label
-          language = result.language
-        } else {
-          const res = await apiFetch(
-            `/api/subtitles/embedded-extract?movieId=${source.movieId}&index=${track.index}`
-          )
-          const data = (await res.json()) as {
-            success: boolean
-            content?: string
-            format?: string
-            label?: string
-            language?: string | null
-            message?: string
-          }
-          if (!res.ok || !data.success || !data.content) {
-            throw new Error(data.message || '提取内嵌字幕失败')
-          }
-          content = data.content
-          format = data.format || 'srt'
-          label = data.label || `轨道 ${track.index}`
-          language = data.language ?? null
+        const res = await apiFetch(
+          `/api/subtitles/embedded-extract?movieId=${source.movieId}&index=${track.index}`
+        )
+        const data = (await res.json()) as {
+          success: boolean
+          content?: string
+          format?: string
+          label?: string
+          language?: string | null
+          message?: string
         }
-        const cues = parseSubtitle(content, mapOutputFormat(format))
+        if (!res.ok || !data.success || !data.content) {
+          throw new Error(data.message || '提取内嵌字幕失败')
+        }
+        const cues = parseSubtitle(
+          data.content,
+          mapOutputFormat(data.format || 'srt')
+        )
         const newTrack: SubtitleTrack = {
           cues,
-          label: track.label || label || embeddedTrackLabel(track),
-          lang: language || track.language || undefined,
+          label: track.label || data.label || embeddedTrackLabel(track),
+          lang: data.language ?? track.language ?? undefined,
         }
         setState((prev) => {
           // 去重：相同 label 的轨道已存在（重复手动提取）时激活它而非重复建轨
@@ -898,6 +833,13 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
       payload: Partial<SubtitleBroadcastPayload> | undefined
     ) => {
       if (!payload) return
+      // 房主清空字幕（切影片）时，观众本地的内嵌提取流一并失效，
+      // 防止旧影片的流继续 append 重建轨道
+      if (Array.isArray(payload.tracks) && payload.tracks.length === 0) {
+        embeddedEpochRef.current++
+        embeddedAbortRef.current?.abort()
+        embeddedAbortRef.current = null
+      }
       // 观众改过本地偏好（开关/轨道/字号/偏移）后，房主广播只更新轨道
       // 数据；偏好字段保持观众本地选择。未改过则全量跟随房主。
       const touched = viewerPrefTouchedRef.current
@@ -905,7 +847,21 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         subtitleEnabled: touched
           ? prev.subtitleEnabled
           : payload.enabled ?? prev.subtitleEnabled,
-        subtitleTracks: payload.tracks ?? prev.subtitleTracks,
+        // 轨道数据：以房主广播为基准（数量/顺序/新增/清空均跟随房主，
+        // 房主手动上传的轨道由此同步给观众）；仅当本地同索引轨道 label
+        // 一致且 cues 更多（观众本地流式提取进度领先房主快照）时保留
+        // 本地该条——本地提取有 seek 感知（房主跳转后观众跟随跳转也能
+        // 秒出字幕），且避免替换打断进行中的流
+        subtitleTracks: payload.tracks
+          ? payload.tracks.map((t, i) => {
+              const local = prev.subtitleTracks[i]
+              return local &&
+                local.label === t.label &&
+                local.cues.length > t.cues.length
+                ? local
+                : t
+            })
+          : prev.subtitleTracks,
         activeTrackIndex: touched
           ? prev.activeTrackIndex
           : payload.activeIndex ?? prev.activeTrackIndex,

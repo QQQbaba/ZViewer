@@ -7,14 +7,17 @@
  * 复用 wasm-engine 的解复用器：
  * - 探测：Range 拉取文件头（几 MB 内含 Tracks 元素）→ 字幕轨列表
  * - 提取（小文件）：全量流式扫描 → 收集目标轨帧 → zlib 解压（如有）→ 组装
- * - 提取（大文件）：稀疏 Range 扫描——Cues 定位 Cluster、块链上只读
- *   块头字节、视频/音频负载按字节算术跳过不传输。5GB 级片源只需传输
- *   ~10% 字节量且一次遍历提取全部轨道
+ * - 提取（大文件）：稀疏 Range 扫描——Cues 锚点分段（含 CueTime），
+ *   段内按元素 size 链顺序前进（Cues 不保证覆盖全部 Cluster，锚点间
+ *   直跳会漏帧）、块链上只读块头字节、视频/音频负载按字节算术跳过
+ *   不传输。5GB 级片源只需传输 ~10% 字节量且一次遍历提取全部轨道；
+ *   worker 按「距当前播放位置最近」的优先级选锚点（seek 感知），
+ *   跳转后目标区域字幕秒级可用，其余区域后台补齐
  * - 组装 SRT / ASS 文本 → 交给 subtitleParser 解析渲染
  *
  * 支持的编码：S_TEXT/UTF8（SRT）、S_TEXT/SSA / S_TEXT/ASS、
  * S_TEXT/WEBVTT（按 SRT 兜底）。位图字幕（PGS/VOBSUB）标记不支持，
- * 调用方回退后端接口。
+ * 前端无可行提取路径（后端 ffmpeg 已移除，无回退）。
  */
 import { MatroskaDemuxer, type DemuxedFrame, type DemuxedTrack } from '@/modules/player/wasm-engine/demuxer/matroska-demuxer'
 import { TRACK_TYPE } from '@/modules/player/wasm-engine/demuxer/ebml'
@@ -29,8 +32,17 @@ const FULL_STREAM_LIMIT = 512 * 1024 * 1024
  * server-files 代理）。流式提取（边播边补）无需激进并发，2 足够。
  */
 const SPARSE_CONCURRENCY = 2
-/** 稀疏模式窗口大小（块链读取粒度，覆盖块头即可） */
-const SPARSE_WINDOW = 4096
+/**
+ * 稀疏模式窗口大小（块链读取粒度）。
+ *
+ * MKV 块头间隔由块负载大小决定（视频块 ~5-200KB，平均 ~15KB）。
+ * 窗口必须显著大于平均块间距，否则每个块头读取都是缓存未命中——
+ * 5.7GB 文件 × 每 15KB 一次 fetchRange = 62 万次 HTTP 请求，
+ * Firefox 单请求开销（连接建立/调度）显著高于 Chrome，提取期间
+ * 会挤占 video 元素的连接配额并拖慢首播。64KB 窗口可让连续
+ * 4-5 个块头共享缓存，请求次数降为 1/7。
+ */
+const SPARSE_WINDOW = 64 * 1024
 /** 稀疏模式允许的 Cluster 解析失败比例（超过则判整体失败） */
 const SPARSE_MAX_FAIL_RATIO = 0.1
 
@@ -55,6 +67,12 @@ export interface ExtractOptions {
   signal?: AbortSignal
   /** 进度回调（0-100 整数） */
   onProgress?: (pct: number) => void
+  /**
+   * 当前播放时间（秒）。稀疏提取按「距该时间最近」的优先级选择锚点：
+   * GB 级文件的提取按文件顺序爬取需数分钟，seek 到未爬取区域时字幕
+   * 会缺失；传入播放时间后 worker 优先提取播放位置附近，跳转即出字幕。
+   */
+  getPriorityTime?: () => number | null
 }
 
 /** 字幕轨编码 → 是否前端可提取（文本类） */
@@ -526,7 +544,7 @@ async function sparseReadUint(w: SparseWindow, pos: number, len: number): Promis
   return v
 }
 
-/** 稀疏提取主流程：Cues → 并行 Cluster 块链遍历。 */
+/** 稀疏提取主流程：Cues 锚点分段 → 并行顺序块链遍历（seek 感知调度）。 */
 async function extractSparse(
   url: string,
   trackMap: Map<number, DemuxedTrack>,
@@ -535,12 +553,12 @@ async function extractSparse(
   tsScaleMs: number,
   opts: ExtractOptions
 ): Promise<Map<number, RawSubtitleFrame[]>> {
-  // 1. 尾部读取并解析 Cues → Cluster 绝对位置
+  // 1. 尾部读取并解析 Cues → Cluster 锚点（含时间戳）
   const tailLen = Math.min(8 * 1024 * 1024, size)
   const rf = new RangeFetcher(url, opts)
   const tail = await rf.fetchRange(size - tailLen, tailLen)
-  const clusterStarts = parseCuesClusterPositions(tail, segmentDataStart)
-  if (clusterStarts.length === 0) {
+  const anchors = parseCuesAnchors(tail, segmentDataStart, tsScaleMs)
+  if (anchors.length === 0) {
     throw new Error('MKV 无 Cues 索引，无法稀疏提取')
   }
 
@@ -548,26 +566,32 @@ async function extractSparse(
   const framesByTrack = new Map<number, RawSubtitleFrame[]>()
   for (const n of trackMap.keys()) framesByTrack.set(n, [])
   const failList: number[] = []
-  let nextIdx = 0
+  const scheduler = createAnchorScheduler(anchors)
   let done = 0
-  const total = clusterStarts.length
+  const total = anchors.length
 
   const runWorker = async (): Promise<void> => {
     const w = new SparseWindow(rf, SPARSE_WINDOW)
     for (;;) {
-      const i = nextIdx++
-      if (i >= total) break
-      const start = clusterStarts[i]!
-      const next = i + 1 < total ? clusterStarts[i + 1]! : size
+      // abort 后立即退出：fetchRange 对已中止信号会即刻抛错，
+      // 不检查会导致 294 个锚点逐个失败（数百次无效请求级联）
+      if (opts.signal?.aborted) throw new Error('提取已中止')
+      const pt = opts.getPriorityTime?.() ?? null
+      const i = scheduler.pick(pt != null && Number.isFinite(pt) ? pt * 1000 : null)
+      if (i < 0) break
+      const start = anchors[i]!.pos
+      const next = i + 1 < total ? anchors[i + 1]!.pos : size
       try {
-        await walkClusterIntoAsync(w, start, next, trackMap, framesByTrack, tsScaleMs)
+        await walkAnchorSegment(w, start, next, trackMap, framesByTrack, tsScaleMs)
       } catch (err) {
+        // abort 引起的失败不是解析失败：不计数、不重试下一个锚点
+        if (opts.signal?.aborted) throw err
         failList.push(i)
         if (failList.length > Math.ceil(total * SPARSE_MAX_FAIL_RATIO) + 2) {
           throw err
         }
         console.warn(
-          `[mkv-embedded] Cluster #${i} 解析失败，跳过：`,
+          `[mkv-embedded] 锚点区间 #${i} 解析失败，跳过：`,
           err instanceof Error ? err.message : err
         )
       }      w.invalidate()
@@ -585,6 +609,48 @@ async function extractSparse(
     list.sort((a, b) => a.timestampMs - b.timestampMs)
   }
   return framesByTrack
+}
+
+/**
+ * 顺序遍历锚点区间 [segStart, segEnd) 内的所有顶层元素。
+ *
+ * Cues 并不保证覆盖全部 Cluster（实测部分封装工具只为部分 Cluster 写
+ * Cue 条目），直接锚点间跳转会漏掉未索引 Cluster 中的字幕帧。本函数
+ * 从锚点起点按元素 size 链顺序前进——锚点仅作并行分段边界，区间内
+ * （含未索引的 Cluster）一个不漏；视频/音频负载仍按字节算术跳过。
+ */
+async function walkAnchorSegment(
+  w: SparseWindow,
+  segStart: number,
+  segEnd: number,
+  trackMap: Map<number, DemuxedTrack>,
+  framesByTrack: Map<number, RawSubtitleFrame[]>,
+  tsScaleMs: number
+): Promise<void> {
+  let cur = segStart
+  for (;;) {
+    if (cur >= segEnd - 4) return
+    const id = await sparseReadElemId(w, cur)
+    const sz = await sparseReadVint(w, cur + id.length)
+    const dataStart = cur + id.length + sz.length
+    // unknown size（流式写入尾段）兜底为区间终点
+    const elSize =
+      sz.value >= 0xffffffffffffff ? segEnd - dataStart : sz.value
+    if (elSize <= 0) throw new Error(`@${cur} 元素尺寸异常（size=${elSize}）`)
+    if (id.id === 0x1f43b675) {
+      // Cluster：块链收集（nextBoundary 传 Cluster 自身结束位置）
+      await walkClusterIntoAsync(
+        w,
+        cur,
+        dataStart + elSize,
+        trackMap,
+        framesByTrack,
+        tsScaleMs
+      )
+    }
+    // 其他顶层元素（Chapters/Tags/Attachments 等）按大小跳过
+    cur = dataStart + elSize
+  }
 }
 
 /**
@@ -731,11 +797,21 @@ async function parseSparseBlock(
   })
 }
 
-/** 在尾部缓冲中查找并解析 Cues，返回 Cluster 绝对位置列表（升序去重）。 */
-function parseCuesClusterPositions(
+/** Cues 锚点：Cluster 绝对位置 + 该 CuePoint 时间戳（ms） */
+interface CueAnchor {
+  pos: number
+  timeMs: number
+}
+
+/**
+ * 在尾部缓冲中查找并解析 Cues，返回 Cluster 锚点列表
+ * （按 pos 升序去重，含 CueTime 时间戳，供 seek 感知调度）。
+ */
+function parseCuesAnchors(
   tail: Uint8Array,
-  segmentDataStart: number
-): number[] {
+  segmentDataStart: number,
+  tsScaleMs: number
+): CueAnchor[] {
   // 扫描 Cues 元素 ID（1C 53 BB 6B）
   let cuesOff = -1
   for (let i = 0; i < tail.length - 12; i++) {
@@ -756,18 +832,25 @@ function parseCuesClusterPositions(
   const szv = readVintBytes(tail, cuesOff + 4, false)!
   const cuesEnd = cuesOff + 4 + szv.length + szv.value
 
-  const positions: number[] = []
+  const anchors: CueAnchor[] = []
   let pos = cuesOff + 4 + szv.length
   while (pos < cuesEnd - 4) {
     const el = parseElementHeader(tail, pos)
     if (!el || el.end < 0) break
     if (el.id === 0xbb) {
       // CuePoint：内含 CueTime(0xB3) / CueTrackPositions(0xB7)
+      // 先收齐子元素（ CueTime 与 CueTrackPositions 顺序不保证），再落锚点
       let q = el.dataStart
+      let cueTime: number | null = null
+      const positions: number[] = []
       while (q < el.end - 4) {
         const child = parseElementHeader(tail, q)
         if (!child || child.end < 0 || child.end > el.end) break
-        if (child.id === 0xb7) {
+        if (child.id === 0xb3) {
+          let v = 0
+          for (let i = 0; i < child.size; i++) v = v * 256 + tail[child.dataStart + i]!
+          cueTime = v * tsScaleMs
+        } else if (child.id === 0xb7) {
           // CueTrackPositions：内含 CueClusterPosition(0xF1)
           let r = child.dataStart
           while (r < child.end - 4) {
@@ -783,10 +866,60 @@ function parseCuesClusterPositions(
         }
         q = child.end
       }
+      for (const p of positions) anchors.push({ pos: p, timeMs: cueTime ?? 0 })
     }
     pos = el.end
   }
-  return [...new Set(positions)].sort((a, b) => a - b)
+  // 同位置去重（保留首个时间）+ 按 pos 升序
+  const seen = new Set<number>()
+  const out: CueAnchor[] = []
+  for (const a of [...anchors].sort((a, b) => a.pos - b.pos)) {
+    if (seen.has(a.pos)) continue
+    seen.add(a.pos)
+    out.push(a)
+  }
+  return out
+}
+
+/**
+ * 锚点调度器：seek 感知的提取顺序。
+ * 有播放时间时优先取「距播放位置最近」的未处理锚点（跳转后该区域字幕
+ * 秒级可用，其余区域后台补齐）；无播放时间时按文件顺序推进。
+ */
+function createAnchorScheduler(anchors: CueAnchor[]): {
+  pick: (priorityTimeMs: number | null) => number
+  remaining: () => number
+} {
+  const total = anchors.length
+  const processed = new Uint8Array(total)
+  let remainingCount = total
+  let seqCursor = 0
+  const pick = (priorityTimeMs: number | null): number => {
+    if (priorityTimeMs != null && Number.isFinite(priorityTimeMs)) {
+      let best = -1
+      let bestDist = Infinity
+      for (let i = 0; i < total; i++) {
+        if (processed[i]) continue
+        const d = Math.abs(anchors[i]!.timeMs - priorityTimeMs)
+        if (d < bestDist) {
+          bestDist = d
+          best = i
+        }
+      }
+      if (best >= 0) {
+        processed[best] = 1
+        remainingCount--
+        return best
+      }
+      return -1
+    }
+    while (seqCursor < total && processed[seqCursor]) seqCursor++
+    if (seqCursor >= total) return -1
+    processed[seqCursor] = 1
+    remainingCount--
+    return seqCursor
+  }
+  return { pick, remaining: () => remainingCount }
 }
 
 /** DecompressionStream('deflate') = zlib（RFC1950）封装 */
@@ -875,6 +1008,11 @@ export async function streamMkvSubtitleTrack(
     if (needInflate) {
       for (const f of pending) f.data = await inflateZlib(f.data)
     }
+    // seek 感知调度下锚点乱序完成：按时间排序恢复「下一帧时间戳」
+    // 作为结束时间的正确语义（否则边界帧可能拿到更早的 nextTs）
+    if (pending.length > 1) {
+      pending.sort((a, b) => a.timestampMs - b.timestampMs)
+    }
     const parts: string[] = []
     for (let i = 0; i < pending.length; i++) {
       const f = pending[i]!
@@ -955,46 +1093,39 @@ export async function streamMkvSubtitleTrack(
     return
   }
 
-  // 大文件：稀疏路径 + 按序交付
+  // 大文件：稀疏路径 + seek 感知调度 + 完成即交付
   const tailLen = Math.min(8 * 1024 * 1024, size)
   const rf = new RangeFetcher(url, opts)
   const tail = await rf.fetchRange(size - tailLen, tailLen)
-  const clusterStarts = parseCuesClusterPositions(tail, segmentDataStart)
-  if (clusterStarts.length === 0) {
+  const anchors = parseCuesAnchors(tail, segmentDataStart, tsScaleMs)
+  if (anchors.length === 0) {
     // 无 Cues：回退全量流式（GB 级耗时较长，但仍可边读边交付）
     await streamFullScan()
     if (emittedChunks === 0) throw new Error('字幕轨为空')
     return
   }
 
-  const total = clusterStarts.length
+  const total = anchors.length
   const trackMap = new Map([[trackNumber, track]])
-  // 按序交付：worker 乱序完成 → slot 缓冲 → deliver 指针连续前移
-  const slots: (RawSubtitleFrame[] | null)[] = new Array(total).fill(null)
-  let nextIdx = 0
-  let deliverIdx = 0
+  const scheduler = createAnchorScheduler(anchors)
+  let done = 0
   let hardFail = 0
-
-  const deliver = async (): Promise<void> => {
-    while (deliverIdx < total && slots[deliverIdx] !== null) {
-      const frames = slots[deliverIdx]!
-      slots[deliverIdx] = null
-      for (const f of frames) pending.push(f)
-      deliverIdx++
-    }
-    await maybeFlush()
-  }
 
   const runWorker = async (): Promise<void> => {
     const w = new SparseWindow(rf, SPARSE_WINDOW)
     for (;;) {
-      const i = nextIdx++
-      if (i >= total) break
-      const start = clusterStarts[i]!
-      const next = i + 1 < total ? clusterStarts[i + 1]! : size
+      // abort 后立即退出：fetchRange 对已中止信号会即刻抛错，
+      // 不检查会导致全部锚点逐个失败（数百次无效请求级联）
+      if (opts.signal?.aborted) throw new Error('提取已中止')
+      const pt = opts.getPriorityTime?.() ?? null
+      const priorityMs = pt != null && Number.isFinite(pt) ? pt * 1000 : null
+      const i = scheduler.pick(priorityMs)
+      if (i < 0) break
+      const start = anchors[i]!.pos
+      const next = i + 1 < total ? anchors[i + 1]!.pos : size
       const local: RawSubtitleFrame[] = []
       try {
-        await walkClusterIntoAsync(
+        await walkAnchorSegment(
           w,
           start,
           next,
@@ -1002,19 +1133,33 @@ export async function streamMkvSubtitleTrack(
           new Map([[trackNumber, local]]),
           tsScaleMs
         )
-        slots[i] = local
       } catch (err) {
+        // abort 引起的失败不是解析失败：不计数、立即终止 worker
+        if (opts.signal?.aborted) throw err
         hardFail++
         if (hardFail > Math.ceil(total * SPARSE_MAX_FAIL_RATIO) + 2) throw err
-        slots[i] = []
         console.warn(
-          `[mkv-embedded] Cluster #${i} 解析失败，跳过：`,
+          `[mkv-embedded] 锚点区间 #${i} 解析失败，跳过：`,
           err instanceof Error ? err.message : err
         )
       }
       w.invalidate()
-      await deliver()
-      opts.onProgress?.(Math.min(99, Math.round((deliverIdx / total) * 100)))
+      // 乱序交付安全：调用方把 cues 追加进轨道、渲染层按激活时间
+      // 线性扫描全部 cues，与到达顺序无关（flush 前按时间排序）
+      for (const f of local) pending.push(f)
+      // 播放位置附近的锚点立即 flush（seek 后秒级出字幕）；
+      // 其余按批大小 / 时间间隔节奏交付
+      const nearPriority =
+        priorityMs != null &&
+        local.length > 0 &&
+        Math.abs(anchors[i]!.timeMs - priorityMs) < 30000
+      if (nearPriority) {
+        await flush()
+      } else {
+        await maybeFlush()
+      }
+      done++
+      opts.onProgress?.(Math.min(99, Math.round((done / total) * 100)))
     }
   }
 

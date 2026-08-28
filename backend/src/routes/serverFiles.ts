@@ -21,7 +21,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
+import { createWriteStream } from 'node:fs';
 import multer from 'multer';
 import { AppDataSource } from '../data-source';
 import { ServerFolder } from '../entities/ServerFolder';
@@ -44,27 +44,13 @@ import {
 } from '../services/bilibili/resolver';
 import { VIP_ONLY_QNS } from '../services/bilibili/permission';
 import { getUserCookie } from '../routes/stream/helpers';
-import {
-  checkFfmpeg,
-  installFfmpeg,
-  installFfmpegFromZip,
-  mergeVideoAudio,
-  downloadToFile,
-  resolveFfmpegPath,
-  probeMediaInfo,
-  extractSubtitleTrack,
-  mapCodecToSubtitleFormat,
-  resetFfmpegCache,
-  type InstallProgress,
-  type SubtitleStreamInfo,
-} from '../services/ffmpeg';
 
 const router = Router();
 
 // 全局校验：所有端点需登录
 router.use(authenticateToken);
 // 管理类端点仅 root 可访问；
-// 播放代理相关端点（/resolve、/extract-subtitle、/proxy）允许任意已登录用户访问，
+// 播放代理相关端点（/resolve、/proxy）允许任意已登录用户访问，
 // 否则观众（guest）无法加载房主推送的服务器本地视频。
 router.use(
   [
@@ -75,9 +61,6 @@ router.use(
     '/folder',
     '/rename',
     '/file',
-    '/ffmpeg-status',
-    '/ffmpeg-install',
-    '/ffmpeg-upload',
     '/bilibili-download',
   ],
   requireRoot,
@@ -587,27 +570,14 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
     // 使用相对路径，由前端根据当前页面 origin 自动解析，避免反向代理后协议错误（http vs https）
     const proxyUrl = `/api/server-files/proxy?path=${encodeURIComponent(target)}`;
 
-    // 探测音频编码（用于前端判断是否需要转码提示）
-    let audioCodec: string | null = null;
-    let duration: number | null = null;
-    let subtitleTracks: SubtitleStreamInfo[] = [];
-    try {
-      const probe = await probeMediaInfo(targetAbs);
-      audioCodec = probe.audioCodec;
-      duration = probe.duration;
-      subtitleTracks = probe.subtitleStreams || [];
-    } catch {
-      // 探测失败不影响正常流程
-    }
-
+    // 音轨编码探测已前端化（浏览器端 MKV demux），此处不再返回
     res.json({
       success: true,
       title: name,
       videoUrl: proxyUrl,
       format,
-      audioCodec,
-      duration,
-      subtitleTracks,
+      audioCodec: null,
+      duration: null,
       size: fs.statSync(targetAbs).size,
     });
   } catch (err) {
@@ -618,76 +588,12 @@ router.get('/resolve', async (req: AuthenticatedRequest, res: Response): Promise
   }
 });
 
-// ============ 7.5 提取内嵌字幕轨道 ============
-
-/**
- * GET /extract-subtitle — 提取视频文件中指定字幕轨道的内容。
- *
- * 查询参数：
- *   path   — 前缀式文件路径（如 'uploads:/movie.mkv'）
- *   index  — ffprobe 流索引（绝对索引，从 /resolve 返回的 subtitleTracks 中获取）
- *
- * 返回 JSON：
- *   { success: true, content, format, label }
- *   content 为 SRT 格式字幕文本，前端解析为 VTT 后使用
- */
-router.get('/extract-subtitle', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  try {
-    const target = typeof req.query.path === 'string' ? req.query.path : '';
-    const streamIndex = parseInt(String(req.query.index), 10);
-
-    if (!target.trim()) {
-      res.status(400).json({ success: false, message: '缺少 path 参数' });
-      return;
-    }
-    if (!Number.isFinite(streamIndex) || streamIndex < 0) {
-      res.status(400).json({ success: false, message: '缺少或无效的 index 参数' });
-      return;
-    }
-
-    const roots = await loadRootRegistry();
-    const { abs: targetAbs } = resolveSafePath(target, roots);
-    if (!fs.existsSync(targetAbs) || fs.statSync(targetAbs).isDirectory()) {
-      res.status(404).json({ success: false, message: '文件不存在' });
-      return;
-    }
-
-    // 验证该流索引确实是字幕流
-    const probe = await probeMediaInfo(targetAbs);
-    const subStream = (probe.subtitleStreams || []).find(s => s.index === streamIndex);
-    if (!subStream) {
-      res.status(400).json({ success: false, message: '未找到指定的字幕轨道' });
-      return;
-    }
-
-    // 按轨道编码选择输出格式（ass/ssa → ass 保留样式，webvtt → webvtt，其余 srt）
-    const format = mapCodecToSubtitleFormat(subStream.codecName);
-    const content = await extractSubtitleTrack(targetAbs, streamIndex, format);
-    const label = subStream.title || subStream.language || `轨道 ${streamIndex}`;
-
-    res.json({
-      success: true,
-      content,
-      format,
-      label,
-      language: subStream.language,
-    });
-  } catch (err) {
-    console.error('[server-files] extract-subtitle error:', err);
-    res.status(500).json({
-      success: false,
-      message: err instanceof Error ? err.message : '提取字幕失败',
-    });
-  }
-});
-
 // ============ 8. 流式代理播放（支持 Range） ============
 
 /**
- * HEAD /proxy — 轻量级元数据响应（不启动 FFmpeg）。
+ * HEAD /proxy — 轻量级元数据响应。
  *
- * 前端 direct-engine 在 attach 时发送 HEAD 请求获取 X-Content-Duration，
- * 用于 fragmented MP4 转码流（video.duration=Infinity）场景下的时长回退。
+ * 前端 direct-engine 在 attach 时发送 HEAD 请求获取元信息。
  * 仅探测文件信息并返回 header，不执行转码或流式传输。
  */
 router.head('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -710,16 +616,6 @@ router.head('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<
     res.setHeader('Content-Type', getContentType(format));
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Length', stat.size.toString());
-
-    // 探测时长，设置 X-Content-Duration header（供前端回退使用）
-    try {
-      const probe = await probeMediaInfo(targetAbs);
-      if (probe.duration && probe.duration > 0) {
-        res.setHeader('X-Content-Duration', probe.duration.toFixed(3));
-      }
-    } catch {
-      // 探测失败不影响 HEAD 响应
-    }
 
     res.status(200).end();
   } catch {
@@ -796,189 +692,70 @@ router.get('/proxy', async (req: AuthenticatedRequest, res: Response): Promise<v
 // ============ 9. 下载 B站 视频到服务器 ============
 
 /**
- * GET /ffmpeg-status — 检测 FFmpeg 是否可用（内置或系统 PATH）。
+ * 流式下载文件到本地路径。
  *
- * 返回：
- *   { success, available, source, path, version, transcodeCapable, platform,
- *     manualDownloadUrl, error? }
+ * 优化点：
+ * - 下载失败时自动清理不完整的文件
+ * - 进度回调节流：每 2% 或 512KB 触发一次，避免过度回调
  *
- * transcodeCapable: 是否具备 AAC 编码能力（精简版 FFmpeg 可能为 false）。
- * available=true 但 transcodeCapable=false 时，前端应提示安装完整版。
- *
- * manualDownloadUrl: 按【服务端运行平台】生成的手动下载地址（浏览器直接
- * 下载后通过"手动安装"上传）。由服务端提供而非前端硬编码，保证与实际
- * 运行环境匹配（前端无法可靠得知服务端平台）。
- *
- * 查询参数：
- *   ?force=true  强制刷新缓存，重新检测。
+ * @returns 文件大小（字节）
  */
-router.get('/ffmpeg-status', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  try {
-    // force=true 时重置缓存，重新检测
-    if (req.query.force === 'true') {
-      resetFfmpegCache();
-    }
-    const status = await checkFfmpeg();
-    // 音频转码已迁移至浏览器端（ffmpeg.wasm），服务端不再依赖 AAC 编码器；
-    // 保留 transcodeCapable 字段仅为兼容旧版管理前端响应结构。
-    const transcodeCapable = status.available;
-    // 手动下载链接：提供全部支持平台的官方下载地址，由用户在弹窗中自选
-    // （下载的是浏览器所在机器的文件，上传到服务端时才需要与服务端平台匹配）
-    const manualDownloadUrls = [
-      {
-        platform: 'win32' as const,
-        label: 'Windows（zip）',
-        url: 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip',
-      },
-      {
-        platform: 'linux64' as const,
-        label: 'Linux x64（tar.xz）',
-        url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz',
-      },
-    ];
-    res.json({
-      success: true,
-      ...status,
-      transcodeCapable,
-      platform: process.platform,
-      manualDownloadUrls,
-    });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      available: false,
-      transcodeCapable: false,
-      platform: process.platform,
-      message: err instanceof Error ? err.message : '检测 FFmpeg 失败',
-    });
+async function downloadToFile(
+  url: string,
+  filePath: string,
+  headers?: Record<string, string>,
+  onProgress?: (received: number, total: number, percent: number) => void
+): Promise<number> {
+  const res = await fetch(url, { headers, redirect: 'follow' });
+  if (!res.ok || !res.body) {
+    throw new Error(`下载失败：HTTP ${res.status} ${res.statusText}`);
   }
-});
 
-/**
- * POST /ffmpeg-install — 在线下载并安装 FFmpeg 到项目 bin/ 目录。
- *
- * 采用 NDJSON 流式响应推送下载/解压进度：
- *   { status: 'downloading', received, total, percent, message }
- *   { status: 'extracting', message }
- *   { status: 'done', message }
- *   { status: 'error', message }
- */
-router.post('/ffmpeg-install', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
-  res.setHeader('Content-Type', 'application/x-ndjson');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'close');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.setHeader('Transfer-Encoding', 'chunked');
+  const total = Number(res.headers.get('content-length') || '0');
+  let received = 0;
+  let lastPercent = 0;
 
-  const send = (payload: Record<string, unknown>): void => {
-    res.write(JSON.stringify(payload) + '\n');
-    const flushable = res as unknown as { flush?: () => void };
-    if (typeof flushable.flush === 'function') flushable.flush();
-  };
+  const fileStream = createWriteStream(filePath);
+  const reader = res.body.getReader();
 
   try {
-    await installFfmpeg((p: InstallProgress) => {
-      send({ status: p.stage, ...p });
-    });
-    send({ success: true, status: 'done', message: 'FFmpeg 安装完成' });
-    res.end();
-  } catch (err) {
-    send({
-      success: false,
-      status: 'error',
-      message: err instanceof Error ? err.message : '安装 FFmpeg 失败',
-    });
-    res.end();
-  }
-});
-
-/**
- * POST /ffmpeg-upload — 手动上传 zip 文件安装 FFmpeg。
- *
- * 接收 multipart/form-data 中的 file 字段（zip 文件），
- * 解压并提取 ffmpeg 可执行文件到 bin/ 目录。
- *
- * 返回 JSON：
- *   { success: true, message }
- *   { success: false, message }
- */
-const ffmpegUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => {
-      const tmpDir = path.join(os.tmpdir(), 'ffmpeg-upload');
-      fs.mkdirSync(tmpDir, { recursive: true });
-      cb(null, tmpDir);
-    },
-    filename: (_req, file, cb) => {
-      cb(null, `ffmpeg-${Date.now()}-${file.originalname}`);
-    },
-  }),
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
-  fileFilter: (_req, file, cb) => {
-    const name = file.originalname.toLowerCase();
-    if (name.endsWith('.zip') || name.endsWith('.tar.xz') || name.endsWith('.tar.gz') || name.endsWith('.tgz')) {
-      cb(null, true);
-    } else {
-      cb(new Error('仅支持 .zip、.tar.xz 或 .tar.gz 格式的 FFmpeg 压缩包'));
-    }
-  },
-});
-
-router.post('/ffmpeg-upload', ffmpegUpload.single('file'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  try {
-    if (!req.file) {
-      res.status(400).json({ success: false, message: '未收到文件' });
-      return;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        fileStream.write(Buffer.from(value));
+        received += value.length;
+        const percent = total > 0 ? Math.floor((received / total) * 100) : 0;
+        if (percent >= lastPercent + 2 || (total === 0 && received % (512 * 1024) === 0)) {
+          lastPercent = percent;
+          onProgress?.(received, total, percent);
+        }
+      }
     }
 
-    const zipPath = req.file.path;
-    console.log(`[ffmpeg-upload] 收到上传文件: ${req.file.originalname} (${(req.file.size / 1024 / 1024).toFixed(1)}MB)`);
-
-    await installFfmpegFromZip(zipPath);
-
-    // 清理上传的临时文件
-    try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
-
-    // 验证安装结果
-    const status = await checkFfmpeg();
-    // 音频转码已迁移至浏览器端，transcodeCapable 仅保留字段兼容
-    const transcodeCapable = status.available;
-
-    res.json({
-      success: status.available,
-      message: status.available ? 'FFmpeg 安装成功' : '安装后仍未检测到 FFmpeg，请检查压缩包内容',
-      available: status.available,
-      source: status.source,
-      version: status.version,
-      transcodeCapable,
+    await new Promise<void>((resolve, reject) => {
+      fileStream.end((err?: Error) => (err ? reject(err) : resolve()));
     });
   } catch (err) {
-    // 清理上传的临时文件
-    if (req.file?.path) {
-      try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
-    }
-    console.error('[ffmpeg-upload] 安装失败:', err);
-    res.status(500).json({
-      success: false,
-      message: err instanceof Error ? err.message : '安装失败',
-    });
+    // 下载失败时清理不完整的文件
+    try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+    throw err;
   }
-});
+
+  return received;
+}
 
 /**
  * POST /bilibili-download — 解析 B站 视频并下载到服务器指定目录。
  *
- * 采用 NDJSON 流式响应，实时推送解析、下载、合并进度：
+ * 采用 NDJSON 流式响应，实时推送解析、下载进度：
  *   { status: 'parsing', step, message }
- *   { status: 'downloading', phase: 'video'|'audio', received, total, percent }
- *   { status: 'merging', percent, message }
+ *   { status: 'downloading', phase: 'video', received, total, percent }
  *   { status: 'done', file: { name, path, size } }
  *   { status: 'error', message, code }
  *
- * 支持两种模式：
- *   - mode='mp4'（默认）：MP4 单文件直链，最高 1080P，无需 FFmpeg
- *   - mode='dash'：DASH 分离流（m4s），支持 4K/8K/HDR/杜比视界，
- *                  需要服务器安装 FFmpeg 合并音视频流
+ * 仅 MP4 单文件直链模式（最高 720P）。高画质（DASH 分离流需服务器
+ * FFmpeg 合并）已随服务器端 FFmpeg 一并移除，请使用 CLI 模式下载高画质。
  */
 router.post('/bilibili-download', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const url = typeof req.body.url === 'string' ? req.body.url.trim() : '';
@@ -992,7 +769,6 @@ router.post('/bilibili-download', async (req: AuthenticatedRequest, res: Respons
     typeof req.body.page === 'number' && Number.isFinite(req.body.page)
       ? req.body.page
       : undefined;
-  const mode = req.body.mode === 'dash' ? 'dash' : 'mp4';
   const userId = req.user?.userId;
 
   if (!url) {
@@ -1006,18 +782,6 @@ router.post('/bilibili-download', async (req: AuthenticatedRequest, res: Respons
   if (!targetDir) {
     res.status(400).json({ success: false, message: '缺少目标目录' });
     return;
-  }
-
-  // DASH 模式需要 FFmpeg
-  if (mode === 'dash') {
-    const ffmpegPath = resolveFfmpegPath();
-    if (!ffmpegPath) {
-      res.status(400).json({
-        success: false,
-        message: 'DASH 模式需要 FFmpeg，请先在下载面板中点击「下载 FFmpeg」',
-      });
-      return;
-    }
   }
 
   // NDJSON 流式响应
@@ -1035,14 +799,6 @@ router.post('/bilibili-download', async (req: AuthenticatedRequest, res: Respons
   const fail = (message: string, code?: string): void => {
     send({ success: false, status: 'error', message, code });
     res.end();
-  };
-
-  // 临时文件清理列表
-  const tempFiles: string[] = [];
-  const cleanupTemps = (): void => {
-    for (const f of tempFiles) {
-      try { fs.unlinkSync(f); } catch { /* ignore */ }
-    }
   };
 
   try {
@@ -1067,7 +823,7 @@ router.post('/bilibili-download', async (req: AuthenticatedRequest, res: Respons
       userId: userId !== undefined ? String(userId) : undefined,
       cookie,
       qn,
-      preferMp4: mode === 'mp4',
+      preferMp4: true,
       page,
       // 下载场景跳过 CDN HEAD 健康检查（3.5s 超时），
       // 下载本身即连接验证，失败时由 backupUrl 重试
@@ -1105,90 +861,17 @@ router.post('/bilibili-download', async (req: AuthenticatedRequest, res: Respons
       ...(cookie ? { Cookie: cookie } : {}),
     };
 
-    if (mode === 'mp4') {
-      // ===== MP4 模式：单文件直接下载 =====
-      send({ status: 'downloading', phase: 'video', message: '开始下载...', received: 0, total: 0, percent: 0 });
+    // MP4 单文件直接下载
+    send({ status: 'downloading', phase: 'video', message: '开始下载...', received: 0, total: 0, percent: 0 });
 
-      try {
-        await downloadToFile(result.videoUrl, targetPath, downloadHeaders, (received, total, percent) => {
-          send({ status: 'downloading', phase: 'video', received, total, percent });
-        });
-      } catch (err) {
-        try { fs.unlinkSync(targetPath); } catch { /* ignore */ }
-        fail(`下载失败：${err instanceof Error ? err.message : '写入文件失败'}`);
-        return;
-      }
-    } else {
-      // ===== DASH 模式：视频和音频 m4s 并行下载，再用 FFmpeg 合并 =====
-      const videoTmp = `${targetPath}.video.m4s`;
-      const audioTmp = `${targetPath}.audio.m4s`;
-      tempFiles.push(videoTmp, audioTmp);
-
-      // 并行下载视频流和音频流（两个独立 URL，无依赖关系）
-      // 优化：原串行下载改为并行，节省约 50% 下载时间
-      send({ status: 'downloading', phase: 'video', message: '开始下载视频流和音频流...', received: 0, total: 0, percent: 0 });
-
-      // 进度合并：视频流和音频流分别报告，前端按 phase 区分
-      const downloadVideo = async () => {
-        try {
-          await downloadToFile(result.videoUrl, videoTmp, downloadHeaders, (received, total, percent) => {
-            send({ status: 'downloading', phase: 'video', received, total, percent });
-          });
-          return true;
-        } catch (err) {
-          console.error('[server-files] 视频流下载失败:', err);
-          return false;
-        }
-      };
-
-      const downloadAudio = async (): Promise<boolean> => {
-        if (!result.audioUrl) return true;
-        try {
-          await downloadToFile(result.audioUrl, audioTmp, downloadHeaders, (received, total, percent) => {
-            send({ status: 'downloading', phase: 'audio', received, total, percent });
-          });
-          return true;
-        } catch (err) {
-          console.error('[server-files] 音频流下载失败:', err);
-          return false;
-        }
-      };
-
-      // 并行下载：Promise.all 同时拉取两个流
-      const [videoOk, audioOk] = await Promise.all([downloadVideo(), downloadAudio()]);
-
-      if (!videoOk) {
-        cleanupTemps();
-        fail('视频流下载失败，请检查网络连接或稍后重试');
-        return;
-      }
-      if (!audioOk && result.audioUrl) {
-        cleanupTemps();
-        fail('音频流下载失败，请检查网络连接或稍后重试');
-        return;
-      }
-
-      // 4.3 FFmpeg 合并
-      send({ status: 'merging', percent: 0, message: '正在合并音视频流...' });
-      try {
-        await mergeVideoAudio({
-          videoPath: videoTmp,
-          audioPath: result.audioUrl ? audioTmp : undefined,
-          outputPath: targetPath,
-          duration: result.duration > 0 ? result.duration : undefined,
-          onProgress: (percent, message) => {
-            send({ status: 'merging', percent, message });
-          },
-        });
-      } catch (err) {
-        cleanupTemps();
-        try { fs.unlinkSync(targetPath); } catch { /* ignore */ }
-        fail(`合并失败：${err instanceof Error ? err.message : 'FFmpeg 合并失败'}`);
-        return;
-      }
-
-      // 4.4 清理临时 m4s 文件
-      cleanupTemps();
+    try {
+      await downloadToFile(result.videoUrl, targetPath, downloadHeaders, (received, total, percent) => {
+        send({ status: 'downloading', phase: 'video', received, total, percent });
+      });
+    } catch (err) {
+      try { fs.unlinkSync(targetPath); } catch { /* ignore */ }
+      fail(`下载失败：${err instanceof Error ? err.message : '写入文件失败'}`);
+      return;
     }
 
     // 5. 完成
@@ -1205,7 +888,6 @@ router.post('/bilibili-download', async (req: AuthenticatedRequest, res: Respons
     res.end();
   } catch (err) {
     console.error('[server-files] bilibili-download error:', err);
-    cleanupTemps();
     const normalized = normalizeResolveError(err);
     fail(normalized.message, normalized.code);
   }

@@ -71,9 +71,9 @@ export interface PlayerSource {
   /**
    * 影片级 FFmpeg WASM 引擎标记。
    *
-   * 添加影片时勾选「启用 FFmpeg WASM 引擎」并检测到需要（DTS 音轨 /
-   * 内嵌字幕）时为 true：播放该影片直接启用 wasm 引擎，
-   * 不依赖全局 audioTranscodeEnabled 开关（与全局开关为 OR 关系）。
+   * 添加影片时勾选「启用 FFmpeg WASM 引擎」并检测到需要（DTS 等不兼容
+   * 音轨）时为 true：wasm 转码的实际触发条件，需与全局
+   * audioTranscodeEnabled 许可开关同时满足（AND 关系）才启用 wasm 引擎。
    */
   wasmEngine?: boolean
   /**

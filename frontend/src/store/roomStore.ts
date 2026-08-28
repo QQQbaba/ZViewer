@@ -68,9 +68,9 @@ export interface Movie {
   directLink?: boolean
   /**
    * 影片级 FFmpeg WASM 引擎标记。
-   * 添加影片时勾选「启用 FFmpeg WASM 引擎」且检测到需要（DTS 音轨转码 /
-   * 内嵌字幕提取）时为 true，播放时该影片直接启用 wasm 引擎，
-   * 不依赖全局 audioTranscodeEnabled 开关。
+   * 添加影片时勾选「启用 FFmpeg WASM 引擎」且检测到需要（DTS 等不兼容
+   * 音轨转码）时为 true。播放时为 wasm 转码的实际触发条件——需与全局
+   * audioTranscodeEnabled 许可开关同时满足才启用 wasm 引擎。
    */
   wasmEngine?: boolean
   // 以下为前端解析得到的临时字段（不持久化到后端）

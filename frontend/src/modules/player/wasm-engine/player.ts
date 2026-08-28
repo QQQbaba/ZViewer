@@ -34,6 +34,7 @@ import {
 import { MediaByteSource, StreamEndedError } from './fetch-source'
 import { Muxer, StreamTarget } from 'mp4-muxer'
 import { notifyWasmCoreProgress } from './core-progress-store'
+import { resolveWasmCoreUrl } from '@/store/systemSettingsStore'
 
 /** 批量送 wasm 解码的目标时长 / 字节上限 */
 const BATCH_DURATION_MS = 6000
@@ -91,7 +92,9 @@ function acquireSharedWorker(
     if (msg.type === 'loaded') sharedCoreLoaded = true
     activeWorkerHandler?.(msg)
   })
-  w.postMessage({ type: 'load' })
+  // wasm 核心下载来源由系统设置决定（作者直链 / 服务器中转 / 自定义），
+  // 仅在首次创建 worker 时解析——核心单次加载后会话内复用
+  w.postMessage({ type: 'load', wasmUrl: resolveWasmCoreUrl() })
   sharedWorker = w
   return w
 }
@@ -245,9 +248,6 @@ export class WasmPlayer {
     this.audioBatch = null
     this.firstAudioBatchSent = false
 
-    // worker 幂等启动：核心下载与网络取流并行推进，进度在控制栏展示。
-    this.attachWorker()
-
     const duration = this.durationSec ?? this.fallbackDurationSec ?? null
     this.durationSec = duration
 
@@ -350,6 +350,9 @@ export class WasmPlayer {
     this.structureReady = true
     this.ensureVideoMuxer()
     if (this.needsTranscode()) {
+      // 确认需要转码才拉起 worker 下载 wasm 核心：AAC 直通（或任何
+      // A_AAC 系音轨）完全用不到核心，提前下载纯属浪费带宽。
+      this.attachWorker()
       console.info(
         `[wasm-engine] 音轨 ${this.audioTrack.codecId} 需浏览器内转码`
       )

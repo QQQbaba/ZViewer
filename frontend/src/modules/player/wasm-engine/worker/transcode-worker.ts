@@ -18,6 +18,12 @@
  * 取回文本、追加 `export default` 包装成 ESM 经 Blob URL 导入（经典与
  * module worker 通用；module worker 禁用 importScripts，不能走脚本注入）。
  * wasm 二进制流式下载上报进度后经 wasmBinary 注入实例。
+ *
+ * wasm 核心下载来源由主线程随 load 消息传入（wasmUrl）：
+ * 管理后台「基础设置 → FFmpeg 引擎」可选作者 CDN 直链 / 服务器中转 /
+ * 自定义直链。直链（非 /ffmpeg 本地路径）加载失败时自动回退服务器
+ * 中转重试一次，避免 CDN 故障直接击溃转码链路。js 垫片体积小
+ * （约 110KB），恒定从服务器 /ffmpeg 加载。
  */
 const CORE_BASE_URL = '/ffmpeg'
 
@@ -84,7 +90,7 @@ async function fetchWithProgress(
 }
 
 /** 加载并实例化 ffmpeg core（幂等），下载过程经 onCoreProgress 上报 */
-function ensureCore(): Promise<FfmpegCoreInstance> {
+function ensureCore(wasmUrl?: string): Promise<FfmpegCoreInstance> {
   if (corePromise) return corePromise
   corePromise = (async () => {
     const report = (
@@ -93,15 +99,45 @@ function ensureCore(): Promise<FfmpegCoreInstance> {
       total: number | null
     ) => self.postMessage({ type: 'core-progress', part, loaded, total })
 
-    // wasm 二进制（约 31MB）流式下载 + 进度上报；js 垫片很小（约 110KB）
-    const [wasmBytes, coreJsText] = await Promise.all([
-      fetchWithProgress(`${CORE_BASE_URL}/ffmpeg-core.wasm`, 'wasm', report),
-      fetchWithProgress(`${CORE_BASE_URL}/ffmpeg-core.js`, 'js', report),
-    ])
+    // wasm 二进制（约 32MB）：直链来源失败时回退服务器中转重试一次
+    const primaryWasmUrl =
+      wasmUrl && /^https?:\/\//i.test(wasmUrl)
+        ? wasmUrl
+        : `${CORE_BASE_URL}/ffmpeg-core.wasm`
+    let wasmBytes: ArrayBuffer
+    if (primaryWasmUrl !== `${CORE_BASE_URL}/ffmpeg-core.wasm`) {
+      try {
+        wasmBytes = await fetchWithProgress(
+          primaryWasmUrl,
+          'wasm',
+          report
+        )
+      } catch (err) {
+        console.warn(
+          '[ffmpeg.wasm] 直链下载核心失败，回退服务器中转:',
+          err instanceof Error ? err.message : String(err)
+        )
+        wasmBytes = await fetchWithProgress(
+          `${CORE_BASE_URL}/ffmpeg-core.wasm`,
+          'wasm',
+          report
+        )
+      }
+    } else {
+      wasmBytes = await fetchWithProgress(
+        primaryWasmUrl,
+        'wasm',
+        report
+      )
+    }
+    // js 垫片很小（约 110KB），恒定从服务器加载
+    const coreJsText = await fetchWithProgress(
+      `${CORE_BASE_URL}/ffmpeg-core.js`,
+      'js',
+      report
+    ).then((buf) => new TextDecoder().decode(buf))
 
-    const factory = await importCoreFactory(
-      new TextDecoder().decode(coreJsText)
-    )
+    const factory = await importCoreFactory(coreJsText)
 
     const inst = (await factory({
       // 直接注入预取的 wasm 字节，避免 emscripten 内部再 fetch（相对路径易错）
@@ -160,8 +196,8 @@ async function importCoreFactory(coreJsText: string): Promise<CoreModule> {
   }
 }
 
-async function load(): Promise<void> {
-  await ensureCore()
+async function load(wasmUrl?: string): Promise<void> {
+  await ensureCore(wasmUrl)
 }
 
 /** 解码一批裸音频流并直接编码为 AAC（ADTS 流）。
@@ -172,7 +208,8 @@ async function load(): Promise<void> {
  * 同时完成解码与编码，兼容性最好。
  */
 async function decode(id: number, data: ArrayBuffer): Promise<void> {
-  const ff = await ensureCore()
+  // wasmUrl 缺省时 ensureCore 内部回退服务器路径
+  const ff = await ensureCore(undefined)
   try {
     ff.FS.writeFile('in.audio', new Uint8Array(data))
   } catch {
@@ -240,9 +277,10 @@ async function decode(id: number, data: ArrayBuffer): Promise<void> {
 
 self.addEventListener('message', (ev: MessageEvent) => {
   const msg = ev.data as
-    { type: 'load' } | { type: 'decode'; id: number; data: ArrayBuffer }
+    | { type: 'load'; wasmUrl?: string }
+    | { type: 'decode'; id: number; data: ArrayBuffer }
   if (msg.type === 'load') {
-    load()
+    load(msg.wasmUrl)
       .then(() => self.postMessage({ type: 'loaded' }))
       .catch((err: unknown) =>
         self.postMessage({

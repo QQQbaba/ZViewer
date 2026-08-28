@@ -56,13 +56,6 @@ import {
   type RootRegistry,
 } from '../services/server-files/pathResolver';
 
-// 内嵌字幕探测与提取（ffmpeg/ffprobe）
-import {
-  probeMediaInfo,
-  extractSubtitleTrack,
-  mapCodecToSubtitleFormat,
-} from '../services/ffmpeg';
-
 // Emby 字幕（直接调用 Emby 自带的字幕接口）
 import { EmbyClient, createEmbyClientFromMount } from '../services/emby-client';
 
@@ -757,46 +750,7 @@ router.get('/load', async (req: AuthenticatedRequest, res: Response): Promise<vo
   }
 });
 
-// ==================== 内嵌字幕（仅服务器中转） ====================
-
-/**
- * 重建内嵌字幕探测所需的真实源 URL。
- *
- * 仅支持"服务器中转"的挂载源（webdav/openlist 且 directLink !== true）：
- * - 服务器中转时后端能访问源字节并喂给 ffmpeg；直链模式浏览器直连源，后端无法访问。
- */
-async function resolveEmbeddedSource(movie: Movie): Promise<{ url: string }> {
-  const source = (movie.source || '').toLowerCase();
-  if (source !== 'webdav' && source !== 'openlist') {
-    throw new Error('该源暂不支持内嵌字幕');
-  }
-  // 直链模式：浏览器直连源，后端无法用 ffmpeg 访问，禁用内嵌字幕
-  if (movie.directLink === true) {
-    throw new Error('直链模式不支持内嵌字幕，请改用服务器中转');
-  }
-  if (!movie.serverUrl || !movie.path) {
-    throw new Error('该影片未挂载服务器信息');
-  }
-  const creds = await fillCredentialsFromMount(movie);
-  if (source === 'openlist') {
-    // OpenList：通过 AList /api/fs/get 获取带签名的真实直链（无需额外请求头）
-    const info = await fetchOpenListFileInfo(
-      movie.serverUrl,
-      creds.username,
-      creds.password,
-      movie.path,
-    );
-    return { url: info.rawUrl };
-  }
-  // WebDAV：拼接带凭证的直链（内嵌 Basic Auth），ffmpeg 可直接访问
-  const url = buildWebDAVDirectUrl(
-    movie.serverUrl,
-    movie.path,
-    creds.username,
-    creds.password,
-  );
-  return { url };
-}
+// ==================== 内嵌字幕 ====================
 
 /**
  * 解析 Emby / Jellyfin 播放所需的客户端与用户（直接调用其自带字幕接口）。
@@ -854,7 +808,7 @@ function mapEmbySubtitleFormat(
 /**
  * 列出视频的内嵌字幕轨道：
  * - emby：直接读 Emby PlaybackInfo 的 MediaStreams（Type===Subtitle）
- * - webdav / openlist：后端 ffmpeg 探测
+ * - 其余来源：内嵌字幕提取已前端化（浏览器端 MKV demux），后端不再支持
  */
 router.get(
   '/embedded-tracks',
@@ -890,16 +844,10 @@ router.get(
         return;
       }
 
-      const { url } = await resolveEmbeddedSource(movie);
-      const info = await probeMediaInfo(url);
-      const tracks = info.subtitleStreams.map((t) => ({
-        index: t.index,
-        codecName: t.codecName,
-        language: t.language,
-        title: t.title,
-        label: t.title || t.language || `轨道 ${t.index}`,
-      }));
-      res.json({ success: true, tracks });
+      res.status(400).json({
+        success: false,
+        message: '该来源的内嵌字幕提取已前端化，后端不再提供探测',
+      });
     } catch (err) {
       console.error('[subtitles] embedded-tracks error:', err);
       res.status(400).json({
@@ -913,7 +861,7 @@ router.get(
 /**
  * 提取指定内嵌字幕轨道内容：
  * - emby：调 Emby Subtitles Stream 端点（Emby 自动转封装为 SRT/ASS/VTT）
- * - webdav / openlist：后端 ffmpeg 提取
+ * - 其余来源：内嵌字幕提取已前端化（浏览器端 MKV demux），后端不再支持
  */
 router.get(
   '/embedded-extract',
@@ -961,22 +909,9 @@ router.get(
         return;
       }
 
-      const { url } = await resolveEmbeddedSource(movie);
-      const info = await probeMediaInfo(url);
-      const subStream = info.subtitleStreams.find((s) => s.index === streamIndex);
-      if (!subStream) {
-        res.status(400).json({ success: false, message: '未找到指定的字幕轨道' });
-        return;
-      }
-      const format = mapCodecToSubtitleFormat(subStream.codecName);
-      const content = await extractSubtitleTrack(url, streamIndex, format);
-      const label = subStream.title || subStream.language || `轨道 ${streamIndex}`;
-      res.json({
-        success: true,
-        content,
-        format,
-        label,
-        language: subStream.language,
+      res.status(400).json({
+        success: false,
+        message: '该来源的内嵌字幕提取已前端化，后端不再提供提取',
       });
     } catch (err) {
       console.error('[subtitles] embedded-extract error:', err);

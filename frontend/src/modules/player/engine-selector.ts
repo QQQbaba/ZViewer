@@ -33,8 +33,10 @@ const ENGINES: Record<string, PlayerEngine> = {
 
 export interface EngineSelectionContext {
   /**
-   * 「浏览器端音频转码」总开关（systemSettingsStore.audioTranscodeEnabled）。
-   * 关闭时永不选择 wasm 引擎（默认行为与旧版一致：直推、可能无声）。
+   * 浏览器端音频转码的实际触发条件（usePlayerSource 已完成判定后传入）：
+   * 全局开关（systemSettingsStore.audioTranscodeEnabled，仅做许可）&&
+   * 影片级 wasmEngine 标记（添加影片时勾选并检测到需要）。
+   * 任一不满足时永不选择 wasm 引擎（直推、可能无声）。
    */
   wasmAudioTranscodeEnabled?: boolean
 }
