@@ -25,6 +25,12 @@
 
 [Telegram](https://t.me/Zero_251) [QQ](https://qm.qq.com/q/MuKPRVz8wc)
 
+## 浏览器要求
+
+> **强烈推荐使用 Chrome / Edge 等高版本（内核 130+）的 Chromium 内核浏览器**访问 ZViewer。
+>
+> ⚠️ **不推荐** Safari 和 Firefox 浏览器——由于其对 MSE / MKV / 浏览器端解码与转码等能力的支持差异，可能出现播放卡顿、部分视频无法解码、字幕提取异常等 bug。
+
 ## 目录
 
 - [功能特性](#功能特性)
