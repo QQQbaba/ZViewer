@@ -54,6 +54,8 @@ interface SettingsPanelProps {
   subtitleOffset?: number
   subtitleShiftX?: number
   subtitleShiftY?: number
+  subtitleStrokeWidth?: number
+  subtitleShadowBlur?: number
   subtitleFontFamily?: string
   browseMovieId?: number
   onToggleSubtitles?: (enabled: boolean) => void
@@ -69,6 +71,8 @@ interface SettingsPanelProps {
   onChangeSubtitleOffset?: (offset: number) => void
   onChangeSubtitleShiftX?: (shiftX: number) => void
   onChangeSubtitleShiftY?: (shiftY: number) => void
+  onChangeSubtitleStrokeWidth?: (strokeWidth: number) => void
+  onChangeSubtitleShadowBlur?: (shadowBlur: number) => void
   onChangeSubtitleFontFamily?: (fontFamily: string) => void
   onAutoSearchSubtitles?: () => Promise<number>
   canAutoSearchSubtitles?: boolean
@@ -99,6 +103,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
     subtitleOffset,
     subtitleShiftX,
     subtitleShiftY,
+    subtitleStrokeWidth,
+    subtitleShadowBlur,
     subtitleFontFamily,
     browseMovieId,
     onToggleSubtitles,
@@ -110,6 +116,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onChangeSubtitleOffset,
     onChangeSubtitleShiftX,
     onChangeSubtitleShiftY,
+    onChangeSubtitleStrokeWidth,
+    onChangeSubtitleShadowBlur,
     onChangeSubtitleFontFamily,
     onAutoSearchSubtitles,
     canAutoSearchSubtitles,
@@ -220,7 +228,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         width={SIDE_PANEL_WIDTH}
         gap={PANEL_GAP}
         mainPanelWidth={MAIN_PANEL_WIDTH}
-        maxHeight={420}
+        maxHeight={520}
       >
         {isDanmakuView ? (
           <DanmakuAdvancedSettings
@@ -246,10 +254,30 @@ export function SettingsPanel(props: SettingsPanelProps) {
               size="sm"
               value={subtitleFontSize ?? 20}
               min={12}
-              max={36}
+              max={50}
               step={1}
               valueFormatter={(v) => `${v}px`}
               onChange={(v) => onChangeSubtitleFontSize?.(v)}
+            />
+            <Slider
+              label="描边"
+              size="sm"
+              value={subtitleStrokeWidth ?? 0}
+              min={0}
+              max={4}
+              step={0.5}
+              valueFormatter={(v) => (v > 0 ? `${v}px` : '无')}
+              onChange={(v) => onChangeSubtitleStrokeWidth?.(v)}
+            />
+            <Slider
+              label="阴影"
+              size="sm"
+              value={subtitleShadowBlur ?? 4}
+              min={0}
+              max={12}
+              step={1}
+              valueFormatter={(v) => (v > 0 ? `${v}px` : '无')}
+              onChange={(v) => onChangeSubtitleShadowBlur?.(v)}
             />
             <Slider
               label="时间偏移"

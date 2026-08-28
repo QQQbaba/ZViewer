@@ -23,6 +23,8 @@ interface SubtitleOverlayProps {
   offset: number // 秒，正值延迟显示
   shiftX?: number // 百分比，-50~50，正值右移
   shiftY?: number // 百分比，-50~50，正值下移
+  strokeWidth?: number // 描边宽度（px，0~4），0 表示无描边
+  shadowBlur?: number // 阴影模糊半径（px，0~12），0 表示无阴影
   fontFamily?: string // CSS font-family，空串表示默认
 }
 
@@ -75,6 +77,8 @@ export function SubtitleOverlay({
   offset,
   shiftX = 0,
   shiftY = 0,
+  strokeWidth = 0,
+  shadowBlur = 4,
   fontFamily = '',
 }: SubtitleOverlayProps) {
   const [activeCues, setActiveCues] = useState<ParsedCue[]>([])
@@ -148,8 +152,18 @@ export function SubtitleOverlay({
               lineHeight: '1.4',
               color: '#ffffff',
               backgroundColor: 'transparent',
+              // 描边：paint-order 让描边画在填充之下，不侵蚀字形
+              ...(strokeWidth > 0
+                ? {
+                    WebkitTextStroke: `${strokeWidth}px rgba(0, 0, 0, 0.9)`,
+                    paintOrder: 'stroke fill',
+                  }
+                : {}),
+              // 阴影：模糊半径可调，0 关闭
               textShadow:
-                '0 0 4px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.9)',
+                shadowBlur > 0
+                  ? `0 0 ${shadowBlur}px rgba(0, 0, 0, 0.9)`
+                  : 'none',
               textAlign: align,
               whiteSpace: 'pre-wrap',
               wordWrap: 'break-word',

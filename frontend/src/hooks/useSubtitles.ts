@@ -85,6 +85,10 @@ export interface SubtitleState {
   subtitleShiftX: number
   /** 字幕垂直位移（百分比，-50~50），正值下移 */
   subtitleShiftY: number
+  /** 字幕描边宽度（px，0~4），0 表示无描边 */
+  subtitleStrokeWidth: number
+  /** 字幕阴影模糊半径（px，0~12），0 表示无阴影 */
+  subtitleShadowBlur: number
   /** 字幕字体族（CSS font-family），空串表示默认 */
   subtitleFontFamily: string
 }
@@ -97,6 +101,8 @@ interface SubtitleBroadcastPayload {
   offset: number
   shiftX?: number
   shiftY?: number
+  strokeWidth?: number
+  shadowBlur?: number
   fontFamily?: string
 }
 
@@ -113,6 +119,8 @@ const DEFAULT_SUBTITLE_STATE: SubtitleState = {
   subtitleOffset: 0,
   subtitleShiftX: 0,
   subtitleShiftY: 0,
+  subtitleStrokeWidth: 0,
+  subtitleShadowBlur: 4,
   subtitleFontFamily: '',
 }
 
@@ -168,6 +176,8 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         offset: next.subtitleOffset,
         shiftX: next.subtitleShiftX,
         shiftY: next.subtitleShiftY,
+        strokeWidth: next.subtitleStrokeWidth,
+        shadowBlur: next.subtitleShadowBlur,
         fontFamily: next.subtitleFontFamily,
       }
       socket.emit('subtitle-update', { roomId, ...payload })
@@ -813,6 +823,32 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     [broadcast, isHost]
   )
 
+  const setStrokeWidth = useCallback(
+    (strokeWidth: number) => {
+      // 观众本地调描边：标记偏好，后续房主广播不覆盖此选择
+      if (!isHost) viewerPrefTouchedRef.current = true
+      setState((prev) => {
+        const next: SubtitleState = { ...prev, subtitleStrokeWidth: strokeWidth }
+        broadcast(next)
+        return next
+      })
+    },
+    [broadcast, isHost]
+  )
+
+  const setShadowBlur = useCallback(
+    (shadowBlur: number) => {
+      // 观众本地调阴影：标记偏好，后续房主广播不覆盖此选择
+      if (!isHost) viewerPrefTouchedRef.current = true
+      setState((prev) => {
+        const next: SubtitleState = { ...prev, subtitleShadowBlur: shadowBlur }
+        broadcast(next)
+        return next
+      })
+    },
+    [broadcast, isHost]
+  )
+
   const setFontFamily = useCallback(
     (fontFamily: string) => {
       // 观众本地换字体：标记偏好，后续房主广播不覆盖此选择
@@ -877,6 +913,12 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
         subtitleShiftY: touched
           ? prev.subtitleShiftY
           : payload.shiftY ?? prev.subtitleShiftY,
+        subtitleStrokeWidth: touched
+          ? prev.subtitleStrokeWidth
+          : payload.strokeWidth ?? prev.subtitleStrokeWidth,
+        subtitleShadowBlur: touched
+          ? prev.subtitleShadowBlur
+          : payload.shadowBlur ?? prev.subtitleShadowBlur,
         subtitleFontFamily: touched
           ? prev.subtitleFontFamily
           : payload.fontFamily ?? prev.subtitleFontFamily,
@@ -908,6 +950,8 @@ export function useSubtitles({ roomId, isHost }: UseSubtitlesOptions) {
     setOffset,
     setShiftX,
     setShiftY,
+    setStrokeWidth,
+    setShadowBlur,
     setFontFamily,
   }
 }

@@ -1731,6 +1731,8 @@ export function WatchTogetherCore({
             offset={subtitles.subtitleOffset}
             shiftX={subtitles.subtitleShiftX}
             shiftY={subtitles.subtitleShiftY}
+            strokeWidth={subtitles.subtitleStrokeWidth}
+            shadowBlur={subtitles.subtitleShadowBlur}
             fontFamily={subtitles.subtitleFontFamily}
           />,
           slots.overlayRoot
@@ -1873,6 +1875,8 @@ export function WatchTogetherCore({
               subtitleOffset={subtitles.subtitleOffset}
               subtitleShiftX={subtitles.subtitleShiftX}
               subtitleShiftY={subtitles.subtitleShiftY}
+              subtitleStrokeWidth={subtitles.subtitleStrokeWidth}
+              subtitleShadowBlur={subtitles.subtitleShadowBlur}
               subtitleFontFamily={subtitles.subtitleFontFamily}
               browseMovieId={
                 isHost &&
@@ -1890,6 +1894,8 @@ export function WatchTogetherCore({
               onChangeSubtitleOffset={subtitles.setOffset}
               onChangeSubtitleShiftX={subtitles.setShiftX}
               onChangeSubtitleShiftY={subtitles.setShiftY}
+              onChangeSubtitleStrokeWidth={subtitles.setStrokeWidth}
+              onChangeSubtitleShadowBlur={subtitles.setShadowBlur}
               onChangeSubtitleFontFamily={subtitles.setFontFamily}
               onAutoSearchSubtitles={
                 currentMovieId != null && isHost
