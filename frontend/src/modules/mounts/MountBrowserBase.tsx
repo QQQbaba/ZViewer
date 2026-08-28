@@ -124,6 +124,10 @@ export default function MountBrowserBase<T extends DirectoryEntry>({
 
   const toggleSelection = (path: string) => {
     setSelectedPaths((prev) => {
+      // 非多选模式：单选行为，点击新文件替换已有选择，再次点击取消
+      if (!multiSelectMode) {
+        return prev.has(path) ? new Set<string>() : new Set([path])
+      }
       const next = new Set(prev)
       if (next.has(path)) {
         next.delete(path)
