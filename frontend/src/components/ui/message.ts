@@ -149,30 +149,23 @@ function show(
     node.dataset.removing = 'true'
     clearTimeout(timer)
 
-    // 读取实际高度，用于 max-height 过渡的起始值
-    // 避免使用固定 200px 导致的塌陷延迟（实际高度约 42px，前 75% 过渡时间无视觉效果）
+    // 读取实际高度，用于计算负 margin 收起量（高度本身保持不变，内容不会被压扁）
     const actualHeight = node.offsetHeight
+    const TOAST_GAP = 8 // 与容器 gap-2 一致
 
-    // 切换到 exit 状态：移除 enter 类，添加 exit 类（设置 transition + overflow:hidden）
+    // 切换到 exit 状态：移除 enter 类，添加 exit 类
     node.classList.remove('zen-toast-enter')
     node.classList.add('zen-toast-exit')
     node.style.animationDelay = ''
 
-    // 先禁用 transition，设置初始 max-height 为当前实际高度（避免从旧值过渡导致的跳变）
-    node.style.transition = 'none'
-    node.style.maxHeight = `${actualHeight}px`
-    node.style.opacity = '1'
-    node.style.transform = 'translateX(0) scale(1)'
+    // 目标状态：向左飞出 + 淡出 + 负 margin 平滑收起占位空间
+    // 起始值均为当前自然值（opacity:1 / transform:none / margin-bottom:0），
+    // 无需先写中间态再等下一帧，规避 rAF 批处理导致的过渡失效竞态
+    node.style.opacity = '0'
+    node.style.transform = 'translateX(-100vw) scale(0.96)'
+    node.style.marginBottom = `-${actualHeight + TOAST_GAP}px`
 
-    // 下一帧恢复 transition 并设置目标状态，触发平滑过渡
-    requestAnimationFrame(() => {
-      node.style.transition = ''
-      node.style.opacity = '0'
-      node.style.transform = 'translateX(-100vw) scale(0.96)'
-      node.style.maxHeight = '0'
-    })
-
-    // 过渡完成后移除节点（flex gap 会自动让上方消息下移填补空隙）
+    // 过渡完成后移除节点（下方消息已通过负 margin 平滑上移，无跳变）
     setTimeout(() => {
       node.remove()
     }, EXIT_TRANSITION_MS)

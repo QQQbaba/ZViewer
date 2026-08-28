@@ -605,16 +605,14 @@ video {
   animation: zen-toast-enter 0.32s var(--ease-out-expo) backwards;
 }
 
-/* exit 使用 transition 而非 keyframes，配合 JS 动态读取实际高度设置 max-height，
-   避免固定 200px 导致的塌陷延迟（实际高度约 42px，前 75% 过渡时间无视觉效果）。
-   同时移除 margin-bottom 过渡，间距完全由容器 gap-2 控制，避免 8px→12px 的跳变。 */
+/* exit 使用 transition 而非 keyframes。高度恒定不收缩（内容不会被压扁），
+   通过负 margin-bottom 过渡收起占位空间，让下方消息平滑上移填补空隙。 */
 .zen-toast-exit {
-  overflow: hidden;
   transition:
     opacity 0.28s var(--ease-in-expo),
     transform 0.28s var(--ease-in-expo),
-    max-height 0.28s var(--ease-in-expo);
-  will-change: transform, opacity, max-height;
+    margin-bottom 0.28s var(--ease-in-expo);
+  will-change: transform, opacity, margin-bottom;
 }
 
 .zen-toast-progress {
