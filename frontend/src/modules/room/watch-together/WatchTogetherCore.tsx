@@ -290,13 +290,17 @@ export function WatchTogetherCore({
     if (supportedSubtitleSources.includes(currentMovieSourceType)) {
       void subtitles.searchAutoSubtitles(currentMovieId)
     }
-    // 服务器文件：额外加载内嵌字幕轨道（仅开关开启）
+    // 内嵌字幕探测需预取数 MB 文件头并占用同源连接（HTTP/1.1 同源仅
+    // 6 并发），延迟到视频首帧拉流之后发起，避免拖慢初次加载
+    let embeddedTimer: ReturnType<typeof setTimeout> | undefined
     if (
       embeddedSubtitleEnabled &&
       currentMovieSourceType === 'server-files' &&
       currentMoviePath
     ) {
-      void subtitles.loadEmbeddedSubtitles(currentMoviePath)
+      embeddedTimer = setTimeout(() => {
+        void subtitles.loadEmbeddedSubtitles(currentMoviePath)
+      }, 3000)
     }
     // 挂载源（webdav/openlist，中转或直链）：前端 MKV demux 提取内嵌
     // 字幕轨道（直链时这是唯一可用路径）
@@ -306,11 +310,14 @@ export function WatchTogetherCore({
         currentMovieSourceType === 'openlist') &&
       watchTogether.sourceUrl
     ) {
-      void subtitles.loadEmbeddedSubtitles(
-        currentMoviePath ?? '',
-        watchTogether.sourceUrl
-      )
+      embeddedTimer = setTimeout(() => {
+        void subtitles.loadEmbeddedSubtitles(
+          currentMoviePath ?? '',
+          watchTogether.sourceUrl
+        )
+      }, 3000)
     }
+    return () => clearTimeout(embeddedTimer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     currentMovieId,

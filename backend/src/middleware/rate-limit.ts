@@ -8,7 +8,7 @@
  *
  * keyGenerator 默认取 req.ip；生产部署在反向代理后时依赖 app.set('trust proxy')。
  */
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Request, Response } from 'express';
 
 /** 登录/注册等认证入口的通用限制：15 分钟窗口内每个 IP 最多 20 次请求。 */
@@ -116,6 +116,13 @@ export const passwordLimiter = rateLimit({
   limit: 3,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
-  keyGenerator: (req) => `pw:${(req as { user?: { userId?: number } }).user?.userId ?? req.ip ?? 'unknown'}`,
+  // 未认证（无 userId）时回退到 IP 维度；IPv6 必须经 ipKeyGenerator
+  // 规范化，否则 express-rate-limit 校验会抛 ERR_ERL_KEY_GEN_IPV6 导致启动失败
+  keyGenerator: (req) => {
+    const userId = (req as { user?: { userId?: number } }).user?.userId;
+    return userId !== undefined
+      ? `pw:${userId}`
+      : `pw:${ipKeyGenerator(req.ip ?? 'unknown')}`;
+  },
   message: { success: false, message: '操作过于频繁，请稍后再试' },
 });

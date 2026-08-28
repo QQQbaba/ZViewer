@@ -37,6 +37,8 @@ import { notifyWasmCoreProgress } from './core-progress-store'
 
 /** 批量送 wasm 解码的目标时长 / 字节上限 */
 const BATCH_DURATION_MS = 6000
+/** 首个音频批次的窗口：缩短以尽快出声，后续批次恢复 BATCH_DURATION_MS 摊薄转码调用开销 */
+const FIRST_AUDIO_BATCH_MS = 1500
 const BATCH_MAX_BYTES = 8 * 1024 * 1024
 /** B 帧重排缓冲上限（按 60fps ≈ 1s 容量；超过则强制收窗防内存膨胀） */
 const VIDEO_REORDER_MAX = 64
@@ -48,6 +50,65 @@ const LOOKAHEAD_SEC = 60
 const BACK_BUFFER_SEC = 45
 /** 解码错误恢复时每次跳过的秒数（越过可疑 GOP） */
 const RECOVERY_JUMP_SEC = 10
+
+// ---------- 转码 worker 模块级单例 ----------
+// 每次 attach 都会创建全新 WasmPlayer，若 worker 随实例销毁（terminate），
+// 已下载并编译好的 32MB wasm 核心全部作废——切换/重载影片就要重新下载
+// 与编译。worker 提升为模块级单例：实例销毁只注销消息路由，核心整个
+// 页面会话内复用（跨刷新由 /ffmpeg 强缓存 immutable 头兜底）。
+
+type WasmWorkerMessage =
+  | { type: 'loaded' }
+  | {
+      type: 'core-progress'
+      part: 'wasm' | 'js'
+      loaded: number
+      total: number | null
+    }
+  | { type: 'decoded'; id: number; adts: Uint8Array }
+  | { type: 'error'; id?: number; message: string }
+
+let sharedWorker: Worker | null = null
+let sharedCoreLoaded = false
+let activeWorkerHandler: ((msg: WasmWorkerMessage) => void) | null = null
+
+/** 获取共享 worker；首次调用时创建并触发核心加载 */
+function acquireSharedWorker(
+  onMessage: (msg: WasmWorkerMessage) => void
+): Worker {
+  activeWorkerHandler = onMessage
+  if (sharedWorker) {
+    // 核心已就绪时补发 loaded：新实例立即清掉残留的进度 UI
+    if (sharedCoreLoaded) onMessage({ type: 'loaded' })
+    return sharedWorker
+  }
+  const w = new Worker(
+    new URL('./worker/transcode-worker.ts', import.meta.url),
+    { type: 'module' }
+  )
+  w.addEventListener('message', (ev: MessageEvent) => {
+    const msg = ev.data as WasmWorkerMessage
+    if (msg.type === 'loaded') sharedCoreLoaded = true
+    activeWorkerHandler?.(msg)
+  })
+  w.postMessage({ type: 'load' })
+  sharedWorker = w
+  return w
+}
+
+/** 注销当前实例的消息路由（不 terminate，核心保留复用） */
+function releaseSharedWorker(
+  onMessage: (msg: WasmWorkerMessage) => void
+): void {
+  if (activeWorkerHandler === onMessage) activeWorkerHandler = null
+}
+
+/** 核心加载失败等致命场景：销毁共享 worker，下次 attach 重新加载 */
+function destroySharedWorker(): void {
+  sharedWorker?.terminate()
+  sharedWorker = null
+  sharedCoreLoaded = false
+}
 
 export interface WasmPlayerOptions {
   video: HTMLVideoElement
@@ -150,6 +211,9 @@ export class WasmPlayer {
   /** 音频全局单调时钟（µs）：跨批防回退 */
   private lastAudioPtsUs: number | null = null
 
+  /** 首个音频批次是否已派发（决定批次窗口：首批短窗口快速出声） */
+  private firstAudioBatchSent = false
+
   constructor(opts: WasmPlayerOptions) {
     this.video = opts.video
     this.sourceUrl = opts.sourceUrl
@@ -179,6 +243,7 @@ export class WasmPlayer {
     this.eofReached = false
     this.pendingVideo = []
     this.audioBatch = null
+    this.firstAudioBatchSent = false
 
     // worker 幂等启动：核心下载与网络取流并行推进，进度在控制栏展示。
     this.attachWorker()
@@ -443,8 +508,12 @@ export class WasmPlayer {
     }
     this.audioBatch.frames.push(frame.data)
     this.audioBatch.bytes += frame.data.byteLength
+    // 首个批次用短窗口：起播后 ~1.5s 即可出声，不必等攒满 6s
+    const batchMs = this.firstAudioBatchSent
+      ? BATCH_DURATION_MS
+      : FIRST_AUDIO_BATCH_MS
     if (
-      frame.timestampMs - this.audioBatch.startMs >= BATCH_DURATION_MS ||
+      frame.timestampMs - this.audioBatch.startMs >= batchMs ||
       this.audioBatch.bytes >= BATCH_MAX_BYTES
     ) {
       this.dispatchAudioBatch()
@@ -467,6 +536,7 @@ export class WasmPlayer {
     this.worker.postMessage({ type: 'decode', id, data: merged.buffer }, [
       merged.buffer,
     ])
+    this.firstAudioBatchSent = true
   }
 
   /**
@@ -582,58 +652,38 @@ export class WasmPlayer {
 
   // ---------- Worker ----------
 
-  /** worker 核心加载状态（'loaded' 消息置位） */
-  coreLoaded = false
-  coreLoadFailed = false
+  /** worker 消息路由（注册到共享单例上） */
+  private workerHandler = (msg: WasmWorkerMessage): void => {
+    if (msg.type === 'loaded') {
+      console.info('[wasm-engine] ffmpeg.wasm 核心加载完成')
+      notifyWasmCoreProgress(null)
+    } else if (msg.type === 'core-progress') {
+      notifyWasmCoreProgress({
+        part: msg.part,
+        loaded: msg.loaded,
+        total: msg.total,
+      })
+    } else if (msg.type === 'decoded') {
+      this.onAdtsDecoded(msg.id, msg.adts)
+    } else if (msg.type === 'error') {
+      // 核心加载失败 = 转码链路整体不可用，必须上抛触发回退。
+      // 同时销毁共享 worker：否则坏单例永久驻留，后续 attach 全部失败。
+      console.warn('[wasm-engine] worker 错误:', msg.message)
+      if (
+        (msg.id === undefined || this.batchRegistry.has(msg.id)) &&
+        /加载|下载|import|createFFmpegCore|初始化/.test(msg.message)
+      ) {
+        destroySharedWorker()
+        notifyWasmCoreProgress(null)
+        this.onFatal(new Error(`浏览器端转码核心加载失败: ${msg.message}`))
+      }
+    }
+  }
 
   private attachWorker(): void {
-    // 幂等：worker 全生命周期只创建一次。
+    // 幂等：本实例只注册一次路由；worker 本身是模块级共享单例。
     if (this.worker) return
-    const w = new Worker(
-      new URL('./worker/transcode-worker.ts', import.meta.url),
-      { type: 'module' }
-    )
-    let loadFailed = false
-    w.addEventListener('message', (ev: MessageEvent) => {
-      const msg = ev.data as
-        | { type: 'loaded' }
-        | {
-            type: 'core-progress'
-            part: 'wasm' | 'js'
-            loaded: number
-            total: number | null
-          }
-        | { type: 'decoded'; id: number; adts: Uint8Array }
-        | { type: 'error'; id?: number; message: string }
-      if (msg.type === 'loaded') {
-        console.info('[wasm-engine] ffmpeg.wasm 核心加载完成')
-        notifyWasmCoreProgress(null)
-        this.coreLoaded = true
-      } else if (msg.type === 'core-progress') {
-        notifyWasmCoreProgress({
-          part: msg.part,
-          loaded: msg.loaded,
-          total: msg.total,
-        })
-      } else if (msg.type === 'decoded') {
-        this.onAdtsDecoded(msg.id, msg.adts)
-      } else if (msg.type === 'error') {
-        // 核心加载失败 = 转码链路整体不可用，必须上抛触发回退
-        console.warn('[wasm-engine] worker 错误:', msg.message)
-        if (
-          !loadFailed &&
-          (msg.id === undefined || this.batchRegistry.has(msg.id)) &&
-          /加载|下载|import|createFFmpegCore|初始化/.test(msg.message)
-        ) {
-          loadFailed = true
-          this.coreLoadFailed = true
-          notifyWasmCoreProgress(null)
-          this.onFatal(new Error(`浏览器端转码核心加载失败: ${msg.message}`))
-        }
-      }
-    })
-    w.postMessage({ type: 'load' })
-    this.worker = w
+    this.worker = acquireSharedWorker(this.workerHandler)
   }
 
   // ---------- MSE ----------
@@ -718,7 +768,10 @@ export class WasmPlayer {
         chunked: false,
       }),
       fastStart: 'fragmented',
-      minFragmentDuration: 2,
+      // fragment 的最小分片时长：mp4-muxer 只在关键帧处切分，且要求
+      // 当前分片累计时长 ≥ 该值。2s 会让小 GOP（<2s）片源额外多等一个
+      // GOP 才产出首个可解码分片；1s 即可做到「第二个关键帧一到就出片」。
+      minFragmentDuration: 1,
       firstTimestampBehavior: 'cross-track-offset',
       video: {
         codec: 'avc',
@@ -1216,6 +1269,7 @@ export class WasmPlayer {
 
       this.pendingVideo = []
       this.audioBatch = null
+      this.firstAudioBatchSent = false
       this.batchRegistry.clear()
       this.eofReached = false
       this.parsingPaused = false
@@ -1316,7 +1370,9 @@ export class WasmPlayer {
       this.seekBridgeTimer = null
     }
     this.byteSource?.abort()
-    this.worker?.terminate()
+    // 不 terminate 共享 worker：32MB wasm 核心整个会话内复用（一次下载，
+    // 永久使用），仅注销本实例的消息路由。
+    releaseSharedWorker(this.workerHandler)
     this.worker = null
     notifyWasmCoreProgress(null)
     this.disposeMseOnly()

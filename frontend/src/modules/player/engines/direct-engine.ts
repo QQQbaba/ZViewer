@@ -119,8 +119,13 @@ export const directEngine: PlayerEngine = {
       const proxyUrl = buildProxyUrl(source.url)
       await loadOnce(proxyUrl)
     }
-    // 等待 HEAD 结算（超时上限 5s，不显著阻塞；结果仅写 dataset）
-    await headPromise
+    // 仅当原生时长不可用（转码流 duration=Infinity）时才等待 HEAD 结算：
+    // 普通直链/代理源没有 X-Content-Duration，无条件等待会白等至多 5s
+    // （慢代理下 HEAD 还要回源验证），显著拖慢首帧。普通源的 HEAD 结果
+    // 后台写入 dataset 即可（消费方仅在 duration 异常时才依赖它）。
+    if (!Number.isFinite(video.duration) || video.duration === Infinity) {
+      await headPromise
+    }
 
     return {
       cleanup: () => {
