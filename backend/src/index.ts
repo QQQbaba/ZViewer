@@ -39,6 +39,8 @@ import subtitlesRoutes from './routes/subtitles';
 import updaterRoutes from './routes/updater';
 import clientLogsRoutes from './routes/client-logs';
 import cliRoutes from './routes/cli';
+import tunnelRoutes from './routes/tunnel';
+import zcliRoutes from './routes/zcli';
 import { createRoomsRouter } from './routes/rooms';
 import { verifyAccessToken } from './middleware/auth';
 
@@ -285,6 +287,8 @@ async function bootstrap() {
   app.use('/api/stream', streamRoutes);
   // CLI 本地代理端点：供 zcontrol-cli 使用，使用用户自己的 Cookie 解析高画质
   app.use('/api/cli', cliRoutes);
+  app.use('/api/tunnel', tunnelRoutes);
+  app.use('/api/zcli', zcliRoutes);
   app.use('/api/openlist', openlistRoutes);
   app.use('/api/webdav', createMountRouter({
     type: 'webdav',

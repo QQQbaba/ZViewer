@@ -11,6 +11,8 @@ import {
   Settings,
   User,
 } from 'lucide-react'
+import { TunnelControl } from '@/components/TunnelControl'
+import { ZcliControl } from '@/components/ZcliControl'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Space } from '@/components/ui/Space'
@@ -199,6 +201,15 @@ function HomePage() {
             </>
           )}
         </Space>
+
+        <div className="mt-4 w-full space-y-3">
+          <Fade delay={380} className="w-full">
+            <TunnelControl />
+          </Fade>
+          <Fade delay={400} className="w-full">
+            <ZcliControl />
+          </Fade>
+        </div>
 
         <Fade delay={400}>
           <div className="mt-6 flex flex-col items-center gap-2">

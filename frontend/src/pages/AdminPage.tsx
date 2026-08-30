@@ -134,6 +134,11 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<'users' | 'rooms' | 'settings'>(
     'users'
   )
+
+  // ---- 公网邀请通道（隧道）状态 ----
+  const [tunnelRunning, setTunnelRunning] = useState(false)
+  const [tunnelUrl, setTunnelUrl] = useState('')
+  const [tunnelBusy, setTunnelBusy] = useState(false)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [rooms, setRooms] = useState<AdminRoom[]>([])
   const [settings, setSettings] = useState<AdminSettings>({
@@ -590,6 +595,7 @@ export default function AdminPage() {
     if (activeTab === 'settings') {
       void loadSettings()
       void checkUpdate()
+      void refreshTunnelStatus()
     } else if (activeTab === 'users') {
       void loadData()
       void loadSettings()
@@ -600,7 +606,56 @@ export default function AdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isAuthenticated])
 
-  const handleChangeRole = async (
+  const refreshTunnelStatus = async () => {
+    try {
+      const res = await apiFetch('/api/tunnel/status', { headers: authHeaders })
+      const r = (await res.json()) as {
+        success?: boolean
+        running?: boolean
+        url?: string
+      }
+      if (r.success) {
+        setTunnelRunning(!!r.running)
+        setTunnelUrl(r.url || '')
+      }
+    } catch {
+      /* 忽略 */
+    }
+  }
+  const toggleTunnel = async (on: boolean) => {
+    setTunnelBusy(true)
+    try {
+      const res = await apiFetch(on ? '/api/tunnel/start' : '/api/tunnel/stop', {
+        method: 'POST',
+        headers: authHeaders,
+      })
+      const r = (await res.json()) as {
+        success?: boolean
+        message?: string
+      }
+      if (r.success) {
+        message.success(r.message ?? '操作成功')
+        setTunnelRunning(on)
+      } else {
+        message.error(r.message ?? '操作失败')
+        setTunnelRunning(false)
+      }
+    } catch {
+      message.error('通道操作失败')
+      setTunnelRunning(false)
+    }
+    setTunnelBusy(false)
+    void refreshTunnelStatus()
+  }
+  const copyTunnelUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(tunnelUrl)
+      message.success('邀请链接已复制')
+    } catch {
+      message.success(tunnelUrl)
+    }
+  }
+    const handleChangeRole = async (
     targetUser: AdminUser,
     nextRole: AdminUser['role']
   ) => {
@@ -1414,6 +1469,38 @@ export default function AdminPage() {
                   </p>
                 </div>
 
+                <Title level={5} className="mb-4 mt-6">
+                  公网邀请通道
+                </Title>
+                <div className="mb-6">
+                  <Switch
+                    label="开启公网邀请链接（朋友远程加入房间）"
+                    checked={tunnelRunning}
+                    disabled={tunnelBusy}
+                    onChange={(e) => void toggleTunnel(e.target.checked)}
+                  />
+                  <p className="mt-1.5 text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                    开启后生成临时公网链接，朋友在浏览器打开即可加入你的房间；关闭后链接立即失效。
+                  </p>
+                  {tunnelUrl && (
+                    <div className="mt-3 rounded-lg bg-[var(--md-sys-color-surface-variant)] p-3">
+                      <div className="mb-1 text-xs font-medium text-[var(--md-sys-color-on-surface-variant)]">
+                        邀请链接
+                      </div>
+                      <div className="select-all break-all text-sm text-[var(--md-sys-color-primary)]">
+                        {tunnelUrl}
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="mt-2"
+                        onClick={() => void copyTunnelUrl()}
+                      >
+                        复制链接
+                      </Button>
+                    </div>
+                  )}
+                </div>
                 <Title level={5} className="mb-4 mt-6">
                   Beta 功能
                 </Title>
