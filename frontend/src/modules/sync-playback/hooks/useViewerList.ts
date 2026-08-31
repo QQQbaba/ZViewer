@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { useSocket } from '@/hooks/useSocket'
 import { useRoomStore } from '@/store/roomStore'
+import { useAuthStore } from '@/store/authStore'
+import { message } from '@/components/ui/message'
 import type { ViewerJoinedPayload, ViewerLeftPayload } from '../types'
 import { SOCKET_EVENT } from '../constants'
 
@@ -22,16 +24,24 @@ export function useViewerList(): UseViewerListReturn {
 
     const handleViewerJoined = (payload: ViewerJoinedPayload) => {
       if (!payload?.viewerSocketId) return
+      // 自己加入不提示
+      const me = useAuthStore.getState().user
+      if (me && payload.userId != null && me.id === payload.userId) return
       useRoomStore.getState().addViewer({
         socketId: payload.viewerSocketId,
         userId: payload.userId,
         username: payload.username,
         role: payload.role,
       })
+      const name = payload.username?.trim() || '有观众'
+      message.info(`${name} 加入了房间`)
     }
     const handleViewerLeft = (payload: ViewerLeftPayload) => {
       if (!payload?.viewerSocketId) return
+      const me = useAuthStore.getState().user
       useRoomStore.getState().removeViewer(payload.viewerSocketId)
+      if (me && payload.userId != null && me.id === payload.userId) return
+      message.info('有观众离开了房间')
     }
 
     socket.on(SOCKET_EVENT.VIEWER_JOINED, handleViewerJoined)
