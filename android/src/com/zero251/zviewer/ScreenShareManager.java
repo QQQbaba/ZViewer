@@ -56,9 +56,19 @@ public class ScreenShareManager {
         this.activity = act;
         this.streamKey = (key == null || key.isEmpty()) ? "screen" : key;
         try {
-            MediaProjectionManager mpm = (MediaProjectionManager) act.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-            act.startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CODE);
-            Log.i(TAG, "已请求屏幕捕获授权");
+            final MediaProjectionManager mpm = (MediaProjectionManager) act.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+            // 必须在主线程启动授权 Activity（JS 桥线程调用会静默失败）
+            act.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        act.startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CODE);
+                        Log.i(TAG, "已请求屏幕捕获授权");
+                    } catch (Throwable t) {
+                        Log.e(TAG, "请求屏幕捕获失败", t);
+                    }
+                }
+            });
         } catch (Throwable t) {
             Log.e(TAG, "请求屏幕捕获失败", t);
         }
