@@ -11,8 +11,15 @@ import android.media.projection.MediaProjectionManager;
 import android.os.Handler;
 import android.util.Log;
 import android.view.Surface;
+import android.widget.Toast;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.PrintWriter;
 import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 /**
  * 屏幕共享管理器（v11.2）：
@@ -47,6 +54,35 @@ public class ScreenShareManager {
     private ScreenShareManager() {
     }
 
+    /** 写诊断日志（文件 + logcat），方便远程排查 */
+    private void log(String msg) {
+        Log.i(TAG, msg);
+        try {
+            File f = new File("/sdcard/Android/data/com.zero251.zviewer/files/screenshare.log");
+            f.getParentFile().mkdirs();
+            FileOutputStream fos = new FileOutputStream(f, true);
+            PrintWriter pw = new PrintWriter(fos);
+            pw.println(new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date()) + " " + msg);
+            pw.close();
+            fos.close();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void toast(final String msg) {
+        try {
+            if (activity != null) {
+                activity.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        Toast.makeText(activity, msg, Toast.LENGTH_LONG).show();
+                    }
+                });
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** 请求屏幕捕获授权（弹系统框） */
     public void start(Activity act, String key) {
         if (running) {
@@ -55,6 +91,7 @@ public class ScreenShareManager {
         }
         this.activity = act;
         this.streamKey = (key == null || key.isEmpty()) ? "screen" : key;
+        log("start() 请求授权 streamKey=" + this.streamKey);
         try {
             final MediaProjectionManager mpm = (MediaProjectionManager) act.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
             // 必须在主线程启动授权 Activity（JS 桥线程调用会静默失败）
@@ -63,29 +100,36 @@ public class ScreenShareManager {
                 public void run() {
                     try {
                         act.startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CODE);
-                        Log.i(TAG, "已请求屏幕捕获授权");
+                        log("已请求屏幕捕获授权（等待系统弹窗确认）");
+                        toast("已请求屏幕捕获授权，请在系统弹窗点击「立即开始」");
                     } catch (Throwable t) {
-                        Log.e(TAG, "请求屏幕捕获失败", t);
+                        log("请求屏幕捕获失败: " + t);
+                        toast("屏幕捕获授权失败: " + t.getMessage());
                     }
                 }
             });
         } catch (Throwable t) {
-            Log.e(TAG, "请求屏幕捕获失败", t);
+            log("请求屏幕捕获失败(outer): " + t);
+            toast("屏幕捕获授权失败: " + t.getMessage());
         }
     }
 
     /** 授权回调（由 MainActivity.onActivityResult 转发） */
     public void onActivityResult(int resultCode, Intent data) {
+        log("onActivityResult resultCode=" + resultCode + " data=" + (data != null ? "有" : "null"));
         if (resultCode != Activity.RESULT_OK || data == null) {
-            Log.w(TAG, "屏幕捕获被拒绝");
+            log("屏幕捕获被拒绝");
+            toast("屏幕捕获授权被拒绝");
             return;
         }
         try {
             MediaProjectionManager mpm = (MediaProjectionManager) activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
             mediaProjection = mpm.getMediaProjection(resultCode, data);
+            log("MediaProjection 获取成功，启动编码");
             startEncoding();
         } catch (Throwable t) {
-            Log.e(TAG, "获取 MediaProjection 失败", t);
+            log("获取 MediaProjection 失败: " + t);
+            toast("屏幕捕获初始化失败: " + t.getMessage());
         }
     }
 
@@ -105,7 +149,7 @@ public class ScreenShareManager {
             virtualDisplay = mediaProjection.createVirtualDisplay(
                     "ZViewerScreenShare", WIDTH, HEIGHT, 320,
                     VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, inputSurface, null, new Handler());
-            Log.i(TAG, "编码器与虚拟显示已启动");
+            log("编码器与虚拟显示已启动（1280x720@30fps 2.5Mbps）");
 
             running = true;
             pushThread = new Thread(new Runnable() {
@@ -115,8 +159,10 @@ public class ScreenShareManager {
                 }
             }, "zviewer-screen-push");
             pushThread.start();
+            toast("屏幕推流已开始");
         } catch (Throwable t) {
-            Log.e(TAG, "启动编码失败", t);
+            log("启动编码失败: " + t);
+            toast("编码器启动失败: " + t.getMessage());
             stop();
         }
     }
@@ -156,7 +202,8 @@ public class ScreenShareManager {
                 }
             }
         } catch (Throwable t) {
-            Log.e(TAG, "推流循环异常", t);
+            log("推流循环异常: " + t);
+            toast("推流失败: " + t.getMessage());
         } finally {
             cleanup();
         }
@@ -228,6 +275,6 @@ public class ScreenShareManager {
             }
         } catch (Throwable ignored) {
         }
-        Log.i(TAG, "屏幕共享已清理");
+        log("屏幕共享已清理");
     }
 }

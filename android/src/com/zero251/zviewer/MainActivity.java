@@ -19,6 +19,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -177,7 +178,17 @@ public class MainActivity extends Activity {
             @JavascriptInterface
             public String startScreenShare(String streamKey) {
                 Log.i(TAG, "前端请求开始屏幕共享 streamKey=" + streamKey);
-                ScreenShareManager.get().start(MainActivity.this, streamKey);
+                final String sk = streamKey;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            Toast.makeText(MainActivity.this, "正在请求屏幕共享...", Toast.LENGTH_SHORT).show();
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                });
+                ScreenShareManager.get().start(MainActivity.this, sk);
                 return "requesting";
             }
 
