@@ -26,7 +26,7 @@ export function useViewerList(): UseViewerListReturn {
       if (!payload?.viewerSocketId) return
       // 自己加入不提示
       const me = useAuthStore.getState().user
-      if (me && payload.userId != null && me.id === payload.userId) return
+      if (me && payload.userId != null && me.id === String(payload.userId)) return
       useRoomStore.getState().addViewer({
         socketId: payload.viewerSocketId,
         userId: payload.userId,
@@ -38,9 +38,8 @@ export function useViewerList(): UseViewerListReturn {
     }
     const handleViewerLeft = (payload: ViewerLeftPayload) => {
       if (!payload?.viewerSocketId) return
-      const me = useAuthStore.getState().user
       useRoomStore.getState().removeViewer(payload.viewerSocketId)
-      if (me && payload.userId != null && me.id === payload.userId) return
+      // 离开通知不区分身份（ViewerLeftPayload 不含 userId）
       message.info('有观众离开了房间')
     }
 

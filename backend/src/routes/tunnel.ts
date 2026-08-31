@@ -15,12 +15,31 @@ import { Router } from 'express'
 import { spawn, type ChildProcess } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
-
+import { getPublishedRoom, publishNow } from './directory'
 const router = Router()
 
 let proc: ChildProcess | null = null
 let tunnelUrl: string | null = null
 let logBuf = ''
+// v11.2 watchdog：隧道进程退出后自动重启（用户开启过则保持运行）
+let shouldRun = false
+let restartCount = 0
+let restartTimer: NodeJS.Timeout | null = null
+function scheduleRestart() {
+  if (!shouldRun) return
+  if (restartTimer) clearTimeout(restartTimer)
+  const delay = restartCount >= 5 ? 60000 : 5000 // 连续失败 5 次退避到 60 秒
+  restartTimer = setTimeout(() => {
+    restartTimer = null
+    if (!shouldRun) return
+    logBuf += `\n[watchdog] 自动重启通道 (第 ${restartCount + 1} 次)`
+    const r = startCloudflared()
+    if (!r.ok) {
+      restartCount++
+      scheduleRestart()
+    }
+  }, delay)
+}
 
 function envBin(name: string): string | null {
   const v = process.env[name]
@@ -31,12 +50,24 @@ function extractUrl() {
   const m = logBuf.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g)
   if (m) {
     const u = m.find((x) => !x.includes('api.'))
-    if (u) tunnelUrl = u
+    if (u) {
+      tunnelUrl = u
+      process.env.TUNNEL_URL = u
+      // 目录联动：若已公开房间，URL 变化自动重新上报（v11.3）
+      try {
+        const pub = getPublishedRoom()
+        if (pub) publishNow(pub.roomId, pub.name)
+      } catch {
+        /* 忽略 */
+      }
+    }
   }
 }
 
 function startCloudflared(): { ok: boolean; message: string } {
   if (proc) return { ok: false, message: '通道已在运行中' }
+  shouldRun = true
+  restartCount = 0 // 启动成功即重置计数
   const proot = envBin('PROOT_BIN')
   const cfd = envBin('CLOUDFLARED_BIN')
   const loader = envBin('PROOT_LOADER')
@@ -67,11 +98,21 @@ function startCloudflared(): { ok: boolean; message: string } {
     proc = null
     tunnelUrl = null // 进程退出（主动关闭或崩溃）都清空链接，避免残留死链接
     if (code !== 0) logBuf += `\n[通道进程退出 code=${code}]`
+    if (shouldRun) {
+      restartCount++
+      logBuf += `\n[watchdog] 检测到通道退出，${restartCount >= 5 ? '60 秒后' : '5 秒后'}自动重启`
+      scheduleRestart()
+    }
   })
   return { ok: true, message: '通道启动中，约 10~30 秒就绪' }
 }
 
 function stopCloudflared(): { ok: boolean; message: string } {
+  shouldRun = false // 用户主动停止：不再自动重启
+  if (restartTimer) {
+    clearTimeout(restartTimer)
+    restartTimer = null
+  }
   if (!proc) return { ok: false, message: '通道未在运行' }
   try { proc.kill('SIGKILL') } catch { /* 忽略 */ }
   proc = null

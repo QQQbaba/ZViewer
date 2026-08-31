@@ -10,11 +10,28 @@ import { Input } from '@/components/ui/Input'
 export default function JoinByRoomIdPage() {
   const navigate = useNavigate()
   const [roomIdInput, setRoomIdInput] = useState('')
-
-  const handleJoin = () => {
+  const [joining, setJoining] = useState(false)
+  const handleJoin = async () => {
     const trimmed = roomIdInput.trim()
     if (!trimmed) return
-    navigate(`/room/${trimmed}`)
+    setJoining(true)
+    try {
+      // v11.3：先查公告栏（房间号 → 房主最新地址），找到则跳到房主服务器
+      try {
+        const res = await fetch(`/api/directory/rooms/${encodeURIComponent(trimmed)}`)
+        const data = await res.json().catch(() => null)
+        if (data && data.success && data.room && data.room.url) {
+          const base = String(data.room.url).replace(/\/$/, '')
+          window.location.href = `${base}/room/${encodeURIComponent(trimmed)}`
+          return
+        }
+      } catch {
+        // 公告栏不可用时降级：同服务器直接加入
+      }
+      navigate(`/room/${trimmed}`)
+    } finally {
+      setJoining(false)
+    }
   }
 
   return (
@@ -56,8 +73,9 @@ export default function JoinByRoomIdPage() {
               variant="secondary"
               size="lg"
               icon={<LogIn className="h-5 w-5 shrink-0" />}
-              onClick={handleJoin}
-              disabled={!roomIdInput.trim()}
+              onClick={() => void handleJoin()}
+              disabled={!roomIdInput.trim() || joining}
+              loading={joining}
               className="shrink-0 whitespace-nowrap"
             >
               加入

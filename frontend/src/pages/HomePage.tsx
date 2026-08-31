@@ -8,8 +8,9 @@ import {
   Wifi,
   WifiOff,
   Loader2,
-  Settings,
+    Settings,
   User,
+  Search,
 } from 'lucide-react'
 import { TunnelControl } from '@/components/TunnelControl'
 import { ZcliControl } from '@/components/ZcliControl'
@@ -133,6 +134,17 @@ function HomePage() {
                   onClick={() => navigate('/rooms')}
                 >
                   房间列表
+                </Button>
+              </Fade>
+              <Fade delay={280} className="w-full">
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  icon={<Search className="h-5 w-5" />}
+                  block
+                  onClick={() => navigate('/discover')}
+                >
+                  发现公开房间
                 </Button>
               </Fade>
               <Fade delay={300}>

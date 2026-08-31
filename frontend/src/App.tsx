@@ -16,6 +16,7 @@ import AdminPage from '@/pages/AdminPage'
 import ProfilePage from '@/pages/ProfilePage'
 import RoomsListPage from '@/pages/RoomsListPage'
 import JoinByRoomIdPage from '@/pages/JoinByRoomIdPage'
+import DiscoverRoomsPage from '@/pages/DiscoverRoomsPage'
 
 function AuthInitializer() {
   const setUser = useAuthStore((s) => s.setUser)
@@ -247,6 +248,14 @@ function App() {
             element={
               <RequireAuth>
                 <JoinByRoomIdPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/discover"
+            element={
+              <RequireAuth>
+                <DiscoverRoomsPage />
               </RequireAuth>
             }
           />

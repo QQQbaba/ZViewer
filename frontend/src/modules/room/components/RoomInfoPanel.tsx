@@ -16,6 +16,7 @@ import {
   Lock,
   UserCheck,
   Zap,
+  Megaphone,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Space } from '@/components/ui/Space'
@@ -227,6 +228,30 @@ export function RoomInfoPanel({
       message.success('分享链接已复制')
     } catch {
       message.error('复制失败')
+    }
+  }
+  // v11.3：公开/取消公开房间到公告栏（供「发现公开房间」搜索加入）
+  const [publishing, setPublishing] = useState(false)
+  const [published, setPublished] = useState(false)
+  const handleTogglePublish = async () => {
+    setPublishing(true)
+    try {
+      const res = await fetch(published ? '/api/directory/unpublish' : '/api/directory/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId, name: roomName || roomId }),
+      })
+      const data = await res.json().catch(() => null)
+      if (data && data.success) {
+        setPublished(!published)
+        message.success(published ? '已从公告栏下架' : '房间已公开到公告栏，别人可搜索加入')
+      } else {
+        message.error((data && data.message) || '操作失败')
+      }
+    } catch {
+      message.error('网络异常')
+    } finally {
+      setPublishing(false)
     }
   }
 
@@ -618,6 +643,17 @@ export function RoomInfoPanel({
               >
                 分享
               </Button>
+              {isHost && (
+                <Button
+                  variant={published ? 'ghost' : 'secondary'}
+                  size="sm"
+                  icon={<Megaphone className="h-3.5 w-3.5" />}
+                  loading={publishing}
+                  onClick={() => void handleTogglePublish()}
+                >
+                  {published ? '已公开' : '公开房间'}
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="sm"

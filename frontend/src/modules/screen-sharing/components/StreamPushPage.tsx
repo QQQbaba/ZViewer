@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react'
-import { Download, Copy, Radio, ExternalLink } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Download, Copy, Radio, ExternalLink, Smartphone } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Text, Paragraph } from '@/components/ui/Typography'
 import { Card } from '@/components/ui/Card'
@@ -64,6 +64,34 @@ export function StreamPushPage({
       .writeText(effectiveStreamKey)
       .then(() => message.success('流密钥已复制'))
   }, [effectiveStreamKey])
+  const [phonePushing, setPhonePushing] = useState(false)
+  const handlePhonePush = useCallback(() => {
+    const bridge = (window as any).ZViewerBridge
+    if (!bridge) {
+      message.error('手机屏幕推流仅在 ZViewer 安卓 App 中可用')
+      return
+    }
+    if (phonePushing) {
+      bridge.stopScreenShare()
+      setPhonePushing(false)
+      message.success('手机屏幕推流已停止')
+    } else {
+      bridge.startScreenShare(effectiveStreamKey)
+      setPhonePushing(true)
+      message.success('已请求屏幕捕获授权，请在系统弹窗点击「立即开始」')
+    }
+  }, [phonePushing, effectiveStreamKey])
+  // 挂载时同步真实推流状态（App 重启/页面刷新后按钮仍显示正确状态）
+  useEffect(() => {
+    try {
+      const bridge = (window as any).ZViewerBridge
+      if (bridge && bridge.isScreenSharing && bridge.isScreenSharing() === 'true') {
+        setPhonePushing(true)
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
 
   return (
     <div
@@ -125,6 +153,14 @@ export function StreamPushPage({
         </div>
 
         <div className="flex flex-wrap gap-2 pt-2">
+          <Button
+            variant="primary"
+            icon={<Smartphone className="h-4 w-4" />}
+            loading={phonePushing}
+            onClick={handlePhonePush}
+          >
+            {phonePushing ? '停止手机推流' : '用手机屏幕推流'}
+          </Button>
           <Button
             variant="primary"
             icon={<Download className="h-4 w-4" />}
