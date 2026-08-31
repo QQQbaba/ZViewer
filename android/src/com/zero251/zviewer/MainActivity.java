@@ -26,6 +26,8 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -42,6 +44,18 @@ public class MainActivity extends Activity {
     private File filesDir;
     private String nativeLibDir;
     private volatile String tunnelUrl = null;
+
+    /** 写诊断文件（/sdcard/Download 下，保证可读可写），供远程排查 */
+    private void writeDiag(String msg) {
+        Log.i(TAG, "[diag] " + msg);
+        try {
+            File f = new File("/sdcard/Download/zviewer-diag.log");
+            FileOutputStream fos = new FileOutputStream(f, true);
+            fos.write((new SimpleDateFormat("HH:mm:ss").format(new Date()) + " " + msg + "\n").getBytes("UTF-8"));
+            fos.close();
+        } catch (Exception ignored) {
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -90,6 +104,24 @@ public class MainActivity extends Activity {
                     }
                 }
                 return true;
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                // v11.4 自检：页面加载完成后验证 JS 桥是否注入成功
+                try {
+                    view.evaluateJavascript(
+                        "(function(){var b=window.ZViewerBridge;return 'bridge='+(typeof b)+'|start='+(b&&typeof b.startScreenShare)+'|stop='+(b&&typeof b.stopScreenShare)+'|isShare='+(b&&typeof b.isScreenSharing);})()",
+                        new android.webkit.ValueCallback<String>() {
+                            @Override
+                            public void onReceiveValue(String value) {
+                                writeDiag("JS桥自检 " + url + " -> " + value);
+                            }
+                        });
+                } catch (Throwable t) {
+                    writeDiag("JS桥自检异常: " + t);
+                }
             }
 
             @SuppressWarnings("deprecation")
@@ -178,6 +210,7 @@ public class MainActivity extends Activity {
             @JavascriptInterface
             public String startScreenShare(String streamKey) {
                 Log.i(TAG, "前端请求开始屏幕共享 streamKey=" + streamKey);
+                writeDiag("startScreenShare 被调用 streamKey=" + streamKey);
                 final String sk = streamKey;
                 runOnUiThread(new Runnable() {
                     @Override

@@ -178,8 +178,19 @@ public class RtmpPublisher {
             if (msg.type == 20) {
                 String name = parseAmfString(msg.payload, 0);
                 if ("_result".equals(name)) {
-                    // payload 末尾 4 字节（大端）= stream id
+                    // payload: [命令名][事务号][Null][streamId(AMF Number = 8字节 double)]
                     byte[] p = msg.payload;
+                    for (int i = 0; i + 8 < p.length; i++) {
+                        if (p[i] == 0x00) { // AMF Number 标记
+                            long bits = 0;
+                            for (int j = 0; j < 8; j++) {
+                                bits = (bits << 8) | (p[i + 1 + j] & 0xFF);
+                            }
+                            double d = Double.longBitsToDouble(bits);
+                            return (int) d;
+                        }
+                    }
+                    // 兼容旧逻辑：取最后 4 字节（某些服务器返回裸 int）
                     return ((p[p.length - 4] & 0xFF) << 24) | ((p[p.length - 3] & 0xFF) << 16)
                             | ((p[p.length - 2] & 0xFF) << 8) | (p[p.length - 1] & 0xFF);
                 }
@@ -317,7 +328,7 @@ public class RtmpPublisher {
         int pos = 0;
         while (pos < payload.length) {
             int n = Math.min(chunkSize, payload.length - pos);
-            if (pos > 0) out.writeByte(csid); // fmt=3 延续块
+            if (pos > 0) out.writeByte(0xC0 | csid); // fmt=3 延续块头（0xC0=fmt3）
             out.write(payload, pos, n);
             pos += n;
         }

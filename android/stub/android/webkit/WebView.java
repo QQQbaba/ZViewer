@@ -18,4 +18,5 @@ public class WebView extends View {
     public void destroy() {}
     public WebChromeClient getWebChromeClient() { return null; }
     public void addJavascriptInterface(Object obj, String name) {}
+    public void evaluateJavascript(String script, ValueCallback<String> callback) {}
 }
