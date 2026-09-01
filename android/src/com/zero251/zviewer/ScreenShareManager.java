@@ -146,6 +146,21 @@ public class ScreenShareManager {
             Surface inputSurface = encoder.createInputSurface();
             encoder.start();
 
+            // Android 14+：createVirtualDisplay 前必须注册 callback，否则
+            // 抛 IllegalStateException("Must register a callback before starting capture")
+            try {
+                mediaProjection.registerCallback(new MediaProjection.Callback() {
+                    @Override
+                    public void onStop() {
+                        log("MediaProjection 被系统停止");
+                        stop();
+                    }
+                }, new Handler());
+                log("MediaProjection callback 已注册");
+            } catch (Throwable t) {
+                log("registerCallback 失败（低版本可忽略）: " + t);
+            }
+
             virtualDisplay = mediaProjection.createVirtualDisplay(
                     "ZViewerScreenShare", WIDTH, HEIGHT, 320,
                     VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, inputSurface, null, new Handler());

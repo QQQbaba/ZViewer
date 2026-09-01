@@ -14,6 +14,14 @@ public class MediaProjection {
         return null;
     }
 
+    public void registerCallback(Callback callback, Handler handler) {
+    }
+
     public void stop() {
+    }
+
+    public static abstract class Callback {
+        public void onStop() {
+        }
     }
 }
