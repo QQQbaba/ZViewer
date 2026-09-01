@@ -19,7 +19,9 @@ public class RtmpPublisher {
     private DataOutputStream out;
     private InputStream in;
     private int chunkSize = 128;
-    private int streamId = 1;
+    // RTMP 协议：connect/createStream/setChunkSize 属于连接级消息，必须用 stream id 0；
+    // createStream 成功后 this.streamId 更新为服务器分配的流 id，供 publish/音视频使用。
+    private int streamId = 0;
     private long startTimeMs = 0;
 
     /** 建立 TCP + RTMP 握手 + connect + createStream + publish，并发送 metadata 与 AVC sequence header */
@@ -27,6 +29,7 @@ public class RtmpPublisher {
                                   byte[] sps, byte[] pps, int width, int height) throws Exception {
         socket = new Socket(host, port);
         socket.setTcpNoDelay(true);
+        socket.setSoTimeout(8000); // 握手/响应超时保护，避免卡死
         out = new DataOutputStream(socket.getOutputStream());
         in = socket.getInputStream();
         startTimeMs = System.currentTimeMillis();
@@ -178,16 +181,19 @@ public class RtmpPublisher {
             if (msg.type == 20) {
                 String name = parseAmfString(msg.payload, 0);
                 if ("_result".equals(name)) {
-                    // payload: [命令名][事务号][Null][streamId(AMF Number = 8字节 double)]
+                    // payload: [_result][事务号(Number)][Null][streamId(Number)]
+                    // streamId 是最后一个 AMF Number（从后往前找，避免误取事务号）
                     byte[] p = msg.payload;
-                    for (int i = 0; i + 8 < p.length; i++) {
+                    for (int i = p.length - 9; i >= 0; i--) {
                         if (p[i] == 0x00) { // AMF Number 标记
                             long bits = 0;
                             for (int j = 0; j < 8; j++) {
                                 bits = (bits << 8) | (p[i + 1 + j] & 0xFF);
                             }
                             double d = Double.longBitsToDouble(bits);
-                            return (int) d;
+                            if (d >= 0 && d < 100000) {
+                                return (int) d;
+                            }
                         }
                     }
                     // 兼容旧逻辑：取最后 4 字节（某些服务器返回裸 int）
